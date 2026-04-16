@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import type { User } from "@supabase/supabase-js";
 
 interface UserProfile {
   name: string;
@@ -31,6 +33,7 @@ export interface Integration {
 
 interface AppContextType {
   isAuthenticated: boolean;
+  user: User | null;
   hasCompletedOnboarding: boolean;
   profile: UserProfile;
   notifications: NotificationSettings;
@@ -63,7 +66,8 @@ const DEFAULT_INTEGRATIONS: Integration[] = [
 const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem("isAuthenticated") === "true");
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(() => localStorage.getItem("hasCompletedOnboarding") === "true");
   const [profile, setProfile] = useState<UserProfile>(() => {
     const s = localStorage.getItem("profile");
@@ -82,15 +86,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return s ? JSON.parse(s) : DEFAULT_INTEGRATIONS;
   });
 
+  useEffect(() => {
+    // Set up auth listener BEFORE checking session
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      setIsAuthenticated(!!session?.user);
+    });
+
+    // Then check existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setIsAuthenticated(!!session?.user);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   function signIn() {
-    setIsAuthenticated(true);
-    localStorage.setItem("isAuthenticated", "true");
+    // Handled by Supabase auth - this is a no-op now
   }
 
-  function signOut() {
+  async function signOut() {
+    await supabase.auth.signOut();
     setIsAuthenticated(false);
+    setUser(null);
     setHasCompletedOnboarding(false);
-    localStorage.removeItem("isAuthenticated");
     localStorage.removeItem("hasCompletedOnboarding");
   }
 
@@ -130,7 +150,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ isAuthenticated, hasCompletedOnboarding, profile, notifications, schedule, integrations, signIn, signOut, completeOnboarding, restartOnboarding, updateProfile, updateNotifications, updateSchedule, toggleIntegration }}>
+    <AppContext.Provider value={{ isAuthenticated, user, hasCompletedOnboarding, profile, notifications, schedule, integrations, signIn, signOut, completeOnboarding, restartOnboarding, updateProfile, updateNotifications, updateSchedule, toggleIntegration }}>
       {children}
     </AppContext.Provider>
   );

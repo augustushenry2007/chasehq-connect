@@ -1,0 +1,153 @@
+import { useState, useEffect, useCallback } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useApp } from "@/context/AppContext";
+import type { Tables, TablesInsert } from "@/integrations/supabase/types";
+import { INVOICES as MOCK_INVOICES, type Invoice as MockInvoice } from "@/lib/data";
+import { toast } from "sonner";
+
+export type DbInvoice = Tables<"invoices">;
+export type DbFollowup = Tables<"followups">;
+
+// Convert DB invoice to frontend format
+function dbToFrontend(db: DbInvoice): MockInvoice {
+  return {
+    id: db.invoice_number,
+    client: db.client,
+    clientEmail: db.client_email,
+    description: db.description,
+    amount: Number(db.amount),
+    dueDate: new Date(db.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+    dueDateISO: db.due_date,
+    status: db.status as MockInvoice["status"],
+    daysPastDue: db.days_past_due,
+    sentFrom: db.sent_from,
+    paymentDetails: db.payment_details,
+    clientReply: db.client_reply_snippet ? {
+      snippet: db.client_reply_snippet,
+      receivedAt: db.client_reply_received_at ? new Date(db.client_reply_received_at).toLocaleString() : "Recently",
+      channel: "email",
+      senderEmail: db.client_reply_sender_email || db.client_email,
+    } : undefined,
+    _dbId: db.id, // Store the UUID for DB operations
+  } as MockInvoice & { _dbId: string };
+}
+
+export function useInvoices() {
+  const { user } = useApp();
+  const [invoices, setInvoices] = useState<MockInvoice[]>(MOCK_INVOICES);
+  const [loading, setLoading] = useState(false);
+
+  const fetchInvoices = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching invoices:", error);
+      toast.error("Failed to load invoices from database");
+    } else if (data && data.length > 0) {
+      setInvoices(data.map(dbToFrontend));
+    }
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    fetchInvoices();
+  }, [fetchInvoices]);
+
+  return { invoices, loading, refetch: fetchInvoices };
+}
+
+export async function seedInvoicesForUser(userId: string) {
+  // Check if user already has invoices
+  const { data: existing } = await supabase
+    .from("invoices")
+    .select("id")
+    .limit(1);
+
+  if (existing && existing.length > 0) return;
+
+  // Seed mock invoices into DB
+  const inserts: TablesInsert<"invoices">[] = MOCK_INVOICES.map((inv) => ({
+    user_id: userId,
+    invoice_number: inv.id,
+    client: inv.client,
+    client_email: inv.clientEmail,
+    description: inv.description,
+    amount: inv.amount,
+    due_date: inv.dueDateISO,
+    status: inv.status as any,
+    days_past_due: inv.daysPastDue,
+    sent_from: inv.sentFrom,
+    payment_details: inv.paymentDetails,
+    client_reply_snippet: inv.clientReply?.snippet || null,
+    client_reply_received_at: inv.clientReply ? new Date().toISOString() : null,
+    client_reply_sender_email: inv.clientReply?.senderEmail || null,
+  }));
+
+  const { error } = await supabase.from("invoices").insert(inserts);
+  if (error) {
+    console.error("Error seeding invoices:", error);
+  }
+}
+
+export async function createInvoice(userId: string, data: {
+  client: string;
+  clientEmail: string;
+  description: string;
+  amount: number;
+  dueDate: string;
+}) {
+  // Generate invoice number
+  const { count } = await supabase.from("invoices").select("*", { count: "exact", head: true });
+  const num = (count || 0) + 1;
+  const invoiceNumber = `INV-${String(num).padStart(3, "0")}`;
+
+  const { data: invoice, error } = await supabase.from("invoices").insert({
+    user_id: userId,
+    invoice_number: invoiceNumber,
+    client: data.client,
+    client_email: data.clientEmail,
+    description: data.description,
+    amount: data.amount,
+    due_date: data.dueDate,
+    status: "Upcoming",
+    days_past_due: 0,
+    sent_from: "jamie@studio.co",
+    payment_details: "Bank transfer · Account: 12345678 · Sort code: 12-34-56",
+  }).select().single();
+
+  if (error) {
+    toast.error("Failed to create invoice: " + error.message);
+    return null;
+  }
+
+  toast.success(`Invoice ${invoiceNumber} created!`);
+  return invoice;
+}
+
+export async function generateFollowup(invoice: MockInvoice, tone: string): Promise<{ subject: string; message: string } | null> {
+  try {
+    const { data, error } = await supabase.functions.invoke("generate-followup", {
+      body: { invoice, tone },
+    });
+
+    if (error) {
+      toast.error("AI generation failed: " + error.message);
+      return null;
+    }
+
+    if (data.error) {
+      toast.error(data.error);
+      return null;
+    }
+
+    return data;
+  } catch (e) {
+    toast.error("Failed to generate follow-up");
+    return null;
+  }
+}
