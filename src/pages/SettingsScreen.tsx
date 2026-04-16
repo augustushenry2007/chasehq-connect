@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp, type ScheduleRow, type Integration } from "@/context/AppContext";
-import { ChevronDown, ChevronUp, RefreshCw, LogOut } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 type SectionKey = "profile" | "notifications" | "schedule" | "integrations" | null;
 
@@ -71,26 +72,28 @@ function NotificationsSection({ notifications, updateNotifications }: {
         { label: "Auto-chase", sub: "Automatically send follow-ups on schedule", key: "autoChase" as const },
       ].map((item) => (
         <div key={item.key} className="flex items-center justify-between">
-          <div>
+          <div className="flex-1 pr-4">
             <p className="text-sm font-medium text-foreground">{item.label}</p>
             <p className="text-xs text-muted-foreground">{item.sub}</p>
           </div>
-          <button
-            onClick={() => updateNotifications({ ...notifications, [item.key]: !notifications[item.key] })}
-            className={`w-11 h-6 rounded-full transition-colors relative ${notifications[item.key] ? "bg-primary" : "bg-border"}`}
-          >
-            <span className={`absolute w-5 h-5 bg-primary-foreground rounded-full top-0.5 transition-transform ${notifications[item.key] ? "translate-x-[22px]" : "translate-x-0.5"}`} />
-          </button>
+          <Switch
+            checked={notifications[item.key]}
+            onCheckedChange={(checked) => updateNotifications({ ...notifications, [item.key]: checked })}
+          />
         </div>
       ))}
       <div>
         <p className="text-xs font-medium text-muted-foreground mb-2">Default tone</p>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {tones.map((t) => (
             <button
               key={t}
               onClick={() => updateNotifications({ ...notifications, defaultTone: t })}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium ${notifications.defaultTone === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                notifications.defaultTone === t
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-background text-muted-foreground border-border hover:border-primary/40 hover:text-foreground"
+              }`}
             >
               {t}
             </button>
@@ -102,14 +105,56 @@ function NotificationsSection({ notifications, updateNotifications }: {
 }
 
 function ScheduleSection({ schedule, updateSchedule }: { schedule: ScheduleRow[]; updateSchedule: (s: ScheduleRow[]) => void }) {
+  function updateRow(idx: number, patch: Partial<ScheduleRow>) {
+    const next = schedule.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+    updateSchedule(next);
+  }
+  function removeRow(idx: number) {
+    updateSchedule(schedule.filter((_, i) => i !== idx));
+  }
+  function addRow() {
+    const lastDay = schedule.length > 0 ? Math.max(...schedule.map((r) => r.day)) : 0;
+    updateSchedule([
+      ...schedule,
+      { id: Date.now(), day: lastDay + 7, action: "New reminder", status: "reminder-2" },
+    ]);
+  }
+
   return (
     <div className="flex flex-col gap-2">
       {schedule.map((row, i) => (
-        <div key={row.id} className="flex items-center gap-3 p-3 bg-muted rounded-xl">
-          <span className="text-xs font-bold text-primary w-12">Day {row.day}</span>
-          <span className="text-sm text-foreground flex-1">{row.action}</span>
+        <div key={row.id} className="flex items-center gap-2 p-2.5 bg-muted rounded-xl">
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-xs font-semibold text-muted-foreground">Day</span>
+            <input
+              type="number"
+              min={0}
+              value={row.day}
+              onChange={(e) => updateRow(i, { day: parseInt(e.target.value) || 0 })}
+              className="w-14 px-2 py-1 text-xs font-bold text-primary bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <input
+            type="text"
+            value={row.action}
+            onChange={(e) => updateRow(i, { action: e.target.value })}
+            className="flex-1 px-2.5 py-1.5 text-sm text-foreground bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          <button
+            onClick={() => removeRow(i)}
+            className="p-1.5 text-muted-foreground hover:text-destructive transition-colors"
+            aria-label="Remove step"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       ))}
+      <button
+        onClick={addRow}
+        className="mt-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-border text-xs font-medium text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" /> Add follow-up step
+      </button>
     </div>
   );
 }
