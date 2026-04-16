@@ -17,29 +17,44 @@ export default function AuthScreen() {
 
   async function handleSignIn() {
     setLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin,
+      });
+      if (result.error) {
+        toast.error("Sign in failed: " + result.error.message);
+        setLoading(false);
+        return;
+      }
+      if (result.redirected) {
+        return; // Browser will redirect to Google
+      }
+      // Session set automatically, auth state change handles navigation
+    } catch (e) {
+      toast.error("Sign in failed");
+    }
+    setLoading(false);
+  }
+
+  async function handleExplore() {
+    // Demo account for exploring without Google
+    setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({
       email: "demo@chasehq.app",
       password: "demo123456",
     });
     if (error) {
-      // If demo user doesn't exist, create it
       const { error: signUpError } = await supabase.auth.signUp({
         email: "demo@chasehq.app",
         password: "demo123456",
       });
       if (signUpError) {
-        toast.error("Sign in failed: " + signUpError.message);
+        toast.error("Failed: " + signUpError.message);
         setLoading(false);
         return;
       }
     }
     setLoading(false);
-    // Auth state change in AppContext will handle navigation
-  }
-
-  async function handleExplore() {
-    // For explore mode, use the same demo account
-    await handleSignIn();
   }
 
   return (
