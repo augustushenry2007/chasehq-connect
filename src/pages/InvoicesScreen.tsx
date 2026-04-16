@@ -1,8 +1,11 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { INVOICES, formatUSD, type Invoice, type InvoiceStatus } from "@/lib/data";
+import { useApp } from "@/context/AppContext";
+import { createInvoice } from "@/hooks/useSupabaseData";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
 import { Search, Plus, X, ChevronRight } from "lucide-react";
+import { toast } from "sonner";
 
 type FilterTab = "all" | "overdue" | "upcoming" | "paid";
 
@@ -18,11 +21,11 @@ function getFiltered(invoices: Invoice[], tab: FilterTab, query: string) {
   return list;
 }
 
-function getTabCount(tab: FilterTab) {
-  if (tab === "all") return INVOICES.length;
-  if (tab === "overdue") return INVOICES.filter((i) => ["Escalated", "Overdue", "Follow-up"].includes(i.status)).length;
-  if (tab === "upcoming") return INVOICES.filter((i) => i.status === "Upcoming").length;
-  if (tab === "paid") return INVOICES.filter((i) => i.status === "Paid").length;
+function getTabCount(invoices: Invoice[], tab: FilterTab) {
+  if (tab === "all") return invoices.length;
+  if (tab === "overdue") return invoices.filter((i) => ["Escalated", "Overdue", "Follow-up"].includes(i.status)).length;
+  if (tab === "upcoming") return invoices.filter((i) => i.status === "Upcoming").length;
+  if (tab === "paid") return invoices.filter((i) => i.status === "Paid").length;
   return 0;
 }
 
@@ -34,33 +37,46 @@ const TABS: { id: FilterTab; label: string }[] = [
 ];
 
 function NewInvoiceModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const { user } = useApp();
   const [client, setClient] = useState("");
   const [email, setEmail] = useState("");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [creating, setCreating] = useState(false);
 
   if (!visible) return null;
 
-  function handleCreate() {
+  async function handleCreate() {
+    if (!user) { toast.error("Not signed in"); return; }
+    if (!client || !amount || !dueDate) { toast.error("Fill in required fields"); return; }
+    setCreating(true);
+    await createInvoice(user.id, {
+      client,
+      clientEmail: email,
+      description,
+      amount: parseFloat(amount),
+      dueDate,
+    });
+    setCreating(false);
     setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDate("");
     onClose();
   }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center">
-      <div className="bg-background w-full max-w-lg rounded-t-2xl p-5 pb-8 max-h-[85vh] overflow-auto animate-in slide-in-from-bottom">
+      <div className="bg-background w-full max-w-lg rounded-t-2xl p-5 pb-8 max-h-[85vh] overflow-auto">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-bold text-foreground">New Invoice</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-muted-foreground" /></button>
         </div>
         <div className="flex flex-col gap-3.5">
           {[
-            { label: "Client name", value: client, onChange: setClient, placeholder: "Apex Digital", type: "text" },
+            { label: "Client name *", value: client, onChange: setClient, placeholder: "Apex Digital", type: "text" },
             { label: "Client email", value: email, onChange: setEmail, placeholder: "billing@client.com", type: "email" },
             { label: "Description", value: description, onChange: setDescription, placeholder: "Brand identity & logo system", type: "text" },
-            { label: "Amount ($)", value: amount, onChange: setAmount, placeholder: "4800", type: "number" },
-            { label: "Due date", value: dueDate, onChange: setDueDate, placeholder: "2024-06-15", type: "date" },
+            { label: "Amount ($) *", value: amount, onChange: setAmount, placeholder: "4800", type: "number" },
+            { label: "Due date *", value: dueDate, onChange: setDueDate, placeholder: "2024-06-15", type: "date" },
           ].map((f) => (
             <div key={f.label}>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">{f.label}</label>
@@ -75,10 +91,10 @@ function NewInvoiceModal({ visible, onClose }: { visible: boolean; onClose: () =
           ))}
           <button
             onClick={handleCreate}
-            disabled={!client || !amount}
+            disabled={!client || !amount || !dueDate || creating}
             className="mt-2 w-full bg-dark text-primary-foreground py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
           >
-            Create Invoice
+            {creating ? "Creating…" : "Create Invoice"}
           </button>
         </div>
       </div>
@@ -92,7 +108,9 @@ export default function InvoicesScreen() {
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
 
-  const filtered = useMemo(() => getFiltered(INVOICES, activeTab, query), [activeTab, query]);
+  // Using mock data for now - will be replaced when DB is seeded
+  const invoices = INVOICES;
+  const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -120,7 +138,7 @@ export default function InvoicesScreen() {
       <div className="flex border-b border-border mt-3 px-5 gap-0">
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
-          const count = getTabCount(tab.id);
+          const count = getTabCount(invoices, tab.id);
           return (
             <button
               key={tab.id}
