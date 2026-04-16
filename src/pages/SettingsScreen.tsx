@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp, type ScheduleRow, type Integration } from "@/context/AppContext";
-import { ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2, Mail, Loader2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { useGmailConnection } from "@/hooks/useGmailConnection";
+import { toast } from "sonner";
 
 type SectionKey = "profile" | "notifications" | "schedule" | "integrations" | null;
 
@@ -186,6 +188,8 @@ export default function SettingsScreen() {
   const navigate = useNavigate();
   const { profile, notifications, schedule, integrations, updateProfile, updateNotifications, updateSchedule, toggleIntegration, signOut, restartOnboarding } = useApp();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
+  const { gmail, loading: gmailLoading, connectGmail, disconnectGmail } = useGmailConnection();
+  const [gmailConnecting, setGmailConnecting] = useState(false);
 
   function toggleSection(key: SectionKey) {
     setOpenSection((prev) => (prev === key ? null : key));
@@ -201,12 +205,57 @@ export default function SettingsScreen() {
     navigate("/onboarding", { replace: true });
   }
 
+  async function handleConnectGmail() {
+    setGmailConnecting(true);
+    const result = await connectGmail();
+    if (result.error) {
+      toast.error(result.error);
+      setGmailConnecting(false);
+    }
+    // If successful, the page will redirect to Google
+  }
+
+  async function handleDisconnectGmail() {
+    await disconnectGmail();
+    toast.success("Gmail disconnected");
+  }
+
   return (
     <div className="flex-1 overflow-auto pb-24">
       <div className="px-5 pt-5">
         <h1 className="text-xl font-bold text-foreground mb-4">Settings</h1>
 
         <div className="flex flex-col gap-3">
+          {/* Gmail Connection Card */}
+          <div className="bg-card border border-border rounded-2xl p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center shrink-0">
+                <Mail className="w-5 h-5 text-destructive" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">Gmail</p>
+                {gmailLoading ? (
+                  <p className="text-xs text-muted-foreground">Checking connection…</p>
+                ) : gmail.connected ? (
+                  <p className="text-xs text-primary">Connected as {gmail.email}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Connect to send follow-ups from your Gmail</p>
+                )}
+              </div>
+              {gmailLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              ) : gmail.connected ? (
+                <button onClick={handleDisconnectGmail} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-destructive/10 text-destructive">
+                  Disconnect
+                </button>
+              ) : (
+                <button onClick={handleConnectGmail} disabled={gmailConnecting} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground disabled:opacity-50">
+                  {gmailConnecting ? "Connecting…" : "Connect"}
+                </button>
+              )}
+            </div>
+          </div>
+
           <CollapsibleSection title="Profile" subtitle={`${profile.name} · ${profile.email}`} isOpen={openSection === "profile"} onToggle={() => toggleSection("profile")}>
             <ProfileSection profile={profile} updateProfile={updateProfile} />
           </CollapsibleSection>
