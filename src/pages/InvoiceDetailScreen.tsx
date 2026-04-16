@@ -37,7 +37,7 @@ export default function InvoiceDetailScreen() {
   ];
 
   return (
-    <div className="flex-1 overflow-auto pb-24">
+    <div className="h-screen overflow-y-auto bg-background pb-24">
       <div className="px-5 pt-5 pb-2">
         <button onClick={() => navigate(-1)} className="flex items-center gap-1.5 text-muted-foreground">
           <ArrowLeft className="w-4 h-4" />
