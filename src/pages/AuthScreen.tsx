@@ -1,23 +1,44 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Check, Zap, Shield, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
 
 export default function AuthScreen() {
   const navigate = useNavigate();
-  const { signIn } = useApp();
+  const { isAuthenticated } = useApp();
   const [loading, setLoading] = useState(false);
 
-  function handleSignIn() {
+  useEffect(() => {
+    if (isAuthenticated) navigate("/dashboard", { replace: true });
+  }, [isAuthenticated]);
+
+  async function handleSignIn() {
     setLoading(true);
-    signIn();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: "demo@chasehq.app",
+      password: "demo123456",
+    });
+    if (error) {
+      // If demo user doesn't exist, create it
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: "demo@chasehq.app",
+        password: "demo123456",
+      });
+      if (signUpError) {
+        toast.error("Sign in failed: " + signUpError.message);
+        setLoading(false);
+        return;
+      }
+    }
     setLoading(false);
-    navigate("/onboarding", { replace: true });
+    // Auth state change in AppContext will handle navigation
   }
 
-  function handleExplore() {
-    signIn();
-    navigate("/onboarding", { replace: true });
+  async function handleExplore() {
+    // For explore mode, use the same demo account
+    await handleSignIn();
   }
 
   return (
