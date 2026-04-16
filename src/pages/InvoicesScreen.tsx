@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { INVOICES, formatUSD, type Invoice, type InvoiceStatus } from "@/lib/data";
+import { useInvoices, createInvoice } from "@/hooks/useSupabaseData";
+import { formatUSD, type Invoice, type InvoiceStatus } from "@/lib/data";
 import { useApp } from "@/context/AppContext";
-import { createInvoice } from "@/hooks/useSupabaseData";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
 import { Search, Plus, X, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
@@ -36,7 +36,7 @@ const TABS: { id: FilterTab; label: string }[] = [
   { id: "paid", label: "Paid" },
 ];
 
-function NewInvoiceModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+function NewInvoiceModal({ visible, onClose, onCreated }: { visible: boolean; onClose: () => void; onCreated: () => void }) {
   const { user } = useApp();
   const [client, setClient] = useState("");
   const [email, setEmail] = useState("");
@@ -51,7 +51,7 @@ function NewInvoiceModal({ visible, onClose }: { visible: boolean; onClose: () =
     if (!user) { toast.error("Not signed in"); return; }
     if (!client || !amount || !dueDate) { toast.error("Fill in required fields"); return; }
     setCreating(true);
-    await createInvoice(user.id, {
+    const result = await createInvoice(user.id, {
       client,
       clientEmail: email,
       description,
@@ -59,8 +59,11 @@ function NewInvoiceModal({ visible, onClose }: { visible: boolean; onClose: () =
       dueDate,
     });
     setCreating(false);
-    setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDate("");
-    onClose();
+    if (result) {
+      setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDate("");
+      onCreated();
+      onClose();
+    }
   }
 
   return (
@@ -92,7 +95,7 @@ function NewInvoiceModal({ visible, onClose }: { visible: boolean; onClose: () =
           <button
             onClick={handleCreate}
             disabled={!client || !amount || !dueDate || creating}
-            className="mt-2 w-full bg-dark text-primary-foreground py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
+            className="mt-2 w-full bg-foreground text-background py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
           >
             {creating ? "Creating…" : "Create Invoice"}
           </button>
@@ -108,8 +111,7 @@ export default function InvoicesScreen() {
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
 
-  // Using mock data for now - will be replaced when DB is seeded
-  const invoices = INVOICES;
+  const { invoices, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
 
   return (
@@ -119,7 +121,7 @@ export default function InvoicesScreen() {
           <h1 className="text-xl font-bold text-foreground">Invoices</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Manage and track all your client invoices</p>
         </div>
-        <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-dark text-primary-foreground px-3.5 py-2 rounded-xl text-sm font-semibold">
+        <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-foreground text-background px-3.5 py-2 rounded-xl text-sm font-semibold">
           <Plus className="w-4 h-4" /> New
         </button>
       </div>
@@ -191,7 +193,7 @@ export default function InvoicesScreen() {
         )}
       </div>
 
-      <NewInvoiceModal visible={showNew} onClose={() => setShowNew(false)} />
+      <NewInvoiceModal visible={showNew} onClose={() => setShowNew(false)} onCreated={refetch} />
     </div>
   );
 }

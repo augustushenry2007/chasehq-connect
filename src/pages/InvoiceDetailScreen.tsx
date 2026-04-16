@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useInvoices } from "@/hooks/useSupabaseData";
 import { getInvoiceById, ACTIVITY, formatUSD, type Invoice, type InvoiceStatus } from "@/lib/data";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
-import { generateFollowup } from "@/hooks/useSupabaseData";
+import { generateFollowup, sendFollowupEmail } from "@/hooks/useSupabaseData";
 import { ArrowLeft, ChevronDown, ChevronUp, RefreshCw, Send, Mail, MessageSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -44,12 +45,14 @@ const DOT_COLORS: Record<DotState, string> = {
 export default function InvoiceDetailScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const invoice = getInvoiceById(id || "");
+  const { invoices } = useInvoices();
+  const invoice = getInvoiceById(id || "", invoices);
 
   const [tone, setTone] = useState<Tone>("Friendly");
   const [currentDraft, setCurrentDraft] = useState("");
   const [currentSubject, setCurrentSubject] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [hasGenerated, setHasGenerated] = useState(false);
@@ -79,18 +82,25 @@ export default function InvoiceDetailScreen() {
 
   function handleToneChange(t: Tone) {
     setTone(t);
-    // Auto-generate with new tone
     setHasGenerated(false);
   }
 
-  function handleSend() {
-    if (!currentDraft) {
+  async function handleSend() {
+    if (!currentDraft || !invoice) {
       toast.error("Generate a draft first");
       return;
     }
-    setSent(true);
-    toast.success("Follow-up sent to " + invoice.clientEmail);
-    setTimeout(() => setSent(false), 2500);
+    setSending(true);
+    const success = await sendFollowupEmail(
+      invoice.clientEmail,
+      currentSubject || `Follow-up: ${invoice.id}`,
+      currentDraft
+    );
+    setSending(false);
+    if (success) {
+      setSent(true);
+      setTimeout(() => setSent(false), 2500);
+    }
   }
 
   const detailRows = [
@@ -226,9 +236,10 @@ export default function InvoiceDetailScreen() {
                   </button>
                   <button
                     onClick={handleSend}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors ${sent ? "bg-[#16A34A] text-primary-foreground" : "bg-dark text-primary-foreground"}`}
+                    disabled={sending}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors ${sent ? "bg-[#16A34A] text-primary-foreground" : "bg-foreground text-background"}`}
                   >
-                    {sent ? "Sent ✓" : <><Send className="w-4 h-4" /> Send via Gmail</>}
+                    {sent ? "Sent ✓" : sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : <><Send className="w-4 h-4" /> Send via Gmail</>}
                   </button>
                 </div>
               </>

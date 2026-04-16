@@ -53,10 +53,10 @@ export const INVOICES: Invoice[] = [
   { id: "INV-012", client: "Vantage Creative", clientEmail: "accounts@vantagecreative.io", description: "Product photography & editing", amount: 3400, dueDate: "Apr 10, 2024", dueDateISO: "2024-04-10", status: "Paid", daysPastDue: 0, sentFrom: "jamie@studio.co", paymentDetails: "Bank transfer · Account: 12345678 · Sort code: 12-34-56" },
 ];
 
-export function getStats() {
-  const outstanding = INVOICES.filter((i) => i.status !== "Paid");
-  const overdue = INVOICES.filter((i) => i.status === "Escalated" || i.status === "Overdue");
-  const paid = INVOICES.filter((i) => i.status === "Paid");
+export function getStats(invoices: Invoice[] = INVOICES) {
+  const outstanding = invoices.filter((i) => i.status !== "Paid");
+  const overdue = invoices.filter((i) => i.status === "Escalated" || i.status === "Overdue");
+  const paid = invoices.filter((i) => i.status === "Paid");
   return {
     outstandingTotal: outstanding.reduce((s, i) => s + i.amount, 0),
     outstandingCount: outstanding.length,
@@ -67,13 +67,17 @@ export function getStats() {
   };
 }
 
-export function getInvoiceById(id: string): Invoice | undefined {
-  return INVOICES.find((i) => i.id === id);
+export function getInvoiceById(id: string, invoices: Invoice[] = INVOICES): Invoice | undefined {
+  return invoices.find((i) => i.id === id);
 }
 
-export const CHASE_FEED = INVOICES.filter(
-  (i) => i.status === "Escalated" || i.status === "Overdue" || i.status === "Follow-up"
-).sort((a, b) => b.daysPastDue - a.daysPastDue);
+export function getChaseFeed(invoices: Invoice[] = INVOICES) {
+  return invoices.filter(
+    (i) => i.status === "Escalated" || i.status === "Overdue" || i.status === "Follow-up"
+  ).sort((a, b) => b.daysPastDue - a.daysPastDue);
+}
+
+export const CHASE_FEED = getChaseFeed();
 
 export const ACTIVITY: ActivityItem[] = [
   { id: "act-1", invoiceId: "INV-012", client: "Vantage Creative", description: "Payment of $3,400 received via bank transfer", timeAgo: "2 hours ago", type: "payment" },
