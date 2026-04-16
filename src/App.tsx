@@ -1,27 +1,37 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
-import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import Index from "./pages/Index.tsx";
-import NotFound from "./pages/NotFound.tsx";
-
-const queryClient = new QueryClient();
+import { AppProvider } from "@/context/AppContext";
+import RootRedirect from "./pages/RootRedirect";
+import AuthScreen from "./pages/AuthScreen";
+import OnboardingScreen from "./pages/OnboardingScreen";
+import TabLayout from "./components/TabLayout";
+import DashboardScreen from "./pages/DashboardScreen";
+import InvoicesScreen from "./pages/InvoicesScreen";
+import InvoiceDetailScreen from "./pages/InvoiceDetailScreen";
+import SettingsScreen from "./pages/SettingsScreen";
+import NotFound from "./pages/NotFound";
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
+  <AppProvider>
     <TooltipProvider>
-      <Toaster />
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="/" element={<RootRedirect />} />
+          <Route path="/auth" element={<AuthScreen />} />
+          <Route path="/onboarding" element={<OnboardingScreen />} />
+          <Route element={<TabLayout />}>
+            <Route path="/dashboard" element={<DashboardScreen />} />
+            <Route path="/invoices" element={<InvoicesScreen />} />
+            <Route path="/settings" element={<SettingsScreen />} />
+          </Route>
+          <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
-  </QueryClientProvider>
+  </AppProvider>
 );
 
 export default App;
