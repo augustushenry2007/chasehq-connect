@@ -8,7 +8,6 @@ import { toast } from "sonner";
 export type DbInvoice = Tables<"invoices">;
 export type DbFollowup = Tables<"followups">;
 
-// Convert DB invoice to frontend format
 function dbToFrontend(db: DbInvoice): MockInvoice {
   return {
     id: db.invoice_number,
@@ -28,14 +27,14 @@ function dbToFrontend(db: DbInvoice): MockInvoice {
       channel: "email",
       senderEmail: db.client_reply_sender_email || db.client_email,
     } : undefined,
-    _dbId: db.id, // Store the UUID for DB operations
-  } as MockInvoice & { _dbId: string };
+  };
 }
 
 export function useInvoices() {
   const { user } = useApp();
   const [invoices, setInvoices] = useState<MockInvoice[]>(MOCK_INVOICES);
   const [loading, setLoading] = useState(false);
+  const [seeded, setSeeded] = useState(false);
 
   const fetchInvoices = useCallback(async () => {
     if (!user) return;
@@ -47,12 +46,23 @@ export function useInvoices() {
 
     if (error) {
       console.error("Error fetching invoices:", error);
-      toast.error("Failed to load invoices from database");
     } else if (data && data.length > 0) {
       setInvoices(data.map(dbToFrontend));
+    } else if (data && data.length === 0 && !seeded) {
+      // Seed demo data on first login
+      setSeeded(true);
+      await seedInvoicesForUser(user.id);
+      // Re-fetch after seeding
+      const { data: seededData } = await supabase
+        .from("invoices")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (seededData && seededData.length > 0) {
+        setInvoices(seededData.map(dbToFrontend));
+      }
     }
     setLoading(false);
-  }, [user]);
+  }, [user, seeded]);
 
   useEffect(() => {
     fetchInvoices();
@@ -61,16 +71,7 @@ export function useInvoices() {
   return { invoices, loading, refetch: fetchInvoices };
 }
 
-export async function seedInvoicesForUser(userId: string) {
-  // Check if user already has invoices
-  const { data: existing } = await supabase
-    .from("invoices")
-    .select("id")
-    .limit(1);
-
-  if (existing && existing.length > 0) return;
-
-  // Seed mock invoices into DB
+async function seedInvoicesForUser(userId: string) {
   const inserts: TablesInsert<"invoices">[] = MOCK_INVOICES.map((inv) => ({
     user_id: userId,
     invoice_number: inv.id,
@@ -101,7 +102,6 @@ export async function createInvoice(userId: string, data: {
   amount: number;
   dueDate: string;
 }) {
-  // Generate invoice number
   const { count } = await supabase.from("invoices").select("*", { count: "exact", head: true });
   const num = (count || 0) + 1;
   const invoiceNumber = `INV-${String(num).padStart(3, "0")}`;
@@ -149,5 +149,39 @@ export async function generateFollowup(invoice: MockInvoice, tone: string): Prom
   } catch (e) {
     toast.error("Failed to generate follow-up");
     return null;
+  }
+}
+
+export async function sendFollowupEmail(
+  to: string,
+  subject: string,
+  message: string
+): Promise<boolean> {
+  try {
+    // Note: Gmail OAuth token would come from a connected Gmail account
+    // For now, we show a helpful message about connecting Gmail
+    const { data, error } = await supabase.functions.invoke("send-email", {
+      body: { to, subject, message },
+    });
+
+    if (error) {
+      toast.error("Send failed: " + error.message);
+      return false;
+    }
+
+    if (data.error) {
+      if (data.error.includes("Gmail access token") || data.error.includes("Gmail token")) {
+        toast.error("Gmail not connected. Connect Gmail in Settings to send emails.");
+      } else {
+        toast.error(data.error);
+      }
+      return false;
+    }
+
+    toast.success("Follow-up sent successfully!");
+    return true;
+  } catch (e) {
+    toast.error("Failed to send email");
+    return false;
   }
 }
