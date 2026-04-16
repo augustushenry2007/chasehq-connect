@@ -14,7 +14,110 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      followups: {
+        Row: {
+          created_at: string
+          id: string
+          invoice_id: string
+          is_ai_generated: boolean
+          message: string
+          sent_at: string | null
+          subject: string | null
+          tone: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invoice_id: string
+          is_ai_generated?: boolean
+          message: string
+          sent_at?: string | null
+          subject?: string | null
+          tone?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          is_ai_generated?: boolean
+          message?: string
+          sent_at?: string | null
+          subject?: string | null
+          tone?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "followups_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          amount: number
+          client: string
+          client_email: string
+          client_reply_received_at: string | null
+          client_reply_sender_email: string | null
+          client_reply_snippet: string | null
+          created_at: string
+          days_past_due: number
+          description: string
+          due_date: string
+          id: string
+          invoice_number: string
+          payment_details: string
+          sent_from: string
+          status: Database["public"]["Enums"]["invoice_status"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount?: number
+          client: string
+          client_email: string
+          client_reply_received_at?: string | null
+          client_reply_sender_email?: string | null
+          client_reply_snippet?: string | null
+          created_at?: string
+          days_past_due?: number
+          description?: string
+          due_date: string
+          id?: string
+          invoice_number: string
+          payment_details?: string
+          sent_from?: string
+          status?: Database["public"]["Enums"]["invoice_status"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          client?: string
+          client_email?: string
+          client_reply_received_at?: string | null
+          client_reply_sender_email?: string | null
+          client_reply_snippet?: string | null
+          created_at?: string
+          days_past_due?: number
+          description?: string
+          due_date?: string
+          id?: string
+          invoice_number?: string
+          payment_details?: string
+          sent_from?: string
+          status?: Database["public"]["Enums"]["invoice_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +126,12 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      invoice_status:
+        | "Escalated"
+        | "Overdue"
+        | "Follow-up"
+        | "Upcoming"
+        | "Paid"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +258,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      invoice_status: ["Escalated", "Overdue", "Follow-up", "Upcoming", "Paid"],
+    },
   },
 } as const
