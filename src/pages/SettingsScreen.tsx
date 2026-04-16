@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp, type ScheduleRow, type Integration } from "@/context/AppContext";
-import { ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2, Mail, Loader2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { useGmailConnection } from "@/hooks/useGmailConnection";
+import { toast } from "sonner";
 
 type SectionKey = "profile" | "notifications" | "schedule" | "integrations" | null;
 
