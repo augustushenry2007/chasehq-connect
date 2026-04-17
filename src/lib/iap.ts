@@ -25,9 +25,10 @@ export async function purchaseSubscription(): Promise<PurchaseResult> {
     return { ok: true, receipt: `MOCK_RECEIPT_${Date.now()}`, productId: PRODUCT_ID, mock: true };
   }
   try {
-    // Lazy-load so web build doesn't try to resolve the plugin.
+    // Lazy-load via runtime specifier so Vite doesn't try to resolve the plugin at build time.
+    const pkg = "@capgo/capacitor-purchases";
     // @ts-ignore — plugin installed in iOS native build only
-    const mod = await import("@capgo/capacitor-purchases");
+    const mod = await import(/* @vite-ignore */ pkg);
     const Purchases = (mod as any).Purchases ?? (mod as any).default;
     const result = await Purchases.purchaseProduct({ productIdentifier: PRODUCT_ID });
     const receipt = result?.transaction?.receipt || result?.receipt || "";
