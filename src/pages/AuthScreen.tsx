@@ -8,12 +8,14 @@ import { toast } from "sonner";
 
 export default function AuthScreen() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useApp();
+  const { isAuthenticated, hasCompletedOnboarding, authReady } = useApp();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated) navigate("/dashboard", { replace: true });
-  }, [isAuthenticated]);
+    if (!authReady || !isAuthenticated) return;
+    if (hasCompletedOnboarding) navigate("/dashboard", { replace: true });
+    else navigate("/onboarding", { replace: true });
+  }, [authReady, isAuthenticated, hasCompletedOnboarding, navigate]);
 
   async function handleSignIn() {
     setLoading(true);
