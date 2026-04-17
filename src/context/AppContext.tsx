@@ -49,6 +49,9 @@ interface AppContextType {
   hasCompletedOnboarding: boolean;
   notifications: NotificationSettings;
   schedule: ScheduleRow[];
+  invoices: FrontendInvoice[];
+  invoicesLoading: boolean;
+  refetchInvoices: () => Promise<void>;
   signIn: () => void;
   signOut: () => void;
   completeOnboarding: () => Promise<void>;
@@ -56,6 +59,70 @@ interface AppContextType {
   updateNotifications: (settings: NotificationSettings) => void;
   updateSchedule: (schedule: ScheduleRow[]) => void;
 }
+
+const DEFAULT_SCHEDULE: ScheduleRow[] = [
+  { id: 1, day: 0, action: "Invoice sent", status: "sent" },
+  { id: 2, day: 7, action: "Friendly reminder", status: "reminder-1" },
+  { id: 3, day: 14, action: "Firm reminder", status: "reminder-2" },
+  { id: 4, day: 21, action: "Final Notice", status: "checkpoint" },
+];
+
+const AppContext = createContext<AppContextType | null>(null);
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+  const [fullName, setFullName] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<FrontendInvoice[]>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(true);
+  const [notifications, setNotifications] = useState<NotificationSettings>(() => {
+    const s = localStorage.getItem("notifications");
+    return s ? JSON.parse(s) : { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
+  });
+  const [schedule, setSchedule] = useState<ScheduleRow[]>(() => {
+    const s = localStorage.getItem("schedule");
+    return s ? JSON.parse(s) : DEFAULT_SCHEDULE;
+  });
+
+  const refetchInvoices = useCallback(async () => {
+    if (!user) {
+      setInvoices([]);
+      setInvoicesLoading(false);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error) setInvoices(data ? data.map(dbToFrontend) : []);
+    setInvoicesLoading(false);
+  }, [user]);
+
+  // Fetch invoices once when user is set, then subscribe to realtime changes
+  useEffect(() => {
+    if (!authReady) return;
+    if (!user) {
+      setInvoices([]);
+      setInvoicesLoading(false);
+      return;
+    }
+    setInvoicesLoading(true);
+    refetchInvoices();
+
+    const channel = supabase
+      .channel(`invoices-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "invoices", filter: `user_id=eq.${user.id}` },
+        () => { refetchInvoices(); }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user, authReady, refetchInvoices]);
+
 
 const DEFAULT_SCHEDULE: ScheduleRow[] = [
   { id: 1, day: 0, action: "Invoice sent", status: "sent" },
