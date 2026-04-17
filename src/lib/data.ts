@@ -32,10 +32,6 @@ export interface ActivityItem {
   type: ActivityType;
 }
 
-// Empty by default. Real activity is derived from invoices/followups.
-// For mock-data reference, see src/lib/mockData.ts.
-export const ACTIVITY: ActivityItem[] = [];
-
 export function getStats(invoices: Invoice[]) {
   const outstanding = invoices.filter((i) => i.status !== "Paid");
   const overdue = invoices.filter((i) => i.status === "Escalated" || i.status === "Overdue");
