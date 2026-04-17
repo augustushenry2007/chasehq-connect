@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { RefreshCw, Send, Loader2, AlertTriangle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { RefreshCw, Send, Loader2, AlertTriangle, Lock } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
 import { generateFollowup, sendFollowupEmail } from "@/hooks/useSupabaseData";
 import { getDefaultDraft, type Tone } from "./DraftTemplates";
+import { useEntitlement } from "@/hooks/useEntitlement";
 import {
   AlertDialog,
   AlertDialogAction,
