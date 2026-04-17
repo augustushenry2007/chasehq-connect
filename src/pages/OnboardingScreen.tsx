@@ -251,6 +251,8 @@ export default function OnboardingScreen() {
 
   async function handleGoogle() {
     setGoogleLoading(true);
+    // Safety: if the OAuth popup is blocked/closed without a redirect, unstick the button
+    const safety = window.setTimeout(() => setGoogleLoading(false), 30000);
     try {
       const result = await lovable.auth.signInWithOAuth("google", {
         redirect_uri: window.location.origin + "/onboarding",
@@ -258,12 +260,18 @@ export default function OnboardingScreen() {
       if (result.error) {
         toast.error("Google sign-in failed: " + result.error.message);
         setGoogleLoading(false);
+        window.clearTimeout(safety);
         return;
       }
-      if (result.redirected) return;
-    } catch {
-      toast.error("Google sign-in failed");
+      if (result.redirected) return; // browser is navigating to Google
+      // Popup flow returned without error and without redirect — session should be set; reset state
       setGoogleLoading(false);
+      window.clearTimeout(safety);
+    } catch (e: any) {
+      console.error("[Onboarding] Google sign-in error:", e);
+      toast.error("Google sign-in failed" + (e?.message ? `: ${e.message}` : ""));
+      setGoogleLoading(false);
+      window.clearTimeout(safety);
     }
   }
 
