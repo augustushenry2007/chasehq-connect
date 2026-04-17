@@ -1,6 +1,32 @@
-import React, { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
+import type { Tables } from "@/integrations/supabase/types";
+import type { Invoice as FrontendInvoice } from "@/lib/data";
+
+type DbInvoice = Tables<"invoices">;
+
+function dbToFrontend(db: DbInvoice): FrontendInvoice {
+  return {
+    id: db.invoice_number,
+    client: db.client,
+    clientEmail: db.client_email,
+    description: db.description,
+    amount: Number(db.amount),
+    dueDate: new Date(db.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }),
+    dueDateISO: db.due_date,
+    status: db.status as FrontendInvoice["status"],
+    daysPastDue: db.days_past_due,
+    sentFrom: db.sent_from,
+    paymentDetails: db.payment_details,
+    clientReply: db.client_reply_snippet ? {
+      snippet: db.client_reply_snippet,
+      receivedAt: db.client_reply_received_at ? new Date(db.client_reply_received_at).toLocaleString() : "Recently",
+      channel: "email" as const,
+      senderEmail: db.client_reply_sender_email || db.client_email,
+    } : undefined,
+  };
+}
 
 interface NotificationSettings {
   emailNotifications: boolean;
