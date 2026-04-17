@@ -128,8 +128,41 @@ export default function OnboardingScreen() {
 
   const feelingLabel = buildFeelingLabel();
 
+  function renderCta() {
+    if (step < 3) {
+      return (
+        <button
+          onClick={next}
+          disabled={!canAdvance()}
+          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          That's me <ArrowRight className="w-4 h-4" />
+        </button>
+      );
+    }
+    if (step === 3) {
+      return (
+        <button onClick={next} className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+          Show me how <ArrowRight className="w-4 h-4" />
+        </button>
+      );
+    }
+    if (step === 4) {
+      return (
+        <button onClick={next} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+          Continue
+        </button>
+      );
+    }
+    return (
+      <button onClick={finish} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+        Go to Dashboard
+      </button>
+    );
+  }
+
   return (
-    <div className="h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header with progress */}
       <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-3">
         <button
@@ -150,7 +183,7 @@ export default function OnboardingScreen() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-5 pb-4">
+      <div className="flex-1 overflow-auto px-5 pb-8">
         <div className="bg-card border border-border rounded-2xl p-5 mt-2">
           {step === 0 && <MultiSelectStep config={Q0} selected={selected0} onToggle={makeToggle(setSelected0)} customText={custom0} setCustomText={setCustom0} />}
           {step === 1 && <MultiSelectStep config={Q1} selected={selected1} onToggle={makeToggle(setSelected1)} customText={custom1} setCustomText={setCustom1} />}
@@ -189,7 +222,7 @@ export default function OnboardingScreen() {
                 {[
                   { icon: Mail, title: "Write the message", desc: "We draft every follow-up in your tone — Polite, Friendly, Firm or Urgent — so you never stare at a blank screen." },
                   { icon: Clock, title: "Decide when to send", desc: "Set the schedule once in Settings. ChaseHQ tracks each invoice and queues the next reminder for you." },
-                  { icon: Zap, title: "Review and send in one tap", desc: "Drafts wait in the invoice. Tweak the tone, then send via your connected Gmail — you stay in control." },
+                  { icon: Zap, title: "Stay in control", desc: "Drafts wait in the invoice. Tweak the tone, then send via your connected Gmail — you stay in control." },
                 ].map((f) => (
                   <div key={f.title} className="flex gap-3.5">
                     <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
@@ -216,32 +249,10 @@ export default function OnboardingScreen() {
               </p>
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Sticky bottom CTA — consistent across all steps */}
-      <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom,16px),16px)] bg-background border-t border-border">
-        {step < 3 ? (
-          <button
-            onClick={next}
-            disabled={!canAdvance()}
-            className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            That's me <ArrowRight className="w-4 h-4" />
-          </button>
-        ) : step === 3 ? (
-          <button onClick={next} className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-            Show me how <ArrowRight className="w-4 h-4" />
-          </button>
-        ) : step === 4 ? (
-          <button onClick={next} className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-            Continue
-          </button>
-        ) : (
-          <button onClick={finish} className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-            Go to Dashboard
-          </button>
-        )}
+          {/* CTA sits directly below the user's responses */}
+          {renderCta()}
+        </div>
       </div>
     </div>
   );

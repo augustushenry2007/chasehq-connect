@@ -55,7 +55,7 @@ export default function NewInvoiceModal({
             { label: "Client email", value: email, onChange: setEmail, placeholder: "billing@client.com", type: "email" },
             { label: "Description", value: description, onChange: setDescription, placeholder: "Brand identity & logo system", type: "text" },
             { label: "Amount ($) *", value: amount, onChange: setAmount, placeholder: "4800", type: "number" },
-            { label: "Due date *", value: dueDate, onChange: setDueDate, placeholder: "2024-06-15", type: "date" },
+            { label: "Due date * (MM/DD/YYYY)", value: dueDate, onChange: setDueDate, placeholder: "MM/DD/YYYY", type: "date" },
           ].map((f) => (
             <div key={f.label}>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">{f.label}</label>
