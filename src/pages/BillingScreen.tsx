@@ -40,7 +40,7 @@ export default function BillingScreen() {
       return;
     }
     const { data, error } = await supabase.functions.invoke("validate-apple-receipt", {
-      body: { receipt: result.receipt, productId: result.productId, mock: (result as any).mock, restore: true },
+      body: { receipt: result.receipt, productId: result.productId, mock: result.mock, restore: true },
     });
     setRestoring(false);
     if (error || (data as any)?.error) {
