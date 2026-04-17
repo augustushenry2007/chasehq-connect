@@ -30,29 +30,38 @@ function ProfileSection({ profile, updateProfile }: {
 }) {
   const [name, setName] = useState(profile.name);
   const [email, setEmail] = useState(profile.email);
-  const [paymentDetails, setPaymentDetails] = useState(profile.paymentDetails);
   const [saved, setSaved] = useState(false);
 
   function handleSave() {
-    updateProfile({ name, email, paymentDetails });
+    updateProfile({ name, email, paymentDetails: profile.paymentDetails });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
   return (
     <div className="flex flex-col gap-3.5">
-      {[
-        { label: "Display name", value: name, onChange: setName },
-        { label: "Email", value: email, onChange: setEmail },
-      ].map((f) => (
-        <div key={f.label}>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">{f.label}</label>
-          <input value={f.value} onChange={(e) => f.onChange(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
-        </div>
-      ))}
+      <p className="text-xs text-muted-foreground -mt-1">
+        How you appear to clients in every follow-up email ChaseHQ sends on your behalf.
+      </p>
       <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1 block">Payment details</label>
-        <textarea value={paymentDetails} onChange={(e) => setPaymentDetails(e.target.value)} rows={2} className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/30" />
+        <label className="text-xs font-medium text-muted-foreground mb-1 block">Display name</label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Jamie Doe"
+          className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+        />
+        <p className="text-[11px] text-muted-foreground mt-1">Shown in the signature of every chase email.</p>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-muted-foreground mb-1 block">Reply-to email</label>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@studio.co"
+          className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+        />
+        <p className="text-[11px] text-muted-foreground mt-1">Where client replies should land.</p>
       </div>
       <div className="flex justify-end">
         <button onClick={handleSave} className={`px-5 py-2 rounded-xl text-sm font-semibold text-primary-foreground ${saved ? "bg-[#16A34A]" : "bg-primary"}`}>

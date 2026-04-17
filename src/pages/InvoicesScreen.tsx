@@ -52,9 +52,11 @@ export default function InvoicesScreen() {
           <h1 className="text-xl font-bold text-foreground">Invoices</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Manage and track all your client invoices</p>
         </div>
-        <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3.5 py-2 rounded-xl text-sm font-semibold">
-          <Plus className="w-4 h-4" /> New
-        </button>
+        {!isEmptyWorkspace && (
+          <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3.5 py-2 rounded-xl text-sm font-semibold">
+            <Plus className="w-4 h-4" /> New
+          </button>
+        )}
       </div>
 
       {!isEmptyWorkspace && (
