@@ -146,13 +146,15 @@ function ScheduleSection({ schedule, updateSchedule }: { schedule: ScheduleRow[]
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
-  const { user, notifications, schedule, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
+  const { user, fullName, notifications, schedule, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
   const { invoices } = useInvoices();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
   const { gmail, loading: gmailLoading, connectGmail, disconnectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
+  const mailbox = useSendingMailbox();
   const [gmailBusy, setGmailBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [smtpOpen, setSmtpOpen] = useState(false);
 
   function toggleSection(key: SectionKey) { setOpenSection((prev) => (prev === key ? null : key)); }
 
