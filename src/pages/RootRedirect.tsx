@@ -12,8 +12,7 @@ export default function RootRedirect() {
     );
   }
 
-  // Value-before-friction: app opens directly into onboarding.
-  // Onboarding handles auth itself once the user taps "Send now".
-  if (!isAuthenticated || !hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
+  if (!isAuthenticated) return <Navigate to="/auth" replace />;
+  if (!hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
   return <Navigate to="/dashboard" replace />;
 }
