@@ -98,10 +98,22 @@ export async function createInvoice(userId: string, data: {
   return invoice;
 }
 
-export async function generateFollowup(invoice: FrontendInvoice, tone: string): Promise<{ subject: string; message: string } | null> {
+export async function deleteInvoice(invoiceId: string): Promise<boolean> {
+  // Best-effort cleanup of related followups (no FK cascade in schema)
+  await supabase.from("followups").delete().eq("invoice_id", invoiceId);
+  const { error } = await supabase.from("invoices").delete().eq("id", invoiceId);
+  if (error) {
+    toast.error("Failed to delete invoice: " + error.message);
+    return false;
+  }
+  toast.success("Invoice deleted");
+  return true;
+}
+
+export async function generateFollowup(invoice: FrontendInvoice, tone: string, previousMessage?: string): Promise<{ subject: string; message: string } | null> {
   try {
     const { data, error } = await supabase.functions.invoke("generate-followup", {
-      body: { invoice, tone },
+      body: { invoice, tone, previousMessage },
     });
 
     if (error) {
