@@ -95,10 +95,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   function signIn() {}
 
   async function signOut() {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      // ignore — clear local state regardless
+    }
+    localStorage.removeItem("notifications");
+    localStorage.removeItem("schedule");
     setIsAuthenticated(false);
     setUser(null);
     setHasCompletedOnboarding(false);
+    setNotifications({ emailNotifications: true, autoChase: true, defaultTone: "Friendly" });
+    setSchedule(DEFAULT_SCHEDULE);
   }
 
   async function completeOnboarding() {

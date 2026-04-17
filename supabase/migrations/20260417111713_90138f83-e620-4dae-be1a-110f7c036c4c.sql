@@ -1,0 +1,1 @@
+DELETE FROM public.followups; DELETE FROM public.invoices;
