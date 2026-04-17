@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useInvoices } from "@/hooks/useSupabaseData";
-import { getInvoiceById, ACTIVITY, formatUSD } from "@/lib/data";
+import { getInvoiceById, formatUSD } from "@/lib/data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ArrowLeft, ChevronDown, ChevronUp, Mail, MessageSquare } from "lucide-react";
 import ChaseTimeline from "@/components/invoice/ChaseTimeline";
@@ -23,7 +23,7 @@ export default function InvoiceDetailScreen() {
     );
   }
 
-  const invoiceActivity = ACTIVITY.filter((a) => a.invoiceId === invoice.id);
+  const invoiceActivity: { id: string; description: string; timeAgo: string }[] = [];
 
   const detailRows = [
     { label: "Invoice ID", value: invoice.id },
