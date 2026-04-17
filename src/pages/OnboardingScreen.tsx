@@ -198,9 +198,9 @@ export default function OnboardingScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Header with progress */}
-      <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-3">
+      <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-3 shrink-0">
         <button
           onClick={back}
           className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
@@ -219,7 +219,7 @@ export default function OnboardingScreen() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-5 pb-8">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
         <div className="bg-card border border-border rounded-2xl p-5 mt-2">
           {step === 0 && <MultiSelectStep config={Q0} selected={selected0} onToggle={makeToggle(setSelected0)} customText={custom0} setCustomText={setCustom0} />}
           {step === 1 && <MultiSelectStep config={Q1} selected={selected1} onToggle={makeToggle(setSelected1)} customText={custom1} setCustomText={setCustom1} />}
