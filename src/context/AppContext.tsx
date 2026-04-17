@@ -2,12 +2,6 @@ import React, { createContext, useContext, useState, useEffect, type ReactNode }
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 
-interface UserProfile {
-  name: string;
-  email: string;
-  paymentDetails: string;
-}
-
 interface NotificationSettings {
   emailNotifications: boolean;
   autoChase: boolean;
@@ -26,20 +20,15 @@ interface AppContextType {
   authReady: boolean;
   user: User | null;
   hasCompletedOnboarding: boolean;
-  isDemoUser: boolean;
-  profile: UserProfile;
   notifications: NotificationSettings;
   schedule: ScheduleRow[];
   signIn: () => void;
   signOut: () => void;
   completeOnboarding: () => Promise<void>;
   restartOnboarding: () => Promise<void>;
-  updateProfile: (profile: UserProfile) => void;
   updateNotifications: (settings: NotificationSettings) => void;
   updateSchedule: (schedule: ScheduleRow[]) => void;
 }
-
-const DEMO_EMAIL = "demo@chasehq.app";
 
 const DEFAULT_SCHEDULE: ScheduleRow[] = [
   { id: 1, day: 0, action: "Invoice sent", status: "sent" },
@@ -55,10 +44,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
-  const [profile, setProfile] = useState<UserProfile>(() => {
-    const s = localStorage.getItem("profile");
-    return s ? JSON.parse(s) : { name: "Jamie Doe", email: "jamie@studio.co", paymentDetails: "Bank transfer · Account: 12345678 · Sort code: 12-34-56" };
-  });
   const [notifications, setNotifications] = useState<NotificationSettings>(() => {
     const s = localStorage.getItem("notifications");
     return s ? JSON.parse(s) : { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
@@ -68,9 +53,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return s ? JSON.parse(s) : DEFAULT_SCHEDULE;
   });
 
-  const isDemoUser = user?.email === DEMO_EMAIL;
-
-  // Load onboarding state from profiles table whenever the user changes
   useEffect(() => {
     if (!user) {
       setHasCompletedOnboarding(false);
@@ -87,7 +69,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (data) {
         setHasCompletedOnboarding(!!data.onboarding_completed);
       } else {
-        // Profile row doesn't exist yet (e.g. trigger lag) — create it
         await supabase.from("profiles").insert({ user_id: user.id, onboarding_completed: false });
         setHasCompletedOnboarding(false);
       }
@@ -111,9 +92,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  function signIn() {
-    // Handled by Supabase auth - this is a no-op now
-  }
+  function signIn() {}
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -140,11 +119,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  function updateProfile(p: UserProfile) {
-    setProfile(p);
-    localStorage.setItem("profile", JSON.stringify(p));
-  }
-
   function updateNotifications(n: NotificationSettings) {
     setNotifications(n);
     localStorage.setItem("notifications", JSON.stringify(n));
@@ -156,7 +130,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ isAuthenticated, authReady, user, hasCompletedOnboarding, isDemoUser, profile, notifications, schedule, signIn, signOut, completeOnboarding, restartOnboarding, updateProfile, updateNotifications, updateSchedule }}>
+    <AppContext.Provider value={{ isAuthenticated, authReady, user, hasCompletedOnboarding, notifications, schedule, signIn, signOut, completeOnboarding, restartOnboarding, updateNotifications, updateSchedule }}>
       {children}
     </AppContext.Provider>
   );

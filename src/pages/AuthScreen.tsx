@@ -2,25 +2,19 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { lovable } from "@/integrations/lovable/index";
-import { supabase } from "@/integrations/supabase/client";
 import { Check, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 export default function AuthScreen() {
   const navigate = useNavigate();
-  const { isAuthenticated, hasCompletedOnboarding, authReady, restartOnboarding } = useApp();
+  const { isAuthenticated, hasCompletedOnboarding, authReady } = useApp();
   const [loading, setLoading] = useState(false);
-  const [forceQuiz, setForceQuiz] = useState(false);
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return;
-    if (forceQuiz) {
-      navigate("/onboarding", { replace: true });
-      return;
-    }
     if (hasCompletedOnboarding) navigate("/dashboard", { replace: true });
     else navigate("/onboarding", { replace: true });
-  }, [authReady, isAuthenticated, hasCompletedOnboarding, navigate, forceQuiz]);
+  }, [authReady, isAuthenticated, hasCompletedOnboarding, navigate]);
 
   async function handleSignIn() {
     setLoading(true);
@@ -37,30 +31,6 @@ export default function AuthScreen() {
     } catch {
       toast.error("Sign in failed");
     }
-    setLoading(false);
-  }
-
-  async function handleQuiz() {
-    // Sign in as demo and route directly to onboarding quiz
-    setLoading(true);
-    setForceQuiz(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: "demo@chasehq.app",
-      password: "demo123456",
-    });
-    if (error) {
-      const { error: signUpError } = await supabase.auth.signUp({
-        email: "demo@chasehq.app",
-        password: "demo123456",
-      });
-      if (signUpError) {
-        toast.error("Failed: " + signUpError.message);
-        setLoading(false);
-        setForceQuiz(false);
-        return;
-      }
-    }
-    await restartOnboarding();
     setLoading(false);
   }
 
@@ -104,7 +74,7 @@ export default function AuthScreen() {
         </div>
 
         <button
-          onClick={handleQuiz}
+          onClick={handleSignIn}
           disabled={loading}
           className="flex items-center justify-center gap-2 bg-primary rounded-xl py-3.5 active:scale-[0.98] transition-transform"
         >
