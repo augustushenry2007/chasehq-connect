@@ -165,19 +165,12 @@ export default function DashboardScreen() {
               />
               <GetStartedStep
                 done={gmail.connected}
-                title="Connect Gmail"
-                description="Send follow-ups from your own inbox so replies land where you'd expect."
+                title="Connect your inbox"
+                description={gmail.connected ? `Connected as ${gmail.email}` : "Send follow-ups from your own Gmail so replies land where you'd expect."}
                 action="Connect Gmail"
-                onAction={() => navigate("/settings")}
+                onAction={handleConnectGmail}
+                loading={connectingGmail}
                 icon={Mail}
-              />
-              <GetStartedStep
-                done={false}
-                title="Personalise your follow-up tone"
-                description="Pick the voice ChaseHQ uses on your behalf — Polite, Friendly, Firm, or Urgent."
-                action="Open settings"
-                onAction={() => navigate("/settings")}
-                icon={SettingsIcon}
               />
             </div>
           </div>
