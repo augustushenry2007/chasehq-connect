@@ -41,9 +41,43 @@ export default function InvoicesScreen() {
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
 
-  const { invoices, refetch } = useInvoices();
+  const { invoices, loading, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
   const isEmptyWorkspace = invoices.length === 0;
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="px-5 pt-5 pb-3 flex items-start justify-between">
+          <div className="space-y-2">
+            <div className="h-6 w-32 bg-muted rounded-md animate-pulse" />
+            <div className="h-3 w-56 bg-muted rounded-md animate-pulse" />
+          </div>
+          <div className="h-9 w-20 bg-muted rounded-xl animate-pulse" />
+        </div>
+        <div className="mx-5 h-11 bg-card border border-border rounded-xl animate-pulse" />
+        <div className="flex gap-2 mt-3 px-5 border-b border-border pb-2.5">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-6 w-16 bg-muted rounded-md animate-pulse" />
+          ))}
+        </div>
+        <div className="flex-1 overflow-hidden pb-24">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="px-5 py-3.5 border-b border-border">
+              <div className="flex items-center justify-between">
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-40 bg-muted rounded-md animate-pulse" />
+                  <div className="h-3 w-56 bg-muted rounded-md animate-pulse" />
+                  <div className="h-3 w-32 bg-muted rounded-md animate-pulse" />
+                </div>
+                <div className="h-4 w-16 bg-muted rounded-md animate-pulse ml-3" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
