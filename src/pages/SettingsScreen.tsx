@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { useInvoices } from "@/hooks/useSupabaseData";
+import { useEntitlement } from "@/hooks/useEntitlement";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {

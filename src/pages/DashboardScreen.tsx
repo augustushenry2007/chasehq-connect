@@ -101,6 +101,7 @@ export default function DashboardScreen() {
 
   return (
     <div className="flex-1 overflow-auto pb-24">
+      <TrialBanner />
       <div className="px-5 pt-5">
         <h1 className="text-xl font-bold text-foreground">
           {isEmpty ? `Welcome, ${firstName}` : `Good morning, ${firstName}`}
