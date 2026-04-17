@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import type { Tables } from "@/integrations/supabase/types";
 import type { Invoice as FrontendInvoice } from "@/lib/data";
+import { isTestingMode, clearTestingState } from "@/lib/testingMode";
 
 type DbInvoice = Tables<"invoices">;
 
@@ -78,10 +79,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [invoices, setInvoices] = useState<FrontendInvoice[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(true);
   const [notifications, setNotifications] = useState<NotificationSettings>(() => {
+    if (isTestingMode()) return { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
     const s = localStorage.getItem("notifications");
     return s ? JSON.parse(s) : { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
   });
   const [schedule, setSchedule] = useState<ScheduleRow[]>(() => {
+    if (isTestingMode()) return DEFAULT_SCHEDULE;
     const s = localStorage.getItem("schedule");
     return s ? JSON.parse(s) : DEFAULT_SCHEDULE;
   });
@@ -101,8 +104,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
       if (cancelled) return;
       const metaName = (user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name || null;
+      const testing = isTestingMode();
       if (data) {
-        setHasCompletedOnboarding(!!data.onboarding_completed);
+        setHasCompletedOnboarding(testing ? false : !!data.onboarding_completed);
         const resolved = (data as any).full_name || metaName || null;
         setFullName(resolved);
         if (!(data as any).full_name && metaName) {
@@ -155,7 +159,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [user, authReady, refetchInvoices]);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Testing mode: wipe persisted local state on every sign-in so each session starts fresh
+      if (isTestingMode() && event === "SIGNED_IN") {
+        clearTestingState();
+        setNotifications({ emailNotifications: true, autoChase: true, defaultTone: "Friendly" });
+        setSchedule(DEFAULT_SCHEDULE);
+        setHasCompletedOnboarding(false);
+      }
       setUser(session?.user ?? null);
       setIsAuthenticated(!!session?.user);
       setAuthReady(true);
