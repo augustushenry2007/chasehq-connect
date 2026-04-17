@@ -39,14 +39,7 @@ const Q2 = {
   ],
 };
 
-const INTEGRATIONS = [
-  { name: "FreshBooks", color: "#1AB5D1", initial: "FB", desc: "Import invoices and sync payment status" },
-  { name: "Xero", color: "#13B5EA", initial: "X", desc: "Pull unpaid invoices and trigger chase sequences" },
-  { name: "QuickBooks", color: "#2BA01B", initial: "QB", desc: "Automatically chase overdue QBO invoices" },
-  { name: "Bonsai", color: "#6C47FF", initial: "B", desc: "Sync freelance contracts and invoices" },
-];
-
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 5;
 
 function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
   config: typeof Q0; selected: Set<string>; onToggle: (id: string) => void; customText: string; setCustomText: (s: string) => void;
@@ -96,7 +89,6 @@ export default function OnboardingScreen() {
   const [custom0, setCustom0] = useState("");
   const [custom1, setCustom1] = useState("");
   const [custom2, setCustom2] = useState("");
-  const [connectedIntegrations, setConnectedIntegrations] = useState<Set<string>>(new Set());
 
   const progress = (step / TOTAL_STEPS) * 100;
 
@@ -113,14 +105,6 @@ export default function OnboardingScreen() {
   function finish() {
     completeOnboarding();
     navigate("/dashboard", { replace: true });
-  }
-
-  function toggleIntegration(name: string) {
-    setConnectedIntegrations((prev) => {
-      const n = new Set(prev);
-      if (n.has(name)) n.delete(name); else n.add(name);
-      return n;
-    });
   }
 
   function makeToggle(setter: React.Dispatch<React.SetStateAction<Set<string>>>) {
@@ -222,48 +206,12 @@ export default function OnboardingScreen() {
                 ))}
               </div>
               <button onClick={next} className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-                Connect my tools
+                Continue
               </button>
             </div>
           )}
 
           {step === 5 && (
-            <div>
-              <span className="text-xs font-semibold text-primary uppercase tracking-wider">Almost there</span>
-              <h2 className="text-xl font-bold text-foreground mt-2 mb-1">Connect your invoicing tool</h2>
-              <p className="text-sm text-muted-foreground mb-5">We'll import your unpaid invoices and start chasing for you.</p>
-              <div className="flex flex-col gap-2.5 mb-6">
-                {INTEGRATIONS.map((integ) => {
-                  const isConnected = connectedIntegrations.has(integ.name);
-                  return (
-                    <button
-                      key={integ.name}
-                      onClick={() => toggleIntegration(integ.name)}
-                      className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-colors text-left ${isConnected ? "border-primary bg-accent" : "border-border bg-card"}`}
-                    >
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-primary-foreground font-bold text-sm shrink-0" style={{ backgroundColor: integ.color }}>
-                        {integ.initial}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-foreground">{integ.name}</p>
-                        <p className="text-xs text-muted-foreground">{integ.desc}</p>
-                      </div>
-                      {isConnected && (
-                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
-                          <Check className="w-3 h-3 text-primary-foreground" />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              <button onClick={next} className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-                {connectedIntegrations.size > 0 ? "Continue" : "Skip for now"}
-              </button>
-            </div>
-          )}
-
-          {step === 6 && (
             <div className="text-center py-4">
               <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
                 <Check className="w-8 h-8 text-primary-foreground" />
