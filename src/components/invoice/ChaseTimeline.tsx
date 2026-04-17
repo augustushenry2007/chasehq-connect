@@ -32,7 +32,7 @@ function getTimeline(invoice: Invoice, customDates?: Record<number, string>): Ti
 
   const dates = defaults.map((d, i) => customDates?.[i] ?? d);
   const formatted = dates.map((d) =>
-    new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })
   );
 
   const base: TimelineEvent[] = [

@@ -150,7 +150,7 @@ export default function OnboardingScreen() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-5 pb-8">
+      <div className="flex-1 overflow-auto px-5 pb-4">
         <div className="bg-card border border-border rounded-2xl p-5 mt-2">
           {step === 0 && <MultiSelectStep config={Q0} selected={selected0} onToggle={makeToggle(setSelected0)} customText={custom0} setCustomText={setCustom0} />}
           {step === 1 && <MultiSelectStep config={Q1} selected={selected1} onToggle={makeToggle(setSelected1)} customText={custom1} setCustomText={setCustom1} />}
@@ -175,24 +175,21 @@ export default function OnboardingScreen() {
                 <p className="text-base font-bold mb-1">The real problem isn't you.</p>
                 <p className="text-sm opacity-80">It's deciding what to say, when to say it, and how.</p>
               </div>
-              <p className="text-sm text-muted-foreground mb-5">
+              <p className="text-sm text-muted-foreground">
                 And that's where you stop. You don't make those decisions anymore — we do.
               </p>
-              <button onClick={next} className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-                Show me how <ArrowRight className="w-4 h-4" />
-              </button>
             </div>
           )}
 
           {step === 4 && (
             <div>
               <span className="text-xs font-semibold text-primary uppercase tracking-wider">How it removes the mental load</span>
-              <h2 className="text-xl font-bold text-foreground mt-2 mb-5">Three things you'll never have to do again</h2>
-              <div className="flex flex-col gap-4 mb-6">
+              <h2 className="text-xl font-bold text-foreground mt-2 mb-5">Three things you'll never have to do alone again</h2>
+              <div className="flex flex-col gap-4">
                 {[
-                  { icon: Mail, title: "Write the message", desc: "We draft every follow-up in your voice, matching your tone and style" },
-                  { icon: Clock, title: "Decide when to send", desc: "Our timeline triggers the right message at the right moment" },
-                  { icon: Zap, title: "Hit send", desc: "It goes out automatically — unless you want to review first" },
+                  { icon: Mail, title: "Write the message", desc: "We draft every follow-up in your tone — Polite, Friendly, Firm or Urgent — so you never stare at a blank screen." },
+                  { icon: Clock, title: "Decide when to send", desc: "Set the schedule once in Settings. ChaseHQ tracks each invoice and queues the next reminder for you." },
+                  { icon: Zap, title: "Review and send in one tap", desc: "Drafts wait in the invoice. Tweak the tone, then send via your connected Gmail — you stay in control." },
                 ].map((f) => (
                   <div key={f.title} className="flex gap-3.5">
                     <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
@@ -205,9 +202,6 @@ export default function OnboardingScreen() {
                   </div>
                 ))}
               </div>
-              <button onClick={next} className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-                Continue
-              </button>
             </div>
           )}
 
@@ -217,15 +211,37 @@ export default function OnboardingScreen() {
                 <Check className="w-8 h-8 text-primary-foreground" />
               </div>
               <h2 className="text-xl font-bold text-foreground mb-2">You're all set</h2>
-              <p className="text-sm text-muted-foreground mb-6">
+              <p className="text-sm text-muted-foreground">
                 ChaseHQ will handle the follow-ups so you can focus on the work.
               </p>
-              <button onClick={finish} className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-                Go to Dashboard
-              </button>
             </div>
           )}
         </div>
+      </div>
+
+      {/* Sticky bottom CTA — consistent across all steps */}
+      <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom,16px),16px)] bg-background border-t border-border">
+        {step < 3 ? (
+          <button
+            onClick={next}
+            disabled={!canAdvance()}
+            className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            That's me <ArrowRight className="w-4 h-4" />
+          </button>
+        ) : step === 3 ? (
+          <button onClick={next} className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+            Show me how <ArrowRight className="w-4 h-4" />
+          </button>
+        ) : step === 4 ? (
+          <button onClick={next} className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+            Continue
+          </button>
+        ) : (
+          <button onClick={finish} className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+            Go to Dashboard
+          </button>
+        )}
       </div>
     </div>
   );
