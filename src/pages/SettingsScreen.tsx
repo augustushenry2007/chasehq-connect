@@ -367,17 +367,7 @@ export default function SettingsScreen() {
 
   const authMethod = signedInWithGoogle ? "Google" : "Email";
 
-  // Gmail connection states
-  const gmailLabel = gmail.connected
-    ? `Sending as ${gmail.email}`
-    : signedInWithGoogle
-      ? `Allow ChaseHQ to send follow-ups from ${googleEmail}`
-      : "Connect Gmail to send follow-ups from your inbox";
-  const gmailButtonLabel = gmail.connected
-    ? "Revoke"
-    : signedInWithGoogle
-      ? "Grant permission"
-      : "Connect";
+
 
   return (
     <div className="flex-1 overflow-auto pb-24">
