@@ -86,7 +86,10 @@ export default function AuthScreen() {
       </div>
 
       <p className="text-xs text-muted-foreground text-center pb-8 px-7">
-        By continuing you agree to our Terms &amp; Privacy Policy
+        By continuing you agree to our{" "}
+        <button onClick={() => navigate("/legal/terms")} className="underline hover:text-foreground">Terms</button>
+        {" "}&amp;{" "}
+        <button onClick={() => navigate("/legal/privacy")} className="underline hover:text-foreground">Privacy Policy</button>
       </p>
     </div>
   );
