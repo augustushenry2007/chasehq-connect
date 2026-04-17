@@ -4,8 +4,8 @@ import { ArrowLeft } from "lucide-react";
 export default function TermsOfUse() {
   const navigate = useNavigate();
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-2xl mx-auto px-5 py-6">
+    <div className="h-screen bg-background overflow-y-auto overscroll-contain">
+      <div className="max-w-2xl mx-auto px-5 py-6 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
         <button
           onClick={() => navigate(-1)}
           className="flex items-center gap-1.5 text-sm text-muted-foreground mb-6 hover:text-foreground"
