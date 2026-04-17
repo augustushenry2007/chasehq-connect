@@ -154,30 +154,113 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          email_provider: string | null
+          full_name: string | null
           id: string
           onboarding_completed: boolean
+          sender_type: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          email_provider?: string | null
+          full_name?: string | null
           id?: string
           onboarding_completed?: boolean
+          sender_type?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          email_provider?: string | null
+          full_name?: string | null
           id?: string
           onboarding_completed?: boolean
+          sender_type?: string | null
           updated_at?: string
           user_id?: string
         }
         Relationships: []
       }
+      smtp_connections: {
+        Row: {
+          created_at: string
+          from_email: string
+          from_name: string | null
+          smtp_host: string
+          smtp_password: string
+          smtp_port: number
+          smtp_username: string
+          updated_at: string
+          user_id: string
+          verified: boolean
+        }
+        Insert: {
+          created_at?: string
+          from_email: string
+          from_name?: string | null
+          smtp_host: string
+          smtp_password: string
+          smtp_port?: number
+          smtp_username: string
+          updated_at?: string
+          user_id: string
+          verified?: boolean
+        }
+        Update: {
+          created_at?: string
+          from_email?: string
+          from_name?: string | null
+          smtp_host?: string
+          smtp_password?: string
+          smtp_port?: number
+          smtp_username?: string
+          updated_at?: string
+          user_id?: string
+          verified?: boolean
+        }
+        Relationships: []
+      }
     }
     Views: {
-      [_ in never]: never
+      smtp_connections_safe: {
+        Row: {
+          created_at: string | null
+          from_email: string | null
+          from_name: string | null
+          smtp_host: string | null
+          smtp_port: number | null
+          smtp_username: string | null
+          updated_at: string | null
+          user_id: string | null
+          verified: boolean | null
+        }
+        Insert: {
+          created_at?: string | null
+          from_email?: string | null
+          from_name?: string | null
+          smtp_host?: string | null
+          smtp_port?: number | null
+          smtp_username?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+          verified?: boolean | null
+        }
+        Update: {
+          created_at?: string | null
+          from_email?: string | null
+          from_name?: string | null
+          smtp_host?: string | null
+          smtp_port?: number | null
+          smtp_username?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+          verified?: boolean | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
