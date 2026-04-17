@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { lovable } from "@/integrations/lovable/index";
 import { supabase } from "@/integrations/supabase/client";
-import { Check, Eye, EyeOff, Loader2 } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Loader2, Mail, Lock, User } from "lucide-react";
 import { toast } from "sonner";
 
 type Mode = "signup" | "signin";
@@ -88,121 +88,110 @@ export default function AuthScreen() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <div className="flex-1 flex flex-col justify-center max-w-sm w-full mx-auto px-7 py-10">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 mb-8">
-          <div className="w-10 h-10 rounded-[12px] bg-primary flex items-center justify-center">
-            <Check className="w-5 h-5 text-primary-foreground" strokeWidth={3} />
-          </div>
-          <span className="text-[18px] font-bold text-foreground">ChaseHQ</span>
-        </div>
-
-        {/* Headline */}
-        <h1 className="text-[28px] font-bold text-foreground leading-[1.15] tracking-tight mb-2">
-          {isSignup ? "Create your account" : "Welcome back"}
-        </h1>
-        <p className="text-[14px] text-muted-foreground leading-[20px] mb-7">
-          {isSignup
-            ? "Get paid without the awkwardness — ChaseHQ handles every follow-up for you."
-            : "Sign in to keep your invoices on track."}
-        </p>
-
-        {/* Google */}
+      <div className="flex-1 flex flex-col max-w-sm w-full mx-auto px-7 pt-10 pb-6">
+        {/* Back */}
         <button
-          onClick={handleGoogle}
-          disabled={googleLoading || submitLoading}
-          className="flex items-center justify-center gap-2.5 border border-border bg-card rounded-xl py-3 shadow-sm active:scale-[0.98] transition-transform mb-4 disabled:opacity-60"
+          onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/"))}
+          className="w-9 h-9 -ml-1 flex items-center justify-center text-foreground active:scale-95 transition-transform"
+          aria-label="Back"
         >
-          {googleLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin text-foreground" />
-          ) : (
-            <div className="w-[20px] h-[20px] rounded-md bg-[#4285F4] flex items-center justify-center">
-              <span className="text-[11px] font-bold text-white">G</span>
-            </div>
-          )}
-          <span className="text-[14px] font-semibold text-foreground">
-            Continue with Google
-          </span>
+          <ArrowLeft className="w-5 h-5" />
         </button>
 
-        {/* Divider */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="flex-1 h-px bg-border" />
-          <span className="text-[12px] text-muted-foreground">or</span>
-          <div className="flex-1 h-px bg-border" />
-        </div>
+        {/* Headline */}
+        <h1 className="mt-10 text-[34px] font-bold text-foreground leading-[1.1] tracking-tight">
+          {isSignup ? (
+            <>Create your<br />Account</>
+          ) : (
+            <>Welcome<br />Back</>
+          )}
+        </h1>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <form onSubmit={handleSubmit} className="mt-10 flex flex-col gap-5">
           {isSignup && (
-            <div>
-              <label className="text-[12px] font-medium text-muted-foreground mb-1.5 block">
-                Name
-              </label>
+            <FloatingField label="Full name" icon={<User className="w-4 h-4" />}>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your full name"
-                className="w-full px-3.5 py-3 text-[14px] bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                className="w-full bg-transparent pl-10 pr-3 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
                 autoComplete="name"
               />
-            </div>
+            </FloatingField>
           )}
-          <div>
-            <label className="text-[12px] font-medium text-muted-foreground mb-1.5 block">
-              Email
-            </label>
+
+          <FloatingField label="Email address" icon={<Mail className="w-4 h-4" />}>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-3.5 py-3 text-[14px] bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              className="w-full bg-transparent pl-10 pr-3 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
               autoComplete="email"
             />
-          </div>
-          <div>
-            <label className="text-[12px] font-medium text-muted-foreground mb-1.5 block">
-              Password
-            </label>
-            <div className="relative">
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={isSignup ? "At least 6 characters" : "Your password"}
-                className="w-full px-3.5 py-3 pr-10 text-[14px] bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                autoComplete={isSignup ? "new-password" : "current-password"}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((s) => !s)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                aria-label={showPassword ? "Hide password" : "Show password"}
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
+          </FloatingField>
+
+          <FloatingField label="Password" icon={<Lock className="w-4 h-4" />}>
+            <input
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={isSignup ? "At least 6 characters" : "Your password"}
+              className="w-full bg-transparent pl-10 pr-10 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+              autoComplete={isSignup ? "new-password" : "current-password"}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((s) => !s)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </FloatingField>
 
           <button
             type="submit"
             disabled={submitLoading || googleLoading}
-            className="mt-2 flex items-center justify-center gap-2 bg-primary rounded-xl py-3.5 active:scale-[0.98] transition-transform disabled:opacity-60"
+            className="mt-4 flex items-center justify-center gap-2 bg-primary rounded-full py-4 active:scale-[0.98] transition-transform disabled:opacity-60"
           >
             {submitLoading ? (
               <Loader2 className="w-4 h-4 animate-spin text-primary-foreground" />
             ) : (
-              <span className="text-[14px] font-semibold text-primary-foreground">
-                {isSignup ? "Create account" : "Sign in"}
+              <span className="text-[15px] font-semibold text-primary-foreground">
+                {isSignup ? "Sign up" : "Sign in"}
               </span>
             )}
           </button>
         </form>
 
+        {/* Divider */}
+        <div className="flex items-center gap-3 mt-8">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-[12px] text-muted-foreground">Or</span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+
+        {/* Social row */}
+        <div className="mt-6 flex items-center justify-center">
+          <button
+            onClick={handleGoogle}
+            disabled={googleLoading || submitLoading}
+            className="w-12 h-12 rounded-full border border-border bg-card flex items-center justify-center active:scale-95 transition-transform disabled:opacity-60"
+            aria-label="Continue with Google"
+          >
+            {googleLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-foreground" />
+            ) : (
+              <span className="text-[15px] font-bold text-[#4285F4]">G</span>
+            )}
+          </button>
+        </div>
+
         {/* Toggle */}
-        <p className="text-center text-[13px] text-muted-foreground mt-6">
+        <p className="text-center text-[13px] text-muted-foreground mt-8">
           {isSignup ? "Already have an account?" : "New to ChaseHQ?"}{" "}
           <button
             onClick={() => setMode(isSignup ? "signin" : "signup")}
@@ -219,6 +208,28 @@ export default function AuthScreen() {
         {" "}&amp;{" "}
         <button onClick={() => navigate("/legal/privacy")} className="underline hover:text-foreground">Privacy Policy</button>
       </p>
+    </div>
+  );
+}
+
+function FloatingField({
+  label,
+  icon,
+  children,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative border border-border bg-card rounded-xl focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary">
+      <span className="absolute -top-2 left-3 px-1.5 bg-background text-[11px] font-medium text-muted-foreground">
+        {label}
+      </span>
+      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+        {icon}
+      </span>
+      {children}
     </div>
   );
 }
