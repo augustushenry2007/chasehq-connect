@@ -17,7 +17,7 @@ function dbToFrontend(db: DbInvoice): MockInvoice {
     clientEmail: db.client_email,
     description: db.description,
     amount: Number(db.amount),
-    dueDate: new Date(db.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+    dueDate: new Date(db.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }),
     dueDateISO: db.due_date,
     status: db.status as MockInvoice["status"],
     daysPastDue: db.days_past_due,
