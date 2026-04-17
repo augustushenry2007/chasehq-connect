@@ -329,8 +329,8 @@ export default function SettingsScreen() {
 
   function toggleSection(key: SectionKey) { setOpenSection((prev) => (prev === key ? null : key)); }
 
-  async function handleSignOut() { await signOut(); navigate("/auth", { replace: true }); }
-  async function handleRestartOnboarding() { await restartOnboarding(); await signOut(); navigate("/auth", { replace: true }); }
+  async function handleSignOut() { await signOut(); navigate("/onboarding", { replace: true }); }
+  async function handleRestartOnboarding() { await restartOnboarding(); await signOut(); navigate("/onboarding", { replace: true }); }
 
   function handleExport() {
     const payload = {
