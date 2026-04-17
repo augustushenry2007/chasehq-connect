@@ -51,8 +51,11 @@ export default function PaywallScreen() {
       if (!result.canceled) toast.error(result.error);
       return;
     }
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
     const { data, error } = await supabase.functions.invoke("validate-apple-receipt", {
       body: { receipt: result.receipt, productId: result.productId, mock: result.mock },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     setBusy(null);
     if (error || (data as any)?.error) {
@@ -72,8 +75,11 @@ export default function PaywallScreen() {
       toast.error(result.error);
       return;
     }
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
     const { data, error } = await supabase.functions.invoke("validate-apple-receipt", {
       body: { receipt: result.receipt, productId: result.productId, mock: result.mock, restore: true },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     setBusy(null);
     if (error || (data as any)?.error) {
