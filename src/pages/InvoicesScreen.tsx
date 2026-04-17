@@ -1,11 +1,10 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useInvoices, createInvoice } from "@/hooks/useSupabaseData";
-import { formatUSD, type Invoice, type InvoiceStatus } from "@/lib/data";
-import { useApp } from "@/context/AppContext";
-import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
-import { Search, Plus, X, ChevronRight } from "lucide-react";
-import { toast } from "sonner";
+import { useInvoices } from "@/hooks/useSupabaseData";
+import { formatUSD, type Invoice } from "@/lib/data";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Search, Plus, X, ChevronRight, FileText } from "lucide-react";
+import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 
 type FilterTab = "all" | "overdue" | "upcoming" | "paid";
 
@@ -36,75 +35,6 @@ const TABS: { id: FilterTab; label: string }[] = [
   { id: "paid", label: "Paid" },
 ];
 
-function NewInvoiceModal({ visible, onClose, onCreated }: { visible: boolean; onClose: () => void; onCreated: () => void }) {
-  const { user } = useApp();
-  const [client, setClient] = useState("");
-  const [email, setEmail] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  if (!visible) return null;
-
-  async function handleCreate() {
-    if (!user) { toast.error("Not signed in"); return; }
-    if (!client || !amount || !dueDate) { toast.error("Fill in required fields"); return; }
-    setCreating(true);
-    const result = await createInvoice(user.id, {
-      client,
-      clientEmail: email,
-      description,
-      amount: parseFloat(amount),
-      dueDate,
-    });
-    setCreating(false);
-    if (result) {
-      setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDate("");
-      onCreated();
-      onClose();
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center">
-      <div className="bg-background w-full max-w-lg rounded-t-2xl p-5 pb-8 max-h-[85vh] overflow-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-bold text-foreground">New Invoice</h2>
-          <button onClick={onClose}><X className="w-5 h-5 text-muted-foreground" /></button>
-        </div>
-        <div className="flex flex-col gap-3.5">
-          {[
-            { label: "Client name *", value: client, onChange: setClient, placeholder: "Apex Digital", type: "text" },
-            { label: "Client email", value: email, onChange: setEmail, placeholder: "billing@client.com", type: "email" },
-            { label: "Description", value: description, onChange: setDescription, placeholder: "Brand identity & logo system", type: "text" },
-            { label: "Amount ($) *", value: amount, onChange: setAmount, placeholder: "4800", type: "number" },
-            { label: "Due date *", value: dueDate, onChange: setDueDate, placeholder: "2024-06-15", type: "date" },
-          ].map((f) => (
-            <div key={f.label}>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">{f.label}</label>
-              <input
-                value={f.value}
-                onChange={(e) => f.onChange(e.target.value)}
-                placeholder={f.placeholder}
-                type={f.type}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-          ))}
-          <button
-            onClick={handleCreate}
-            disabled={!client || !amount || !dueDate || creating}
-            className="mt-2 w-full bg-foreground text-background py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
-          >
-            {creating ? "Creating…" : "Create Invoice"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function InvoicesScreen() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
@@ -113,6 +43,7 @@ export default function InvoicesScreen() {
 
   const { invoices, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
+  const isEmptyWorkspace = invoices.length === 0;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -121,41 +52,61 @@ export default function InvoicesScreen() {
           <h1 className="text-xl font-bold text-foreground">Invoices</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Manage and track all your client invoices</p>
         </div>
-        <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-foreground text-background px-3.5 py-2 rounded-xl text-sm font-semibold">
+        <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3.5 py-2 rounded-xl text-sm font-semibold">
           <Plus className="w-4 h-4" /> New
         </button>
       </div>
 
-      <div className="mx-5 flex items-center gap-2 bg-card border border-border rounded-xl px-3 py-2.5">
-        <Search className="w-4 h-4 text-muted-foreground shrink-0" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search invoices..."
-          className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-        />
-        {query && <button onClick={() => setQuery("")}><X className="w-4 h-4 text-muted-foreground" /></button>}
-      </div>
+      {!isEmptyWorkspace && (
+        <>
+          <div className="mx-5 flex items-center gap-2 bg-card border border-border rounded-xl px-3 py-2.5">
+            <Search className="w-4 h-4 text-muted-foreground shrink-0" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search invoices..."
+              className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+            />
+            {query && <button onClick={() => setQuery("")}><X className="w-4 h-4 text-muted-foreground" /></button>}
+          </div>
 
-      <div className="flex border-b border-border mt-3 px-5 gap-0">
-        {TABS.map((tab) => {
-          const isActive = activeTab === tab.id;
-          const count = getTabCount(invoices, tab.id);
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 pb-2.5 pt-1 border-b-2 transition-colors ${isActive ? "border-primary" : "border-transparent"}`}
-            >
-              <span className={`text-sm ${isActive ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}>{tab.label}</span>
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{count}</span>
-            </button>
-          );
-        })}
-      </div>
+          <div className="flex border-b border-border mt-3 px-5 gap-0">
+            {TABS.map((tab) => {
+              const isActive = activeTab === tab.id;
+              const count = getTabCount(invoices, tab.id);
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 pb-2.5 pt-1 border-b-2 transition-colors ${isActive ? "border-primary" : "border-transparent"}`}
+                >
+                  <span className={`text-sm ${isActive ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}>{tab.label}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       <div className="flex-1 overflow-auto pb-24">
-        {filtered.length === 0 ? (
+        {isEmptyWorkspace ? (
+          <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center mb-4">
+              <FileText className="w-7 h-7 text-primary" />
+            </div>
+            <p className="text-base font-semibold text-foreground">No invoices yet</p>
+            <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+              Add your first invoice and ChaseHQ will handle the follow-ups for you.
+            </p>
+            <button
+              onClick={() => setShowNew(true)}
+              className="mt-5 flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold"
+            >
+              <Plus className="w-4 h-4" /> Add your first invoice
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-5">
             <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-3">
               <Search className="w-6 h-6 text-muted-foreground" />

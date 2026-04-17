@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/context/AppContext";
 import type { Tables, TablesInsert } from "@/integrations/supabase/types";
-import { INVOICES as MOCK_INVOICES, type Invoice as MockInvoice } from "@/lib/data";
+import { INVOICES as MOCK_INVOICES, type Invoice as MockInvoice } from "@/lib/mockData";
 import { toast } from "sonner";
 
 export type DbInvoice = Tables<"invoices">;
 export type DbFollowup = Tables<"followups">;
+
+const DEMO_EMAIL = "demo@chasehq.app";
 
 function dbToFrontend(db: DbInvoice): MockInvoice {
   return {
@@ -31,13 +33,18 @@ function dbToFrontend(db: DbInvoice): MockInvoice {
 }
 
 export function useInvoices() {
-  const { user } = useApp();
-  const [invoices, setInvoices] = useState<MockInvoice[]>(MOCK_INVOICES);
-  const [loading, setLoading] = useState(false);
+  const { user, authReady } = useApp();
+  const [invoices, setInvoices] = useState<MockInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
   const [seeded, setSeeded] = useState(false);
 
   const fetchInvoices = useCallback(async () => {
-    if (!user) return;
+    if (!authReady) return;
+    if (!user) {
+      setInvoices([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data, error } = await supabase
       .from("invoices")
@@ -46,23 +53,25 @@ export function useInvoices() {
 
     if (error) {
       console.error("Error fetching invoices:", error);
+      setInvoices([]);
     } else if (data && data.length > 0) {
       setInvoices(data.map(dbToFrontend));
-    } else if (data && data.length === 0 && !seeded) {
-      // Seed demo data on first login
-      setSeeded(true);
-      await seedInvoicesForUser(user.id);
-      // Re-fetch after seeding
-      const { data: seededData } = await supabase
-        .from("invoices")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (seededData && seededData.length > 0) {
-        setInvoices(seededData.map(dbToFrontend));
+    } else {
+      // Only seed mock data for the demo account; real users start with an empty workspace
+      if (user.email === DEMO_EMAIL && !seeded) {
+        setSeeded(true);
+        await seedInvoicesForUser(user.id);
+        const { data: seededData } = await supabase
+          .from("invoices")
+          .select("*")
+          .order("created_at", { ascending: false });
+        setInvoices(seededData ? seededData.map(dbToFrontend) : []);
+      } else {
+        setInvoices([]);
       }
     }
     setLoading(false);
-  }, [user, seeded]);
+  }, [user, authReady, seeded]);
 
   useEffect(() => {
     fetchInvoices();
