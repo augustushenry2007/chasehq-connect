@@ -1,338 +1,484 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ArrowRight, ArrowLeft, Check, Clock, Mail, Loader2, Lock, User as UserIcon } from "lucide-react";
+import { toast } from "sonner";
 import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
-import { ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles, AlertCircle, Loader2 } from "lucide-react";
+import { lovable } from "@/integrations/lovable/index";
+import { GoogleIcon } from "@/components/GoogleIcon";
+import { savePendingInvoice, persistPendingInvoice, clearPendingInvoice } from "@/lib/pendingInvoice";
+import { validatePassword } from "@/lib/passwordValidation";
 
-const Q0 = {
-  label: "Just checking in",
-  question: "When it comes to money conversations, I feel…",
-  sub: "Select all that apply, or add your own.",
-  placeholder: "e.g. stressed, resentful, powerless…",
-  options: [
-    { id: "anxious", label: "Anxious", detail: "I overthink every interaction and second-guess myself" },
-    { id: "guilty", label: "Guilty", detail: "Like I shouldn't be asking for what I'm already owed" },
-    { id: "frustrated", label: "Frustrated", detail: "It's exhausting and draining to deal with every time" },
-  ],
-};
+type Tone = "Polite" | "Friendly" | "Firm" | "Urgent";
+type Step = "landing" | "qualify" | "details" | "magic" | "auth" | "done";
 
-const Q1 = {
-  label: "A little more",
-  question: "When I think about sending a follow-up…",
-  sub: "Tick everything that rings true, or describe it yourself.",
-  placeholder: "e.g. I freeze up, I feel embarrassed…",
-  options: [
-    { id: "hesitant", label: "I hesitate", detail: "I draft it five times and then don't send any of them" },
-    { id: "relationship", label: "I worry", detail: "What if it damages the relationship or makes me look desperate?" },
-    { id: "procrastinate", label: "I put it off", detail: "Until it's awkward to bring up and I've lost the moment" },
-  ],
-};
+const TONES: Tone[] = ["Polite", "Friendly", "Firm", "Urgent"];
 
-const Q2 = {
-  label: "Last one",
-  question: "What would actually make this easier?",
-  sub: "Choose as many as feel right, or say it your way.",
-  placeholder: "e.g. templates, a nudge, less guilt…",
-  options: [
-    { id: "words", label: "The right words", detail: "Already written — so I never stare at a blank screen again" },
-    { id: "timing", label: "The right moment", detail: "Knowing exactly when to reach out without overthinking it" },
-    { id: "automation", label: "Full automation", detail: "Set it and forget it — no manual effort from me at all" },
-  ],
-};
+function buildMessage(client: string, amount: number, dueDate: string, tone: Tone) {
+  const name = client?.trim() || "there";
+  const amt = amount ? `$${amount.toLocaleString()}` : "the invoice";
+  const due = dueDate ? new Date(dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "recently";
 
-const TOTAL_STEPS = 5;
-
-function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
-  config: typeof Q0; selected: Set<string>; onToggle: (id: string) => void; customText: string; setCustomText: (s: string) => void;
-}) {
-  return (
-    <div>
-      <span className="text-xs font-semibold text-primary uppercase tracking-wider">{config.label}</span>
-      <h2 className="text-xl font-bold text-foreground mt-2 mb-1">{config.question}</h2>
-      <p className="text-sm text-muted-foreground mb-5">{config.sub}</p>
-      <div className="flex flex-col gap-2.5">
-        {config.options.map((opt) => (
-          <button
-            key={opt.id}
-            onClick={() => onToggle(opt.id)}
-            className={`text-left p-4 rounded-xl border-[1.5px] transition-colors ${selected.has(opt.id) ? "border-primary bg-accent" : "border-border bg-card"}`}
-          >
-            <div className="flex items-center gap-3">
-              <div className={`w-5 h-5 rounded-md border-[1.5px] flex items-center justify-center shrink-0 ${selected.has(opt.id) ? "bg-primary border-primary" : "border-border"}`}>
-                {selected.has(opt.id) && <Check className="w-3 h-3 text-primary-foreground" />}
-              </div>
-              <div>
-                <span className="text-sm font-semibold text-foreground">{opt.label}</span>
-                <p className="text-xs text-muted-foreground mt-0.5">{opt.detail}</p>
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-      <input
-        value={customText}
-        onChange={(e) => setCustomText(e.target.value)}
-        placeholder={config.placeholder}
-        className="w-full mt-4 px-4 py-3 rounded-xl border border-border bg-muted text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-      />
-    </div>
-  );
-}
-
-interface Personalization {
-  headline: string;
-  subhead: string;
-  painPoints: { title: string; detail: string }[];
-  benefits: { title: string; detail: string }[];
+  switch (tone) {
+    case "Polite":
+      return {
+        subject: `Quick check-in on ${amt}`,
+        message: `Hi ${name}, hope you're doing well. Just gently checking in on the invoice from ${due} — let me know if anything needs clarifying on my end.`,
+      };
+    case "Firm":
+      return {
+        subject: `Following up: ${amt} due ${due}`,
+        message: `Hi ${name}, I'm following up on the ${amt} invoice that was due ${due}. Could you confirm when payment will be sent? Happy to resend any details you need.`,
+      };
+    case "Urgent":
+      return {
+        subject: `Action needed: ${amt} overdue`,
+        message: `Hi ${name}, the ${amt} invoice from ${due} is now overdue. Please let me know today when I can expect payment, or reach out if there's an issue I can help resolve.`,
+      };
+    case "Friendly":
+    default:
+      return {
+        subject: `Just checking in on the invoice`,
+        message: `Hey ${name}, just checking in on the invoice from ${due}. Let me know if you need anything from my end — happy to help.`,
+      };
+  }
 }
 
 export default function OnboardingScreen() {
   const navigate = useNavigate();
-  const { completeOnboarding, user } = useApp();
+  const { isAuthenticated, hasCompletedOnboarding, completeOnboarding, user } = useApp();
 
-  const [step, setStep] = useState(0);
-  const [selected0, setSelected0] = useState<Set<string>>(new Set());
-  const [selected1, setSelected1] = useState<Set<string>>(new Set());
-  const [selected2, setSelected2] = useState<Set<string>>(new Set());
-  const [custom0, setCustom0] = useState("");
-  const [custom1, setCustom1] = useState("");
-  const [custom2, setCustom2] = useState("");
-  const [personalization, setPersonalization] = useState<Personalization | null>(null);
-  const [personalizing, setPersonalizing] = useState(false);
-  const [personalizationError, setPersonalizationError] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>("landing");
 
-  const progress = (step / TOTAL_STEPS) * 100;
+  // Demo invoice
+  const [client, setClient] = useState("");
+  const [amount, setAmount] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [tone, setTone] = useState<Tone>("Friendly");
+  const [hasInvoice, setHasInvoice] = useState<boolean | null>(null);
 
-  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "";
+  // Auth (post-magic)
+  const [authMode, setAuthMode] = useState<"signup" | "signin">("signup");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [persisting, setPersisting] = useState(false);
 
-  function canAdvance() {
-    if (step === 0) return selected0.size > 0 || custom0.trim().length > 0;
-    if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
-    if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
-    return step < TOTAL_STEPS;
-  }
-
-  function next() { setStep((s) => s + 1); }
-  function back() { if (step > 0) setStep((s) => s - 1); }
-
-  function finish() {
-    completeOnboarding();
-    navigate("/dashboard", { replace: true });
-  }
-
-  function makeToggle(setter: React.Dispatch<React.SetStateAction<Set<string>>>) {
-    return (id: string) => {
-      setter((prev) => {
-        const n = new Set(prev);
-        if (n.has(id)) n.delete(id); else n.add(id);
-        return n;
-      });
-    };
-  }
-
-  // Generate AI personalization when entering step 3
+  // If already signed-in & onboarded, kick to dashboard.
   useEffect(() => {
-    if (step !== 3 || personalization || personalizing) return;
+    if (isAuthenticated && hasCompletedOnboarding) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [isAuthenticated, hasCompletedOnboarding, navigate]);
+
+  // After signup/signin during onboarding, persist demo invoice + finish.
+  useEffect(() => {
+    if (step !== "auth" || !user) return;
     let cancelled = false;
     (async () => {
-      setPersonalizing(true);
-      setPersonalizationError(null);
-      const feelings = Array.from(selected0).map((id) => Q0.options.find((o) => o.id === id)?.label || id);
-      const worries = Array.from(selected1).map((id) => Q1.options.find((o) => o.id === id)?.label || id);
-      const goals = Array.from(selected2).map((id) => Q2.options.find((o) => o.id === id)?.label || id);
+      setPersisting(true);
       try {
-        const { data, error } = await supabase.functions.invoke("generate-personalization", {
-          body: {
-            feelings, worries, goals,
-            custom: { feelings: custom0, worries: custom1, goals: custom2 },
-            firstName,
-          },
-        });
-        if (cancelled) return;
-        if (error || data?.error) {
-          setPersonalizationError(data?.error || error?.message || "Couldn't personalize right now.");
-        } else {
-          setPersonalization(data);
-        }
-      } catch (e) {
-        if (!cancelled) setPersonalizationError("Couldn't personalize right now.");
+        await persistPendingInvoice(user.id);
+        await completeOnboarding();
       } finally {
-        if (!cancelled) setPersonalizing(false);
+        if (!cancelled) {
+          setPersisting(false);
+          setStep("done");
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [step]);
+  }, [step, user, completeOnboarding]);
 
+  const draft = useMemo(() => {
+    const amt = parseFloat(amount) || 0;
+    return buildMessage(client || "Alex", amt, dueDate, tone);
+  }, [client, amount, dueDate, tone]);
 
-  function renderCta() {
-    if (step < 3) {
-      return (
-        <button
-          onClick={next}
-          disabled={!canAdvance()}
-          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          That's me <ArrowRight className="w-4 h-4" />
-        </button>
-      );
+  const detailsValid = client.trim().length > 0 && parseFloat(amount) > 0 && !!dueDate;
+
+  function goLandingNext() { setStep("qualify"); }
+  function goQualify(answer: boolean) {
+    setHasInvoice(answer);
+    if (answer) setStep("details");
+    else {
+      // Pre-fill a sample so the magic moment still works
+      setClient("Alex");
+      setAmount("1200");
+      const d = new Date(); d.setDate(d.getDate() - 5);
+      setDueDate(d.toISOString().slice(0, 10));
+      setStep("magic");
     }
-    if (step === 3) {
-      return (
-        <button onClick={next} className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-          Show me how <ArrowRight className="w-4 h-4" />
-        </button>
-      );
+  }
+  function goDetailsNext() {
+    if (!detailsValid) return;
+    setStep("magic");
+  }
+
+  function handleSendNow() {
+    // Stash the demo for post-auth persistence, then prompt sign-in.
+    const amt = parseFloat(amount) || 0;
+    savePendingInvoice({
+      client: client.trim() || "Alex",
+      amount: amt,
+      dueDate: dueDate || new Date().toISOString().slice(0, 10),
+      tone,
+      message: draft.message,
+      subject: draft.subject,
+    });
+    setStep("auth");
+  }
+
+  async function handleGoogle() {
+    setGoogleLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
+      if (result.error) {
+        toast.error("Google sign-in failed: " + result.error.message);
+        setGoogleLoading(false);
+      }
+    } catch {
+      toast.error("Google sign-in failed");
+      setGoogleLoading(false);
     }
-    if (step === 4) {
-      return (
-        <button onClick={next} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-          Continue
-        </button>
-      );
+  }
+
+  async function handleEmailAuth(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email || !password || (authMode === "signup" && !name.trim())) {
+      toast.error("Please fill in all fields");
+      return;
     }
+    if (authMode === "signup" && !validatePassword(password).isValid) {
+      toast.error("Password doesn't meet requirements");
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      if (authMode === "signup") {
+        const { error } = await supabase.auth.signUp({
+          email, password,
+          options: { data: { full_name: name.trim() }, emailRedirectTo: window.location.origin },
+        });
+        if (error) { toast.error(error.message); setAuthLoading(false); return; }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) { toast.error(error.message); setAuthLoading(false); return; }
+      }
+      // Effect above will pick up `user` and persist + advance.
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      setAuthLoading(false);
+    }
+  }
+
+  function handleFinish() {
+    clearPendingInvoice();
+    navigate("/dashboard", { replace: true });
+  }
+
+  // ------- Renders -------
+
+  if (step === "landing") {
     return (
-      <button onClick={finish} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-        Go to Dashboard
-      </button>
+      <Shell>
+        <div className="flex-1 flex flex-col justify-center text-center px-2">
+          <h1 className="text-[34px] font-bold text-foreground leading-[1.1] tracking-tight">
+            Following up on payments<br />shouldn't feel this hard.
+          </h1>
+          <p className="mt-5 text-[15px] text-muted-foreground leading-relaxed">
+            We'll handle what to say, how to say it, and when to send.
+          </p>
+        </div>
+        <div className="pb-2">
+          <PrimaryButton onClick={goLandingNext}>Start</PrimaryButton>
+          <p className="text-center text-[12px] text-muted-foreground mt-3">Takes ~60 seconds</p>
+        </div>
+      </Shell>
     );
   }
 
+  if (step === "qualify") {
+    return (
+      <Shell onBack={() => setStep("landing")}>
+        <div className="flex-1 flex flex-col justify-center">
+          <h2 className="text-[26px] font-bold text-foreground leading-tight tracking-tight">
+            Do you have a payment you're waiting on right now?
+          </h2>
+          <p className="mt-3 text-[14px] text-muted-foreground">
+            We'll use this to set up your first follow-up.
+          </p>
+          <div className="mt-8 flex flex-col gap-3">
+            <ChoiceButton onClick={() => goQualify(true)}>Yes, I do</ChoiceButton>
+            <ChoiceButton onClick={() => goQualify(false)} variant="ghost">Not right now</ChoiceButton>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (step === "details") {
+    return (
+      <Shell onBack={() => setStep("qualify")}>
+        <div className="flex-1 flex flex-col">
+          <h2 className="text-[26px] font-bold text-foreground leading-tight tracking-tight">Let's set it up</h2>
+          <p className="mt-2 text-[14px] text-muted-foreground">A few quick details — no signup needed.</p>
+
+          <div className="mt-7 flex flex-col gap-4">
+            <Field label="Client name">
+              <input
+                value={client} onChange={(e) => setClient(e.target.value)}
+                placeholder="e.g. Acme Inc."
+                className="w-full bg-transparent px-3.5 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+              />
+            </Field>
+            <Field label="Amount (USD)">
+              <input
+                type="number" inputMode="decimal" value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="1200"
+                className="w-full bg-transparent px-3.5 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+              />
+            </Field>
+            <Field label="Due date">
+              <input
+                type="date" value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="w-full bg-transparent px-3.5 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+              />
+            </Field>
+          </div>
+        </div>
+        <PrimaryButton onClick={goDetailsNext} disabled={!detailsValid}>
+          Create follow-up
+        </PrimaryButton>
+      </Shell>
+    );
+  }
+
+  if (step === "magic") {
+    return (
+      <Shell onBack={() => setStep(hasInvoice ? "details" : "qualify")}>
+        <div className="flex-1 flex flex-col overflow-y-auto">
+          <span className="text-[11px] font-semibold text-primary uppercase tracking-wider">Ready to send</span>
+          <h2 className="mt-1 text-[24px] font-bold text-foreground leading-tight tracking-tight">
+            Here's your follow-up
+          </h2>
+
+          {/* Tone selector */}
+          <div className="mt-5 flex gap-2 flex-wrap">
+            {TONES.map((t) => (
+              <button
+                key={t}
+                onClick={() => setTone(t)}
+                className={`px-3.5 py-1.5 rounded-full text-[12px] font-semibold border transition-colors ${
+                  tone === t ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {/* Message card */}
+          <div className="mt-4 rounded-2xl border border-border bg-card p-4">
+            <div className="flex items-center gap-2 pb-3 border-b border-border">
+              <Mail className="w-4 h-4 text-muted-foreground" />
+              <p className="text-[12px] font-medium text-muted-foreground truncate">{draft.subject}</p>
+            </div>
+            <p className="mt-3 text-[14px] text-foreground leading-relaxed whitespace-pre-wrap">
+              {draft.message}
+            </p>
+          </div>
+
+          {/* System promise */}
+          <div className="mt-4 flex items-start gap-2.5 p-3 rounded-xl bg-accent/50 border border-accent">
+            <Clock className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+            <p className="text-[12.5px] text-foreground leading-relaxed">
+              If there's no reply, we'll follow up again in <strong>3 days</strong> — slightly firmer.
+            </p>
+          </div>
+        </div>
+        <PrimaryButton onClick={handleSendNow}>Send now</PrimaryButton>
+      </Shell>
+    );
+  }
+
+  if (step === "auth") {
+    const isSignup = authMode === "signup";
+    return (
+      <Shell onBack={persisting ? undefined : () => setStep("magic")}>
+        {persisting ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center">
+            <Loader2 className="w-7 h-7 animate-spin text-primary" />
+            <p className="mt-4 text-[14px] text-muted-foreground">Sending your follow-up…</p>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col overflow-y-auto">
+            <h2 className="text-[24px] font-bold text-foreground leading-tight tracking-tight">
+              One quick step before we send
+            </h2>
+            <p className="mt-2 text-[14px] text-muted-foreground">
+              Create your account so we can send this from your email and track replies.
+            </p>
+
+            <button
+              onClick={handleGoogle}
+              disabled={googleLoading || authLoading}
+              className="mt-6 w-full flex items-center justify-center gap-3 bg-card border border-border rounded-full py-3.5 active:scale-[0.98] transition-transform disabled:opacity-60"
+            >
+              {googleLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <GoogleIcon className="w-5 h-5" />}
+              <span className="text-[14px] font-medium text-foreground">
+                {isSignup ? "Continue with Google" : "Sign in with Google"}
+              </span>
+            </button>
+
+            <div className="flex items-center gap-3 mt-6">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-[11px] text-muted-foreground">or with email</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+
+            <form onSubmit={handleEmailAuth} className="mt-5 flex flex-col gap-3">
+              {isSignup && (
+                <Field label="Full name" icon={<UserIcon className="w-4 h-4" />}>
+                  <input
+                    value={name} onChange={(e) => setName(e.target.value)}
+                    placeholder="Your full name" autoComplete="name"
+                    className="w-full bg-transparent pl-10 pr-3 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+                  />
+                </Field>
+              )}
+              <Field label="Email" icon={<Mail className="w-4 h-4" />}>
+                <input
+                  type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com" autoComplete="email"
+                  className="w-full bg-transparent pl-10 pr-3 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+                />
+              </Field>
+              <Field label="Password" icon={<Lock className="w-4 h-4" />}>
+                <input
+                  type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                  placeholder={isSignup ? "Create a strong password" : "Your password"}
+                  autoComplete={isSignup ? "new-password" : "current-password"}
+                  className="w-full bg-transparent pl-10 pr-3 py-3.5 text-[14px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+                />
+              </Field>
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="mt-2 flex items-center justify-center gap-2 bg-primary rounded-full py-3.5 active:scale-[0.98] transition-transform disabled:opacity-50"
+              >
+                {authLoading
+                  ? <Loader2 className="w-4 h-4 animate-spin text-primary-foreground" />
+                  : <span className="text-[14px] font-semibold text-primary-foreground">
+                      {isSignup ? "Create account & send" : "Sign in & send"}
+                    </span>}
+              </button>
+            </form>
+
+            <p className="text-center text-[12px] text-muted-foreground mt-5">
+              {isSignup ? "Already have an account?" : "New to ChaseHQ?"}{" "}
+              <button
+                onClick={() => setAuthMode(isSignup ? "signin" : "signup")}
+                className="font-semibold text-primary hover:underline"
+              >
+                {isSignup ? "Sign in" : "Create one"}
+              </button>
+            </p>
+          </div>
+        )}
+      </Shell>
+    );
+  }
+
+  // step === "done"
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
-      {/* Header with progress */}
-      <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-3 shrink-0">
-        <button
-          onClick={back}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-        >
-          <ChevronLeft className="w-4 h-4 text-muted-foreground" />
-        </button>
-        <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
-          <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+    <Shell>
+      <div className="flex-1 flex flex-col items-center justify-center text-center">
+        <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mb-5">
+          <Check className="w-8 h-8 text-primary-foreground" />
         </div>
-        <button
-          onClick={() => canAdvance() && next()}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${canAdvance() ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-        >
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-        </button>
+        <h2 className="text-[26px] font-bold text-foreground leading-tight tracking-tight">Sent</h2>
+        <p className="mt-3 text-[14px] text-muted-foreground max-w-xs">
+          We'll handle the next follow-up if needed.
+        </p>
       </div>
+      <PrimaryButton onClick={handleFinish}>Go to dashboard</PrimaryButton>
+    </Shell>
+  );
+}
 
-      {/* Content */}
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
-        <div className="bg-card border border-border rounded-2xl p-5 mt-2">
-          {step === 0 && <MultiSelectStep config={Q0} selected={selected0} onToggle={makeToggle(setSelected0)} customText={custom0} setCustomText={setCustom0} />}
-          {step === 1 && <MultiSelectStep config={Q1} selected={selected1} onToggle={makeToggle(setSelected1)} customText={custom1} setCustomText={setCustom1} />}
-          {step === 2 && <MultiSelectStep config={Q2} selected={selected2} onToggle={makeToggle(setSelected2)} customText={custom2} setCustomText={setCustom2} />}
+/* ---------- Small UI atoms ---------- */
 
-          {step === 3 && (
-            <div>
-              <div className="inline-flex items-center gap-1.5 bg-accent px-3 py-1.5 rounded-full mb-4">
-                <Sparkles className="w-3 h-3 text-primary" />
-                <span className="text-xs font-semibold text-accent-foreground uppercase tracking-wider">Made for you</span>
-              </div>
-
-              {personalizing && (
-                <div className="flex flex-col gap-3 py-2">
-                  <div className="h-7 w-3/4 rounded-md bg-muted animate-pulse" />
-                  <div className="h-4 w-full rounded bg-muted animate-pulse" />
-                  <div className="h-4 w-5/6 rounded bg-muted animate-pulse" />
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Personalizing for you…
-                  </div>
-                </div>
-              )}
-
-              {personalizationError && !personalizing && (
-                <div className="flex items-start gap-2 p-3 rounded-xl border border-border bg-muted">
-                  <AlertCircle className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-                  <p className="text-sm text-muted-foreground">{personalizationError} You can continue — we'll still tailor your follow-ups.</p>
-                </div>
-              )}
-
-              {personalization && !personalizing && (
-                <>
-                  <h2 className="text-2xl font-bold text-foreground leading-[1.15] tracking-tight mb-2">
-                    {personalization.headline}
-                  </h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-5">
-                    {personalization.subhead}
-                  </p>
-
-                  <div className="border border-border rounded-xl divide-y divide-border mb-4">
-                    <div className="px-4 py-2.5 bg-muted/50">
-                      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">What's weighing on you</span>
-                    </div>
-                    {personalization.painPoints.map((p, i) => (
-                      <div key={i} className="p-3.5">
-                        <p className="text-sm font-semibold text-foreground">{p.title}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{p.detail}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="border border-primary/30 bg-accent/40 rounded-xl divide-y divide-border">
-                    <div className="px-4 py-2.5">
-                      <span className="text-[11px] font-semibold text-primary uppercase tracking-wider">How ChaseHQ helps</span>
-                    </div>
-                    {personalization.benefits.map((b, i) => (
-                      <div key={i} className="p-3.5 flex gap-3">
-                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0 mt-0.5">
-                          <Check className="w-3 h-3 text-primary-foreground" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">{b.title}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{b.detail}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {step === 4 && (
-            <div>
-              <span className="text-xs font-semibold text-primary uppercase tracking-wider">How it removes the mental load</span>
-              <h2 className="text-xl font-bold text-foreground mt-2 mb-5">Three things you'll never have to do alone again</h2>
-              <div className="flex flex-col gap-4">
-                {[
-                  { icon: Mail, title: "Write the message", desc: "We draft every follow-up in your tone — Polite, Friendly, Firm or Urgent — so you never stare at a blank screen." },
-                  { icon: Clock, title: "Decide when to send", desc: "Set the schedule once in Settings. ChaseHQ tracks each invoice and queues the next reminder for you." },
-                  { icon: Zap, title: "Stay in control", desc: "Drafts wait in the invoice. Tweak the tone, then send via your connected Gmail — you stay in control." },
-                ].map((f) => (
-                  <div key={f.title} className="flex gap-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
-                      <f.icon className="w-5 h-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{f.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{f.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {step === 5 && (
-            <div className="text-center py-4">
-              <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
-                <Check className="w-8 h-8 text-primary-foreground" />
-              </div>
-              <h2 className="text-xl font-bold text-foreground mb-2">You're all set</h2>
-              <p className="text-sm text-muted-foreground">
-                ChaseHQ will handle the follow-ups so you can focus on the work.
-              </p>
-            </div>
-          )}
-
-          {/* CTA sits directly below the user's responses */}
-          {renderCta()}
-        </div>
+function Shell({ children, onBack }: { children: React.ReactNode; onBack?: () => void }) {
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <div className="flex-1 flex flex-col max-w-sm w-full mx-auto px-7 pt-[max(env(safe-area-inset-top),24px)] pb-[max(env(safe-area-inset-bottom),24px)]">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="w-9 h-9 -ml-1 mb-2 flex items-center justify-center text-foreground active:scale-95 transition-transform"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+        )}
+        {children}
       </div>
+    </div>
+  );
+}
+
+function PrimaryButton({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-4 rounded-full font-semibold text-[15px] active:scale-[0.98] transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+    >
+      {children}
+      {!disabled && <ArrowRight className="w-4 h-4" />}
+    </button>
+  );
+}
+
+function ChoiceButton({ children, onClick, variant = "solid" }: { children: React.ReactNode; onClick: () => void; variant?: "solid" | "ghost" }) {
+  if (variant === "ghost") {
+    return (
+      <button
+        onClick={onClick}
+        className="w-full py-4 rounded-full font-semibold text-[15px] text-foreground border border-border bg-card active:scale-[0.98] transition-transform"
+      >
+        {children}
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={onClick}
+      className="w-full py-4 rounded-full font-semibold text-[15px] bg-primary text-primary-foreground active:scale-[0.98] transition-transform"
+    >
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, icon, children }: { label: string; icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="relative border border-border bg-card rounded-xl focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary">
+      <span className="absolute -top-2 left-3 px-1.5 bg-background text-[11px] font-medium text-muted-foreground">
+        {label}
+      </span>
+      {icon && (
+        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+          {icon}
+        </span>
+      )}
+      {children}
     </div>
   );
 }
