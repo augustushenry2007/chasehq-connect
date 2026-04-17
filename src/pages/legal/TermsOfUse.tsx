@@ -87,10 +87,25 @@ export default function TermsOfUse() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">8. Fees</h2>
+            <h2 className="text-lg font-semibold mb-2">8. Subscriptions, billing &amp; auto-renewal</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Pricing for paid plans, if any, will be disclosed at the point of purchase. Free
-              tiers may be modified or discontinued at our discretion with reasonable notice.
+              ChaseHQ Pro is offered as a monthly auto-renewing subscription at
+              $5.00 USD per month, with a 30-day free trial for new accounts.
+              Pricing may be displayed in your local currency on the App Store.
+            </p>
+            <ul className="text-sm text-muted-foreground leading-relaxed list-disc pl-5 space-y-1 mt-2">
+              <li>Payment is charged to your Apple ID at confirmation of purchase.</li>
+              <li>Your subscription automatically renews each month unless auto-renew is turned off at least 24 hours before the end of the current period.</li>
+              <li>Your account will be charged for renewal within 24 hours prior to the end of the current period at the then-current price.</li>
+              <li>You can manage and cancel your subscription at any time in your App Store account settings. Canceling stops future renewals; access continues until the end of the current paid period.</li>
+              <li>If you cancel during your free trial, you will not be charged. If you do not cancel before the trial ends, your subscription will begin and your Apple ID will be charged.</li>
+              <li>Refund requests are handled by Apple under their published refund policy.</li>
+            </ul>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-2">
+              ChaseHQ does not store payment card data. All billing on iOS is
+              processed by Apple. If you lose access due to a failed renewal,
+              your account remains read-only — your data is preserved and
+              becomes fully usable again once you resubscribe.
             </p>
           </section>
 

@@ -11,6 +11,7 @@ import {
   Plus, FileText, Sparkles, ArrowRight, Loader2, Settings as SettingsIcon,
 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
+import TrialBanner from "@/components/TrialBanner";
 import { toast } from "sonner";
 
 function StatCard({ label, value, sub, icon: Icon, iconColor, valueColor }: {
@@ -100,6 +101,7 @@ export default function DashboardScreen() {
 
   return (
     <div className="flex-1 overflow-auto pb-24">
+      <TrialBanner />
       <div className="px-5 pt-5">
         <h1 className="text-xl font-bold text-foreground">
           {isEmpty ? `Welcome, ${firstName}` : `Good morning, ${firstName}`}
