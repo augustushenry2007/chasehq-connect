@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.generate-personalization]
 verify_jwt = false
+
+[functions.apple-notifications]
+verify_jwt = false

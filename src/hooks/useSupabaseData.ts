@@ -96,7 +96,13 @@ export async function sendFollowupEmail(
       return false;
     }
 
-    if (data.error) {
+    if (data?.error) {
+      if (data.error === "subscription_required") {
+        toast.error(data.message || "Subscribe to keep sending follow-ups.");
+        // Best-effort redirect to paywall
+        if (typeof window !== "undefined") window.location.assign("/paywall");
+        return false;
+      }
       if (data.error.includes("Gmail access token") || data.error.includes("Gmail token")) {
         toast.error("Gmail not connected. Connect Gmail in Settings to send emails.");
       } else {

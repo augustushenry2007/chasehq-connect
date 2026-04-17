@@ -13,6 +13,8 @@ import SettingsScreen from "./pages/SettingsScreen";
 import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
 import TermsOfUse from "./pages/legal/TermsOfUse";
 import NotFound from "./pages/NotFound";
+import PaywallScreen from "./pages/PaywallScreen";
+import BillingScreen from "./pages/BillingScreen";
 
 const App = () => (
   <AppProvider>
@@ -29,6 +31,8 @@ const App = () => (
             <Route path="/settings" element={<SettingsScreen />} />
           </Route>
           <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
+          <Route path="/paywall" element={<PaywallScreen />} />
+          <Route path="/settings/billing" element={<BillingScreen />} />
           <Route path="/legal/privacy" element={<PrivacyPolicy />} />
           <Route path="/legal/terms" element={<TermsOfUse />} />
           <Route path="*" element={<NotFound />} />

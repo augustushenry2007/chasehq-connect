@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { RefreshCw, Send, Loader2, AlertTriangle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { RefreshCw, Send, Loader2, AlertTriangle, Lock } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
 import { generateFollowup, sendFollowupEmail } from "@/hooks/useSupabaseData";
 import { getDefaultDraft, type Tone } from "./DraftTemplates";
+import { useEntitlement } from "@/hooks/useEntitlement";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +20,8 @@ import {
 const TONES: Tone[] = ["Polite", "Friendly", "Firm", "Urgent", "Final Notice"];
 
 export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
+  const navigate = useNavigate();
+  const { canSend, loading: entLoading } = useEntitlement();
   const [tone, setTone] = useState<Tone>("Friendly");
   const [currentSubject, setCurrentSubject] = useState("");
   const [currentDraft, setCurrentDraft] = useState("");
@@ -30,6 +34,7 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
   const userEditedRef = useRef(false);
 
   const isFinalNotice = tone === "Final Notice";
+  const locked = !entLoading && !canSend;
 
   // Load template when tone changes (resets AI flag and discards manual edits)
   useEffect(() => {
@@ -78,6 +83,10 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
   }
 
   function handleSendClick() {
+    if (locked) {
+      navigate("/paywall");
+      return;
+    }
     if (isFinalNotice) {
       setConfirmFinalOpen(true);
     } else {
@@ -182,6 +191,10 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
           ) : sending ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" /> Sending…
+            </>
+          ) : locked ? (
+            <>
+              <Lock className="w-4 h-4" /> Unlock to send
             </>
           ) : (
             <>

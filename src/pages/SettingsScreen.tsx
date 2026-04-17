@@ -3,12 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { useApp, type ScheduleRow } from "@/context/AppContext";
 import {
   ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2, Mail, Loader2,
-  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, Server,
+  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, Server, CreditCard, ChevronRight,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { useInvoices } from "@/hooks/useSupabaseData";
+import { useEntitlement } from "@/hooks/useEntitlement";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {
@@ -320,6 +321,7 @@ export default function SettingsScreen() {
   const navigate = useNavigate();
   const { user, fullName, notifications, schedule, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
   const { invoices } = useInvoices();
+  const ent = useEntitlement();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
   const { signedInWithGoogle } = useGmailConnection();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -376,7 +378,7 @@ export default function SettingsScreen() {
 
         {/* ACCOUNT */}
         <SectionLabel>Account</SectionLabel>
-        <div className="bg-card border border-border rounded-2xl p-4 mb-5">
+        <div className="bg-card border border-border rounded-2xl p-4 mb-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
               <UserIcon className="w-5 h-5 text-primary" />
@@ -388,6 +390,28 @@ export default function SettingsScreen() {
             </div>
           </div>
         </div>
+
+        <button
+          onClick={() => navigate("/settings/billing")}
+          className="w-full bg-card border border-border rounded-2xl p-4 mb-5 flex items-center gap-3 hover:border-primary/40 transition-colors"
+        >
+          <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
+            <CreditCard className="w-5 h-5 text-primary" />
+          </div>
+          <div className="flex-1 min-w-0 text-left">
+            <p className="text-sm font-semibold text-foreground">Billing</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {ent.loading ? "Loading…"
+                : ent.isTrialing ? `Free trial • ${ent.daysLeftInTrial ?? 0} day${ent.daysLeftInTrial === 1 ? "" : "s"} left`
+                : ent.isActive ? `Active • renews ${ent.nextBillingDate?.toLocaleDateString("en-US", { month: "short", day: "numeric" }) ?? ""}`
+                : ent.isPastDue ? "Payment past due"
+                : ent.status === "canceled" ? "Canceled"
+                : ent.status === "expired" ? "Expired — start free trial"
+                : "Start your 30-day free trial"}
+            </p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-muted-foreground" />
+        </button>
 
         {/* PREFERENCES */}
         <SectionLabel>Preferences</SectionLabel>
