@@ -104,8 +104,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
       if (cancelled) return;
       const metaName = (user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name || null;
+      const testing = isTestingMode();
       if (data) {
-        setHasCompletedOnboarding(!!data.onboarding_completed);
+        setHasCompletedOnboarding(testing ? false : !!data.onboarding_completed);
         const resolved = (data as any).full_name || metaName || null;
         setFullName(resolved);
         if (!(data as any).full_name && metaName) {
