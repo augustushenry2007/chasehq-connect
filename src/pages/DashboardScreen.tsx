@@ -1,26 +1,16 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useInvoices } from "@/hooks/useSupabaseData";
-import { ACTIVITY, getStats, getChaseFeed, formatUSD } from "@/lib/data";
+import { getStats, getChaseFeed, formatUSD } from "@/lib/data";
 import { useApp } from "@/context/AppContext";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
 import {
-  TrendingUp, AlertTriangle, CheckCircle, Mail, Eye, Clock, MessageSquare, Check,
+  TrendingUp, AlertTriangle, CheckCircle, Mail, Check,
   Plus, FileText, Sparkles, ArrowRight, Loader2,
 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 import { toast } from "sonner";
-import type { ActivityType } from "@/lib/data";
-
-const ACTIVITY_ICON: Record<ActivityType, { bg: string; icon: React.ElementType; color: string }> = {
-  payment: { bg: "#DCFCE7", icon: Check, color: "#16A34A" },
-  reminder: { bg: "#DBEAFE", icon: Mail, color: "#2563EB" },
-  escalation: { bg: "#FEE2E2", icon: AlertTriangle, color: "#DC2626" },
-  view: { bg: "#F3E8FF", icon: Eye, color: "#7C3AED" },
-  overdue: { bg: "#FEF3C7", icon: Clock, color: "#D97706" },
-  reply: { bg: "#DBEAFE", icon: MessageSquare, color: "#2563EB" },
-};
 
 function StatCard({ label, value, sub, icon: Icon, iconColor, valueColor }: {
   label: string; value: string; sub: string; icon: React.ElementType; iconColor: string; valueColor?: string;
@@ -224,33 +214,6 @@ export default function DashboardScreen() {
             </div>
           )}
 
-          {/* Recent Activity (only when there is real activity) */}
-          {ACTIVITY.length > 0 && (
-            <div className="mt-4 mx-5 bg-card border border-border rounded-2xl overflow-hidden mb-4">
-              <div className="px-4 pt-4 pb-2">
-                <h2 className="text-base font-semibold text-foreground">Recent Activity</h2>
-                <p className="text-xs text-muted-foreground">Latest updates</p>
-              </div>
-              {ACTIVITY.map((item, i) => {
-                const cfg = ACTIVITY_ICON[item.type];
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => navigate(`/invoice/${item.invoiceId}`)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 text-left ${i < ACTIVITY.length - 1 ? "border-b border-border" : ""}`}
-                  >
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: cfg.bg }}>
-                      <cfg.icon className="w-3.5 h-3.5" style={{ color: cfg.color }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-foreground truncate">{item.description}</p>
-                      <p className="text-xs text-muted-foreground">{item.client} · {item.timeAgo}</p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
         </>
       )}
 

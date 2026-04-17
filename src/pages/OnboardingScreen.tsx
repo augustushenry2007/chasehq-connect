@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
-import { ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles, AlertCircle, Loader2 } from "lucide-react";
 
 const Q0 = {
   label: "Just checking in",
@@ -78,9 +79,16 @@ function MultiSelectStep({ config, selected, onToggle, customText, setCustomText
   );
 }
 
+interface Personalization {
+  headline: string;
+  subhead: string;
+  painPoints: { title: string; detail: string }[];
+  benefits: { title: string; detail: string }[];
+}
+
 export default function OnboardingScreen() {
   const navigate = useNavigate();
-  const { completeOnboarding } = useApp();
+  const { completeOnboarding, user } = useApp();
 
   const [step, setStep] = useState(0);
   const [selected0, setSelected0] = useState<Set<string>>(new Set());
@@ -89,8 +97,13 @@ export default function OnboardingScreen() {
   const [custom0, setCustom0] = useState("");
   const [custom1, setCustom1] = useState("");
   const [custom2, setCustom2] = useState("");
+  const [personalization, setPersonalization] = useState<Personalization | null>(null);
+  const [personalizing, setPersonalizing] = useState(false);
+  const [personalizationError, setPersonalizationError] = useState<string | null>(null);
 
   const progress = (step / TOTAL_STEPS) * 100;
+
+  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "";
 
   function canAdvance() {
     if (step === 0) return selected0.size > 0 || custom0.trim().length > 0;
@@ -117,16 +130,39 @@ export default function OnboardingScreen() {
     };
   }
 
-  function buildFeelingLabel() {
-    const labels = Array.from(selected0).map((id) => Q0.options.find((o) => o.id === id)?.label.toLowerCase() ?? id);
-    if (custom0.trim()) labels.push(custom0.trim().toLowerCase());
-    if (labels.length === 0) return "";
-    if (labels.length === 1) return labels[0];
-    if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
-    return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
-  }
+  // Generate AI personalization when entering step 3
+  useEffect(() => {
+    if (step !== 3 || personalization || personalizing) return;
+    let cancelled = false;
+    (async () => {
+      setPersonalizing(true);
+      setPersonalizationError(null);
+      const feelings = Array.from(selected0).map((id) => Q0.options.find((o) => o.id === id)?.label || id);
+      const worries = Array.from(selected1).map((id) => Q1.options.find((o) => o.id === id)?.label || id);
+      const goals = Array.from(selected2).map((id) => Q2.options.find((o) => o.id === id)?.label || id);
+      try {
+        const { data, error } = await supabase.functions.invoke("generate-personalization", {
+          body: {
+            feelings, worries, goals,
+            custom: { feelings: custom0, worries: custom1, goals: custom2 },
+            firstName,
+          },
+        });
+        if (cancelled) return;
+        if (error || data?.error) {
+          setPersonalizationError(data?.error || error?.message || "Couldn't personalize right now.");
+        } else {
+          setPersonalization(data);
+        }
+      } catch (e) {
+        if (!cancelled) setPersonalizationError("Couldn't personalize right now.");
+      } finally {
+        if (!cancelled) setPersonalizing(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step]);
 
-  const feelingLabel = buildFeelingLabel();
 
   function renderCta() {
     if (step < 3) {
@@ -191,26 +227,69 @@ export default function OnboardingScreen() {
 
           {step === 3 && (
             <div>
-              {feelingLabel && (
-                <div className="inline-block bg-accent px-3 py-1.5 rounded-full mb-4">
-                  <span className="text-xs font-medium text-accent-foreground">You said you feel {feelingLabel}</span>
+              <div className="inline-flex items-center gap-1.5 bg-accent px-3 py-1.5 rounded-full mb-4">
+                <Sparkles className="w-3 h-3 text-primary" />
+                <span className="text-xs font-semibold text-accent-foreground uppercase tracking-wider">Made for you</span>
+              </div>
+
+              {personalizing && (
+                <div className="flex flex-col gap-3 py-2">
+                  <div className="h-7 w-3/4 rounded-md bg-muted animate-pulse" />
+                  <div className="h-4 w-full rounded bg-muted animate-pulse" />
+                  <div className="h-4 w-5/6 rounded bg-muted animate-pulse" />
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Personalizing for you…
+                  </div>
                 </div>
               )}
-              <p className="text-sm text-muted-foreground mb-5">
-                {selected0.size + (custom0.trim() ? 1 : 0) > 1
-                  ? "You're not carrying just one thing. That combination makes sense — and it's more common than you'd think."
-                  : selected0.has("anxious") ? "That anxiety isn't a flaw. It means you care about how you come across."
-                  : selected0.has("guilty") ? "That guilt is real. But you did the work — you've already earned this."
-                  : selected0.has("frustrated") ? "That frustration makes sense. You shouldn't have to fight this hard to get paid."
-                  : "That makes sense. You're not alone in this struggle."}
-              </p>
-              <div className="bg-dark text-primary-foreground rounded-xl p-5 mb-4">
-                <p className="text-base font-bold mb-1">The real problem isn't you.</p>
-                <p className="text-sm opacity-80">It's deciding what to say, when to say it, and how.</p>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                And that's where you stop. You don't make those decisions anymore — we do.
-              </p>
+
+              {personalizationError && !personalizing && (
+                <div className="flex items-start gap-2 p-3 rounded-xl border border-border bg-muted">
+                  <AlertCircle className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-sm text-muted-foreground">{personalizationError} You can continue — we'll still tailor your follow-ups.</p>
+                </div>
+              )}
+
+              {personalization && !personalizing && (
+                <>
+                  <h2 className="text-2xl font-bold text-foreground leading-[1.15] tracking-tight mb-2">
+                    {personalization.headline}
+                  </h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-5">
+                    {personalization.subhead}
+                  </p>
+
+                  <div className="border border-border rounded-xl divide-y divide-border mb-4">
+                    <div className="px-4 py-2.5 bg-muted/50">
+                      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">What's weighing on you</span>
+                    </div>
+                    {personalization.painPoints.map((p, i) => (
+                      <div key={i} className="p-3.5">
+                        <p className="text-sm font-semibold text-foreground">{p.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{p.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="border border-primary/30 bg-accent/40 rounded-xl divide-y divide-border">
+                    <div className="px-4 py-2.5">
+                      <span className="text-[11px] font-semibold text-primary uppercase tracking-wider">How ChaseHQ helps</span>
+                    </div>
+                    {personalization.benefits.map((b, i) => (
+                      <div key={i} className="p-3.5 flex gap-3">
+                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0 mt-0.5">
+                          <Check className="w-3 h-3 text-primary-foreground" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{b.title}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{b.detail}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
