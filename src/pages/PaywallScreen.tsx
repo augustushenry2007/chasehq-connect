@@ -22,7 +22,17 @@ export default function PaywallScreen() {
 
   async function handleStartTrial() {
     setBusy("trial");
-    const { data, error } = await supabase.functions.invoke("start-trial");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      setBusy(null);
+      toast.error("Please sign in again");
+      navigate("/auth");
+      return;
+    }
+    const { data, error } = await supabase.functions.invoke("start-trial", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     setBusy(null);
     if (error || (data as any)?.error) {
       toast.error((data as any)?.error || error?.message || "Could not start trial");
@@ -41,8 +51,11 @@ export default function PaywallScreen() {
       if (!result.canceled) toast.error(result.error);
       return;
     }
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
     const { data, error } = await supabase.functions.invoke("validate-apple-receipt", {
       body: { receipt: result.receipt, productId: result.productId, mock: result.mock },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     setBusy(null);
     if (error || (data as any)?.error) {
@@ -62,8 +75,11 @@ export default function PaywallScreen() {
       toast.error(result.error);
       return;
     }
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
     const { data, error } = await supabase.functions.invoke("validate-apple-receipt", {
       body: { receipt: result.receipt, productId: result.productId, mock: result.mock, restore: true },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     setBusy(null);
     if (error || (data as any)?.error) {
