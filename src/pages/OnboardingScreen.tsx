@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
+import { isTestingMode } from "@/lib/testingMode";
 import { GoogleIcon } from "@/components/GoogleIcon";
 import { validatePassword } from "@/lib/passwordValidation";
 import { toast } from "sonner";
@@ -106,6 +107,7 @@ interface PersistedState {
 }
 
 function loadState(): Partial<PersistedState> {
+  if (isTestingMode()) return {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -144,6 +146,7 @@ export default function OnboardingScreen() {
 
   // Persist progress so authentication round-trip doesn't lose context
   useEffect(() => {
+    if (isTestingMode()) return;
     const data: PersistedState = {
       step,
       selected0: Array.from(selected0),
