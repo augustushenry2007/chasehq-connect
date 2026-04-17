@@ -20,6 +20,8 @@ import {
 const TONES: Tone[] = ["Polite", "Friendly", "Firm", "Urgent", "Final Notice"];
 
 export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
+  const navigate = useNavigate();
+  const { canSend, loading: entLoading } = useEntitlement();
   const [tone, setTone] = useState<Tone>("Friendly");
   const [currentSubject, setCurrentSubject] = useState("");
   const [currentDraft, setCurrentDraft] = useState("");
@@ -32,6 +34,7 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
   const userEditedRef = useRef(false);
 
   const isFinalNotice = tone === "Final Notice";
+  const locked = !entLoading && !canSend;
 
   // Load template when tone changes (resets AI flag and discards manual edits)
   useEffect(() => {
@@ -80,6 +83,10 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
   }
 
   function handleSendClick() {
+    if (locked) {
+      navigate("/paywall");
+      return;
+    }
     if (isFinalNotice) {
       setConfirmFinalOpen(true);
     } else {
