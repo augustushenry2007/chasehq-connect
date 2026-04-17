@@ -58,7 +58,7 @@ function GetStartedStep({
 export default function DashboardScreen() {
   const navigate = useNavigate();
   const { user, fullName } = useApp();
-  const { invoices, refetch } = useInvoices();
+  const { invoices, loading, refetch } = useInvoices();
   const { connectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
   const { canSend, hasGmail, hasSmtp } = useSendingMailbox();
   const [showNew, setShowNew] = useState(false);
@@ -67,6 +67,24 @@ export default function DashboardScreen() {
   const stats = getStats(invoices);
   const chaseFeed = getChaseFeed(invoices);
   const isEmpty = invoices.length === 0;
+
+  if (loading) {
+    return (
+      <div className="flex-1 overflow-hidden pb-24">
+        <div className="px-5 pt-5">
+          <div className="h-6 w-48 bg-muted rounded-md animate-pulse" />
+          <div className="h-4 w-64 bg-muted rounded-md animate-pulse mt-2" />
+          <div className="flex gap-3 mt-5">
+            <div className="flex-1 h-24 bg-card border border-border rounded-2xl animate-pulse" />
+            <div className="flex-1 h-24 bg-card border border-border rounded-2xl animate-pulse" />
+          </div>
+          <div className="mt-3 h-24 bg-card border border-border rounded-2xl animate-pulse" />
+          <div className="mt-5 h-40 bg-card border border-border rounded-2xl animate-pulse" />
+          <div className="mt-4 h-32 bg-card border border-border rounded-2xl animate-pulse" />
+        </div>
+      </div>
+    );
+  }
 
   const firstName = fullName?.split(" ")[0] || user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
 
