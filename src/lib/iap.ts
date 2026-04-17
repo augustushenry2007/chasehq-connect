@@ -49,8 +49,9 @@ export async function restorePurchases(): Promise<PurchaseResult> {
     return { ok: true, receipt: `MOCK_RESTORE_${Date.now()}`, productId: PRODUCT_ID, mock: true };
   }
   try {
+    const pkg = "@capgo/capacitor-purchases";
     // @ts-ignore
-    const mod = await import("@capgo/capacitor-purchases");
+    const mod = await import(/* @vite-ignore */ pkg);
     const Purchases = (mod as any).Purchases ?? (mod as any).default;
     const result = await Purchases.restorePurchases();
     const receipt = result?.transactions?.[0]?.receipt || result?.receipt || "";
