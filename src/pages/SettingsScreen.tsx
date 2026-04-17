@@ -32,7 +32,7 @@ const SMTP_PRESETS: SmtpPreset[] = [
   { id: "custom", label: "Custom SMTP", host: "", port: 587 },
 ];
 
-type SectionKey = "notifications" | "schedule" | null;
+type SectionKey = "notifications" | "schedule" | "data" | null;
 
 function CollapsibleSection({ title, subtitle, isOpen, onToggle, children }: {
   title: string; subtitle: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode;
