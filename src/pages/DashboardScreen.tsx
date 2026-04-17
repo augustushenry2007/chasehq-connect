@@ -38,9 +38,9 @@ function StatCard({ label, value, sub, icon: Icon, iconColor, valueColor }: {
 }
 
 function GetStartedStep({
-  done, title, description, action, onAction, icon: Icon,
+  done, title, description, action, onAction, loading, icon: Icon,
 }: {
-  done: boolean; title: string; description: string; action: string; onAction: () => void; icon: React.ElementType;
+  done: boolean; title: string; description: string; action: string; onAction: () => void; loading?: boolean; icon: React.ElementType;
 }) {
   return (
     <div className={`flex items-start gap-3 p-4 rounded-xl border ${done ? "bg-accent/40 border-accent" : "bg-card border-border"}`}>
@@ -53,9 +53,10 @@ function GetStartedStep({
         {!done && (
           <button
             onClick={onAction}
-            className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-primary"
+            disabled={loading}
+            className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-primary disabled:opacity-50"
           >
-            {action} <ArrowRight className="w-3 h-3" />
+            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <>{action} <ArrowRight className="w-3 h-3" /></>}
           </button>
         )}
       </div>
@@ -67,14 +68,25 @@ export default function DashboardScreen() {
   const navigate = useNavigate();
   const { user } = useApp();
   const { invoices, refetch } = useInvoices();
-  const { gmail } = useGmailConnection();
+  const { gmail, connectGmail } = useGmailConnection();
   const [showNew, setShowNew] = useState(false);
+  const [connectingGmail, setConnectingGmail] = useState(false);
 
   const stats = getStats(invoices);
   const chaseFeed = getChaseFeed(invoices);
   const isEmpty = invoices.length === 0;
 
   const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
+
+  async function handleConnectGmail() {
+    setConnectingGmail(true);
+    const result = await connectGmail();
+    if (result.error) {
+      toast.error(result.error);
+      setConnectingGmail(false);
+    }
+    // On success, browser redirects to Google
+  }
 
   return (
     <div className="flex-1 overflow-auto pb-24">
