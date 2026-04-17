@@ -47,24 +47,46 @@ export function useGmailConnection() {
     fetchConnection();
   }, [fetchConnection]);
 
-  // Check URL params for gmail_connected callback
+  // Check URL params for gmail_connected / gmail_error callback
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const url = new URL(window.location.href);
     if (params.get("gmail_connected") === "true") {
       fetchConnection();
-      const url = new URL(window.location.href);
       url.searchParams.delete("gmail_connected");
+      window.history.replaceState({}, "", url.toString());
+    }
+    const err = params.get("gmail_error");
+    if (err) {
+      // Lazy import to avoid circular concerns
+      import("sonner").then(({ toast }) => {
+        toast.error("Gmail connection failed", {
+          description: err === "redirect_uri_mismatch"
+            ? "The OAuth redirect URI isn't whitelisted. Add the callback URL in Google Cloud Console."
+            : decodeURIComponent(err),
+        });
+      });
+      url.searchParams.delete("gmail_error");
       window.history.replaceState({}, "", url.toString());
     }
   }, [fetchConnection]);
 
   async function connectGmail(redirectPath?: string) {
     const path = redirectPath || window.location.pathname || "/dashboard";
+    // Ensure we have a fresh session token — invoke() doesn't always attach it.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      return { error: "Please sign in first to connect Gmail." };
+    }
     const { data, error } = await supabase.functions.invoke("gmail-oauth-start", {
       body: { redirectUri: window.location.origin + path },
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (error || (data as any)?.error) {
-      return { error: error?.message || (data as any)?.error || "Failed to start Gmail OAuth" };
+      const msg = error?.message || (data as any)?.error || "Failed to start Gmail OAuth";
+      console.error("connectGmail error:", msg, error, data);
+      return { error: msg };
     }
     if ((data as any)?.url) {
       window.location.href = (data as any).url;

@@ -12,7 +12,8 @@ export default function RootRedirect() {
     );
   }
 
-  if (!isAuthenticated) return <Navigate to="/auth" replace />;
+  // Unauthenticated users go through onboarding first (auth happens at the end).
+  if (!isAuthenticated) return <Navigate to="/onboarding" replace />;
   if (!hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
   return <Navigate to="/dashboard" replace />;
 }
