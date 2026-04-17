@@ -88,6 +88,13 @@ serve(async (req) => {
       });
     }
 
+    // Mark profile sender_type as gmail (overwrite 'none', preserve explicit 'smtp' choice)
+    await supabase
+      .from("profiles")
+      .update({ sender_type: "gmail" })
+      .eq("user_id", state.userId)
+      .in("sender_type", ["none", "gmail"]);
+
     return new Response(buildRedirectHtml(state.redirectUri, true, "Gmail connected successfully!"), {
       status: 200, headers: { "Content-Type": "text/html" },
     });
