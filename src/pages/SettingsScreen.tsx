@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { toast } from "sonner";
 
-type SectionKey = "profile" | "notifications" | "schedule" | null;
+type SectionKey = "notifications" | "schedule" | null;
 
 function CollapsibleSection({ title, subtitle, isOpen, onToggle, children }: {
   title: string; subtitle: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode;
@@ -21,53 +21,6 @@ function CollapsibleSection({ title, subtitle, isOpen, onToggle, children }: {
         {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
       </button>
       {isOpen && <div className="border-t border-border p-4">{children}</div>}
-    </div>
-  );
-}
-
-function ProfileSection({ profile, updateProfile }: {
-  profile: { name: string; email: string; paymentDetails: string }; updateProfile: (p: any) => void;
-}) {
-  const [name, setName] = useState(profile.name);
-  const [email, setEmail] = useState(profile.email);
-  const [saved, setSaved] = useState(false);
-
-  function handleSave() {
-    updateProfile({ name, email, paymentDetails: profile.paymentDetails });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  }
-
-  return (
-    <div className="flex flex-col gap-3.5">
-      <p className="text-xs text-muted-foreground -mt-1">
-        How you appear to clients in every follow-up email ChaseHQ sends on your behalf.
-      </p>
-      <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1 block">Display name</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Jamie Doe"
-          className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-        />
-        <p className="text-[11px] text-muted-foreground mt-1">Shown in the signature of every chase email.</p>
-      </div>
-      <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1 block">Reply-to email</label>
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@studio.co"
-          className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-        />
-        <p className="text-[11px] text-muted-foreground mt-1">Where client replies should land.</p>
-      </div>
-      <div className="flex justify-end">
-        <button onClick={handleSave} className={`px-5 py-2 rounded-xl text-sm font-semibold text-primary-foreground ${saved ? "bg-[#16A34A]" : "bg-primary"}`}>
-          {saved ? "Saved" : "Save"}
-        </button>
-      </div>
     </div>
   );
 }
@@ -172,7 +125,7 @@ function ScheduleSection({ schedule, updateSchedule }: { schedule: ScheduleRow[]
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
-  const { profile, notifications, schedule, updateProfile, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
+  const { notifications, schedule, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
   const { gmail, loading: gmailLoading, connectGmail, disconnectGmail } = useGmailConnection();
   const [gmailConnecting, setGmailConnecting] = useState(false);
@@ -241,10 +194,6 @@ export default function SettingsScreen() {
               )}
             </div>
           </div>
-
-          <CollapsibleSection title="Profile" subtitle={`${profile.name} · ${profile.email}`} isOpen={openSection === "profile"} onToggle={() => toggleSection("profile")}>
-            <ProfileSection profile={profile} updateProfile={updateProfile} />
-          </CollapsibleSection>
 
           <CollapsibleSection title="Notifications & Chasing" subtitle="Email alerts and auto-follow-up settings" isOpen={openSection === "notifications"} onToggle={() => toggleSection("notifications")}>
             <NotificationsSection notifications={notifications} updateNotifications={updateNotifications} />
