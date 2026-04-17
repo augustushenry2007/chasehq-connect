@@ -192,6 +192,10 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
             <>
               <Loader2 className="w-4 h-4 animate-spin" /> Sending…
             </>
+          ) : locked ? (
+            <>
+              <Lock className="w-4 h-4" /> Unlock to send
+            </>
           ) : (
             <>
               <Send className="w-4 h-4" /> {isFinalNotice ? "Send Final Notice" : "Send"}
