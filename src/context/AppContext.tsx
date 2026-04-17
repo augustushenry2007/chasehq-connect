@@ -124,7 +124,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   async function completeOnboarding() {
     setHasCompletedOnboarding(true);
-    if (user && !isDemoUser) {
+    if (user) {
       await supabase
         .from("profiles")
         .upsert({ user_id: user.id, onboarding_completed: true }, { onConflict: "user_id" });
@@ -133,7 +133,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   async function restartOnboarding() {
     setHasCompletedOnboarding(false);
-    if (user && !isDemoUser) {
+    if (user) {
       await supabase
         .from("profiles")
         .upsert({ user_id: user.id, onboarding_completed: false }, { onConflict: "user_id" });
