@@ -1,146 +1,120 @@
 
 
-Scoping decisions:
-- Drop Apple from this iteration (user revised to Google + email/password only).
-- Drop demo "quiz" button entirely.
-- Gmail send-only scope is already in place; adding read/reply detection requires `gmail.readonly` + a polling job. Will scope as Phase 2 mention only — not implementing inbox sync now (avoids scope creep + new cron infra).
-- SMTP fallback: implement send-only via `denomailer`. IMAP reply detection deferred (documented).
+Let me explore the relevant files first.
+<lov-tool-use id="toolu_vrtx_0195PYLBAQXz8weub9P1FBFF" name="code--view" integration-id="code" data="{\"file_path\": \"src/pages/InvoiceDetailScreen.tsx\"}">
+</lov-tool-use>
 
-## Plan
+<lov-tool-use id="toolu_vrtx_01TpmxuNZcCs5UbFD6i7USqf" name="code--view" integration-id="code" data="{\"file_path\": \"src/components/invoice/AIDraftComposer.tsx\"}">
+</lov-tool-use>
 
-### 1. Signup page redesign (`src/pages/AuthScreen.tsx`)
+<lov-tool-use id="toolu_vrtx_01VK7bP1oht7dtcyAwG4omyc" name="code--view" integration-id="code" data="{\"file_path\": \"src/components/invoice/NewInvoiceModal.tsx\"}">
+</lov-tool-use>
 
-Full rebuild. Single screen with mode toggle (Sign in ⇄ Sign up). Layout inspired by reference, themed in app's sky-blue/light identity.
+<lov-tool-use id="toolu_vrtx_01XUYFmwDoN7Eg73SYaK3DXB" name="code--view" integration-id="code" data="{\"file_path\": \"src/components/invoice/DraftTemplates.ts\"}">
+</lov-tool-use>
 
-Structure (top → bottom):
-- Logo + "ChaseHQ" wordmark
-- Headline: "Create your account" / "Welcome back"
-- Subcopy: short value line
-- **Google button** (primary outlined, full width) — "Continue with Google"
-- "or" divider
-- Inputs:
-  - Name (signup only, required)
-  - Email
-  - Password (with show/hide eye icon)
-- Primary CTA: "Create account" / "Sign in"
-- Toggle link at bottom: "Already have an account? Sign in" ⇄ "New here? Create an account"
-- Footer: Terms + Privacy links
+<lov-tool-use id="toolu_vrtx_01DTpYcFS8WJMxvFJzgLBirw" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/generate-followup/index.ts\"}">
+</lov-tool-use>
 
-Remove: "Start fresh — take the quiz" button and all demo logic.
+<lov-tool-use id="toolu_vrtx_01LvMDvmF2QfEd9bsnPUmZez" name="code--view" integration-id="code" data="{\"file_path\": \"src/pages/InvoiceDetailScreen.tsx\"}">
+</lov-tool-use>
 
-### 2. Auth logic
+<lov-tool-use id="toolu_vrtx_019NhCgEydm7WQUKj7qX6maJ" name="code--view" integration-id="code" data="{\"file_path\": \"src/components/invoice/AIDraftComposer.tsx\"}">
+</lov-tool-use>
 
-- Google: existing `lovable.auth.signInWithOAuth("google")` ✓
-- Email signup: `supabase.auth.signUp({ email, password, options: { data: { full_name }, emailRedirectTo: window.location.origin } })`
-- Email signin: `supabase.auth.signInWithPassword({ email, password })`
-- Errors surfaced via `sonner` toasts; loading state on buttons
+<lov-tool-use id="toolu_vrtx_01FyWGHKsrQi6esqEpmWSRL8" name="code--view" integration-id="code" data="{\"file_path\": \"src/components/invoice/NewInvoiceModal.tsx\"}">
+</lov-tool-use>
 
-### 3. Profile schema update
+<lov-tool-use id="toolu_vrtx_01QSa6NKVL1S7pr6rGcDEyWC" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/generate-followup/index.ts\"}">
+</lov-tool-use>
 
-Migration:
-```sql
-ALTER TABLE public.profiles 
-  ADD COLUMN full_name text,
-  ADD COLUMN email_provider text DEFAULT 'email',  -- 'google' | 'email'
-  ADD COLUMN sender_type text DEFAULT 'none';      -- 'gmail' | 'smtp' | 'none'
-```
+<lov-tool-use id="toolu_vrtx_01EQuKCce3kmEpfJn4XMt7V7" name="code--view" integration-id="code" data="{\"file_path\": \"src/components/invoice/ChaseTimeline.tsx\"}">
+</lov-tool-use>
+<lov-plan>
 
-Update `handle_new_user()` trigger to also persist `full_name` from `raw_user_meta_data->>'full_name'` and detect `email_provider` from `raw_app_meta_data->>'provider'`.
+## Plan — Invoice page overhaul + AI fixes
 
-### 4. Gmail = primary, auto-connected for Google users
+### 1. Invoice Details panel — collapsed by default
+`InvoiceDetailScreen.tsx`: change `useState(true)` → `useState(false)`. Add chevron rotation transition for smooth feel.
 
-`src/hooks/useGmailConnection.ts` already exposes `signedInWithGoogle`. Behavior:
-- Google sign-in users see a single one-tap "Grant Gmail send permission" card on Dashboard if `needsSendPermission` (already implemented).
-- After grant, `sender_type = 'gmail'` is set on profile via `gmail-oauth-callback` (add this update).
-- Token refresh logic in `send-email` already in place ✓.
+### 2. Chase Timeline redesign (calmer, more scannable)
+Rebuild `ChaseTimeline.tsx` as a **vertical stacked list** instead of cramped horizontal row:
+- Each step on its own row: dot + label (left), date (right)
+- Larger spacing (`py-3`), 14px label, 12px muted date
+- Vertical connector line between dots (subtle border)
+- Active step gets a soft sky-blue background pill
+- Final notice step uses a subtle warning accent (amber dot/text) to signal escalation
+- "Edit" mode shows date inputs inline next to each row (mm/dd/yyyy via formatted display, native picker underneath)
+- Drop the calendar/X imports that aren't used
 
-Phase 2 note (NOT implementing now): reply detection would add `gmail.readonly` scope + an edge function polling `users.history.list` on cron, writing replies into `invoices.client_reply_*`. Documented in inline comment only.
+### 3. Delete invoice
+- Add `deleteInvoice(invoiceId)` in `useSupabaseData.ts` (`supabase.from("invoices").delete().eq("id", id)`)
+- Add trash icon button in `InvoiceDetailScreen` header (top-right of back row)
+- Use `AlertDialog` from `@/components/ui/alert-dialog`: title "Delete this invoice?", body "This action cannot be undone. All follow-ups and history for this invoice will be permanently removed.", Cancel / Delete (destructive variant)
+- On success: toast + `navigate("/invoices")` + `refetch()`
 
-### 5. SMTP fallback for non-Gmail users
+### 4. "Send via Gmail" → "Send"
+`AIDraftComposer.tsx` line 142: change to `<Send className="w-4 h-4" /> Send`. Search rest of codebase for any other instances.
 
-New table:
-```sql
-CREATE TABLE public.smtp_connections (
-  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  from_email text NOT NULL,
-  from_name text,
-  smtp_host text NOT NULL,
-  smtp_port int NOT NULL DEFAULT 587,
-  smtp_username text NOT NULL,
-  smtp_password text NOT NULL,  -- stored server-side; never returned to client
-  verified boolean DEFAULT false,
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE public.smtp_connections ENABLE ROW LEVEL SECURITY;
--- RLS: users can SELECT (without password column via view) / INSERT / UPDATE / DELETE own row
-```
+### 5. Invoice page color system alignment
+Replace ad-hoc colors (`bg-foreground text-background` send button, hardcoded `accent/30`) with semantic tokens already used on Dashboard:
+- Send button: `bg-primary text-primary-foreground` (matches dashboard CTAs)
+- Client reply card: `bg-primary/5 border-primary/20`
+- Detail rows: keep `bg-card` but unify radius (`rounded-2xl`) and border (`border-border`) — already aligned
+- Status colors stay via `StatusBadge` (single source)
+- AI badge: already uses `bg-primary/10 text-primary` ✓
 
-Plus a SECURITY DEFINER view `smtp_connections_safe` exposing everything except `smtp_password`, used by the client.
+### 6. Regenerate AI bug + tone variation
+Root causes:
+- `useEffect` resets draft to template on every tone change, overwriting AI output silently
+- AI gateway may cache identical prompts → add nonce + temperature
 
-New edge function `smtp-send/index.ts`:
-- Uses `https://deno.land/x/denomailer@1.6.0/mod.ts`
-- Auth-validates user, loads their `smtp_connections` row via service-role, sends email, returns `{ success, messageId }`
-- Same request shape as `send-email`: `{ to, subject, message }`
+Fixes:
+- **Frontend** (`AIDraftComposer.tsx`): split effect — only load template on initial mount, not on every tone change. When user clicks Regenerate, always call AI. When tone changes after AI generation, auto-regenerate with new tone.
+- **Edge function** (`generate-followup/index.ts`):
+  - Add `temperature: 0.9` to request
+  - Add explicit per-tone instructions in the system prompt (Polite = warm + apologetic; Friendly = casual + upbeat; Firm = direct + matter-of-fact; Urgent = serious + time-sensitive)
+  - Append a random variation seed to user prompt: `Variation seed: ${crypto.randomUUID()}` so identical inputs produce different outputs
+  - Accept optional `previousMessage` from client; if provided, instruct model "Write a meaningfully different variation than: ..."
+- Pass `previousMessage: currentDraft` from frontend on regenerate clicks
 
-New edge function `smtp-verify/index.ts`:
-- Tests SMTP credentials by opening a connection (no send), returns `{ verified: true/false, error }`
-- Sets `verified = true` on success
+### 7. Date format US localization
+`NewInvoiceModal.tsx`: `<input type="date">` always shows browser-native locale (uneditable). Replace with controlled text input + format helper:
+- Display value as `MM/DD/YYYY` via mask
+- Store as ISO `yyyy-mm-dd` for DB
+- Add small calendar icon button that opens `<Popover>` with `Calendar` from `@/components/ui/calendar` (already in project) for picker UX
+- Update placeholder to `MM/DD/YYYY`
+- Audit other date displays (already use `en-US` toLocaleDateString ✓)
 
-Modify `send-email`:
-- After auth, look up `profiles.sender_type`
-- If `gmail` → existing Gmail flow
-- If `smtp` → forward to `smtp-send` logic (refactor: extract `sendViaGmail` / `sendViaSmtp` into one dispatcher function)
-- If `none` → 400 "No sending mailbox connected"
+### 8. "Formal Notice" → "Final Notice"
+`ChaseTimeline.tsx` already says "Final notice" ✓. Search project for "Formal Notice" / "approval needed" — likely in `OnboardingScreen.tsx` follow-up schedule preview. Replace with "Final Notice".
 
-### 6. Settings UI — sending mailbox
+### 9. Final Notice escalation feature
+New tone option in `AIDraftComposer`: add `"Final Notice"` to TONES array (5 tones now). When selected:
+- Tone pill renders in **destructive amber/red** (`bg-amber-500 text-white border-amber-600`) instead of primary blue
+- Above the draft, show a warning banner: amber background, AlertTriangle icon, copy: *"This is a final escalation notice. Please review carefully — it signals serious consequences for non-payment and should only be sent after prior reminders."*
+- Subject prefix "FINAL NOTICE — " auto-prepended
+- Body template tone: formal, references prior reminders, mentions next steps (referral to collections / legal review) — non-legal-advice phrasing
+- Send button changes to "Send Final Notice" with amber styling
+- Click Send → opens `AlertDialog` confirmation: "Send Final Notice to {client}? This message carries more weight than a regular reminder. Make sure all earlier follow-ups have been sent. [Cancel] [Send Final Notice (destructive)]"
+- Edge function: add Final Notice case in system prompt with explicit instructions (firm, formal, references "previous reminders sent on...", mentions "next steps may include referral to a collections agency or further action", does NOT make legal claims)
+- Update `DraftTemplates.ts` with a Final Notice template fallback
 
-In existing "Connected services" section of `SettingsScreen.tsx`:
-- Show **active sender** badge (Gmail / SMTP / None)
-- Card 1: Gmail — existing connect/disconnect (unchanged copy already adapts to Google users)
-- Card 2: "Other email (SMTP)" — collapsible form with provider preset dropdown (Outlook, Yahoo, iCloud, Custom) auto-filling host/port; fields: From name, From email, Username, Password (app-specific password helper link per preset). On save → call `smtp-verify` then store. Disconnect button when configured.
-- Active sender selector (radio) only shown when both are connected: "Send follow-ups using: ◉ Gmail ○ SMTP" → updates `profiles.sender_type`
+### 10. Files
 
-### 7. Frontend hook
+**Edited**:
+- `src/pages/InvoiceDetailScreen.tsx` — collapsed default, delete button + dialog, color tokens
+- `src/components/invoice/ChaseTimeline.tsx` — vertical layout redesign
+- `src/components/invoice/AIDraftComposer.tsx` — fix regenerate, add Final Notice tone + confirm dialog, rename Send, color alignment
+- `src/components/invoice/DraftTemplates.ts` — add Final Notice template, escalated copy
+- `src/components/invoice/NewInvoiceModal.tsx` — MM/DD/YYYY input + calendar picker
+- `src/hooks/useSupabaseData.ts` — add `deleteInvoice` helper
+- `supabase/functions/generate-followup/index.ts` — temperature, tone-specific prompts, variation seed, previousMessage support, Final Notice case
+- `src/pages/OnboardingScreen.tsx` — "Formal Notice" → "Final Notice" if present
 
-New `src/hooks/useSendingMailbox.ts`:
-- Returns `{ activeSender, hasGmail, hasSmtp, canSend, setActiveSender }`
-- Used by Dashboard banner + Invoice Detail send guard
-
-Replace Dashboard "Connect Gmail" CTA with adaptive: 
-- Google user, no permission → "Grant Gmail permission"
-- Email user, no SMTP → "Connect your email to send follow-ups" → opens Settings SMTP card
-- Has any active sender → no banner
-
-### 8. Files
-
-**Migrations** (1 file):
-- Add columns to `profiles`, create `smtp_connections` + RLS + safe view, update `handle_new_user` trigger
-
-**Edge functions**:
-- New: `supabase/functions/smtp-send/index.ts`
-- New: `supabase/functions/smtp-verify/index.ts`
-- Edit: `supabase/functions/send-email/index.ts` (dispatcher)
-- Edit: `supabase/functions/gmail-oauth-callback/index.ts` (set `sender_type = 'gmail'` on success)
-- Edit: `supabase/config.toml` (register new functions)
-
-**Frontend**:
-- Edit: `src/pages/AuthScreen.tsx` (full rebuild)
-- Edit: `src/pages/SettingsScreen.tsx` (add SMTP card + active sender selector)
-- Edit: `src/pages/DashboardScreen.tsx` (adaptive sender banner)
-- Edit: `src/context/AppContext.tsx` (expose `fullName` from profile)
-- New: `src/hooks/useSendingMailbox.ts`
-- Edit: `src/hooks/useGmailConnection.ts` (minor — no longer owns the banner logic)
-
-### Edge cases & assumptions
-- Email signup auto-confirm is already enabled (per memory) — no `/reset-password` page in this scope.
-- SMTP password stored as plaintext server-side initially; encryption-at-rest via pgsodium can be added later. Never returned to client (safe view excludes it).
-- Outlook/Yahoo/iCloud require app-specific passwords — preset cards include help links.
-- Reply detection (Gmail readonly + IMAP) explicitly out of scope; UI relies on user marking invoices paid.
-- Apple sign-in deferred per revised scope.
-
-### User flow summary
-1. New visitor → `/auth` → choose Google or email/password (with name on signup).
-2. Google user → lands on dashboard → one-tap "Grant Gmail permission" → done. `sender_type=gmail`.
-3. Email user → lands on dashboard → banner "Connect your email to send follow-ups" → Settings → SMTP form → verify → done. `sender_type=smtp`.
-4. Sending an invoice follow-up always calls `send-email`, which dispatches to the right provider transparently.
+### Edge cases
+- Deleting an invoice with active follow-ups: ON DELETE CASCADE not set on `followups.invoice_id` — followups will be orphaned. Add cleanup: delete followups first, then invoice (or document as known limitation; no FK exists currently per schema).
+- Final Notice send confirmation can't be bypassed accidentally
+- Date picker: handle invalid manual entry gracefully (keep input, show no error until submit)
+- Regenerate: if AI returns same text by chance, show toast hint "Try a different tone for more variation"
 
