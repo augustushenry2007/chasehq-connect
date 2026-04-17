@@ -4,10 +4,11 @@ import { useInvoices } from "@/hooks/useSupabaseData";
 import { getStats, getChaseFeed, formatUSD } from "@/lib/data";
 import { useApp } from "@/context/AppContext";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
+import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
 import {
   TrendingUp, AlertTriangle, CheckCircle, Mail, Check,
-  Plus, FileText, Sparkles, ArrowRight, Loader2,
+  Plus, FileText, Sparkles, ArrowRight, Loader2, Settings as SettingsIcon,
 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 import { toast } from "sonner";
@@ -56,9 +57,10 @@ function GetStartedStep({
 
 export default function DashboardScreen() {
   const navigate = useNavigate();
-  const { user } = useApp();
+  const { user, fullName } = useApp();
   const { invoices, refetch } = useInvoices();
-  const { gmail, connectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
+  const { connectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
+  const { canSend, hasGmail, hasSmtp } = useSendingMailbox();
   const [showNew, setShowNew] = useState(false);
   const [connectingGmail, setConnectingGmail] = useState(false);
 
@@ -66,7 +68,7 @@ export default function DashboardScreen() {
   const chaseFeed = getChaseFeed(invoices);
   const isEmpty = invoices.length === 0;
 
-  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
+  const firstName = fullName?.split(" ")[0] || user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
 
   async function handleConnectGmail() {
     setConnectingGmail(true);
@@ -139,26 +141,33 @@ export default function DashboardScreen() {
             </div>
           </div>
 
-          {/* Get-started checklist — only show if Gmail send permission isn't granted yet */}
-          {!gmail.connected && (
+          {/* Get-started checklist — show until any sender is connected */}
+          {!canSend && (
             <div className="mt-4 mx-5">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
                 Get set up
               </h3>
               <div className="flex flex-col gap-2.5">
-                <GetStartedStep
-                  done={false}
-                  title={signedInWithGoogle ? "Allow ChaseHQ to send follow-ups" : "Connect your inbox"}
-                  description={
-                    signedInWithGoogle
-                      ? `One-click permission to send from ${googleEmail}. We never read your inbox.`
-                      : "Send follow-ups from your own Gmail so replies land where you'd expect."
-                  }
-                  action={signedInWithGoogle ? "Grant permission" : "Connect Gmail"}
-                  onAction={handleConnectGmail}
-                  loading={connectingGmail}
-                  icon={Mail}
-                />
+                {signedInWithGoogle ? (
+                  <GetStartedStep
+                    done={hasGmail}
+                    title="Allow ChaseHQ to send follow-ups"
+                    description={`One-click permission to send from ${googleEmail}. We never read your inbox.`}
+                    action="Grant permission"
+                    onAction={handleConnectGmail}
+                    loading={connectingGmail}
+                    icon={Mail}
+                  />
+                ) : (
+                  <GetStartedStep
+                    done={hasSmtp}
+                    title="Connect your email to send follow-ups"
+                    description="Add your email's SMTP details so ChaseHQ can send on your behalf."
+                    action="Open Settings"
+                    onAction={() => navigate("/settings")}
+                    icon={SettingsIcon}
+                  />
+                )}
               </div>
             </div>
           )}

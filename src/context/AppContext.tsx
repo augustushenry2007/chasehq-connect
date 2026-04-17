@@ -19,6 +19,7 @@ interface AppContextType {
   isAuthenticated: boolean;
   authReady: boolean;
   user: User | null;
+  fullName: string | null;
   hasCompletedOnboarding: boolean;
   notifications: NotificationSettings;
   schedule: ScheduleRow[];
@@ -44,6 +45,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+  const [fullName, setFullName] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationSettings>(() => {
     const s = localStorage.getItem("notifications");
     return s ? JSON.parse(s) : { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
@@ -56,21 +58,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) {
       setHasCompletedOnboarding(false);
+      setFullName(null);
       return;
     }
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("onboarding_completed")
+        .select("onboarding_completed, full_name")
         .eq("user_id", user.id)
         .maybeSingle();
       if (cancelled) return;
+      const metaName = (user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name || null;
       if (data) {
         setHasCompletedOnboarding(!!data.onboarding_completed);
+        const resolved = (data as any).full_name || metaName || null;
+        setFullName(resolved);
+        if (!(data as any).full_name && metaName) {
+          await supabase.from("profiles").update({ full_name: metaName }).eq("user_id", user.id);
+        }
       } else {
-        await supabase.from("profiles").insert({ user_id: user.id, onboarding_completed: false });
+        await supabase.from("profiles").insert({ user_id: user.id, onboarding_completed: false, full_name: metaName });
         setHasCompletedOnboarding(false);
+        setFullName(metaName);
       }
     })();
     return () => { cancelled = true; };
@@ -138,7 +148,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ isAuthenticated, authReady, user, hasCompletedOnboarding, notifications, schedule, signIn, signOut, completeOnboarding, restartOnboarding, updateNotifications, updateSchedule }}>
+    <AppContext.Provider value={{ isAuthenticated, authReady, user, fullName, hasCompletedOnboarding, notifications, schedule, signIn, signOut, completeOnboarding, restartOnboarding, updateNotifications, updateSchedule }}>
       {children}
     </AppContext.Provider>
   );
