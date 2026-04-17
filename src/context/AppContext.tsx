@@ -35,7 +35,7 @@ const DEFAULT_SCHEDULE: ScheduleRow[] = [
   { id: 1, day: 0, action: "Invoice sent", status: "sent" },
   { id: 2, day: 7, action: "Friendly reminder", status: "reminder-1" },
   { id: 3, day: 14, action: "Firm reminder", status: "reminder-2" },
-  { id: 4, day: 21, action: "Formal notice — your approval needed", status: "checkpoint" },
+  { id: 4, day: 21, action: "Final Notice", status: "checkpoint" },
 ];
 
 const AppContext = createContext<AppContextType | null>(null);

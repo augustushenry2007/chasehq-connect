@@ -1,18 +1,41 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useInvoices } from "@/hooks/useSupabaseData";
+import { useInvoices, deleteInvoice } from "@/hooks/useSupabaseData";
 import { getInvoiceById, formatUSD } from "@/lib/data";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ArrowLeft, ChevronDown, ChevronUp, Mail, MessageSquare } from "lucide-react";
+import { ArrowLeft, ChevronDown, Mail, MessageSquare, Trash2 } from "lucide-react";
 import ChaseTimeline from "@/components/invoice/ChaseTimeline";
 import AIDraftComposer from "@/components/invoice/AIDraftComposer";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function InvoiceDetailScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices } = useInvoices();
+  const { invoices, refetch } = useInvoices();
   const invoice = getInvoiceById(id || "", invoices);
-  const [detailsOpen, setDetailsOpen] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!invoice) return;
+    setDeleting(true);
+    const ok = await deleteInvoice(invoice.id);
+    setDeleting(false);
+    if (ok) {
+      await refetch();
+      navigate("/invoices");
+    }
+  }
 
   if (!invoice) {
     return (
@@ -38,11 +61,39 @@ export default function InvoiceDetailScreen() {
 
   return (
     <div className="h-screen overflow-y-auto bg-background pb-24">
-      <div className="px-5 pt-5 pb-2">
+      <div className="px-5 pt-5 pb-2 flex items-center justify-between">
         <button onClick={() => navigate(-1)} className="flex items-center gap-1.5 text-muted-foreground">
           <ArrowLeft className="w-4 h-4" />
           <span className="text-sm">Back to Invoices</span>
         </button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <button
+              aria-label="Delete invoice"
+              className="p-2 -mr-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this invoice?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. All follow-ups and history for this invoice will be permanently removed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDelete}
+                disabled={deleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       <div className="px-5">
@@ -60,7 +111,7 @@ export default function InvoiceDetailScreen() {
 
         {/* Client reply */}
         {invoice.clientReply && (
-          <div className="mt-4 bg-accent/30 border border-accent rounded-xl p-4">
+          <div className="mt-4 bg-primary/5 border border-primary/20 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
               <MessageSquare className="w-3.5 h-3.5 text-primary" />
               <span className="text-xs font-semibold text-primary">Client replied · {invoice.clientReply.receivedAt}</span>
@@ -77,7 +128,7 @@ export default function InvoiceDetailScreen() {
         <div className="mt-4 bg-card border border-border rounded-2xl overflow-hidden">
           <button onClick={() => setDetailsOpen(!detailsOpen)} className="w-full flex items-center justify-between px-4 py-3">
             <span className="text-sm font-semibold text-foreground">Invoice Details</span>
-            {detailsOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${detailsOpen ? "rotate-180" : ""}`} />
           </button>
           {detailsOpen && (
             <div className="border-t border-border">
