@@ -43,8 +43,8 @@ export default function NewInvoiceModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center" onClick={onClose}>
-      <div className="bg-background w-full max-w-lg rounded-t-2xl p-5 pb-8 max-h-[85vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-background w-full max-w-lg rounded-2xl p-5 my-auto max-h-[90vh] overflow-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-bold text-foreground">New Invoice</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-muted-foreground" /></button>

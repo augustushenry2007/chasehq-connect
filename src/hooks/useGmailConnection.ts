@@ -48,9 +48,10 @@ export function useGmailConnection() {
     }
   }, [fetchConnection]);
 
-  async function connectGmail() {
+  async function connectGmail(redirectPath?: string) {
+    const path = redirectPath || window.location.pathname || "/dashboard";
     const { data, error } = await supabase.functions.invoke("gmail-oauth-start", {
-      body: { redirectUri: window.location.origin + "/settings" },
+      body: { redirectUri: window.location.origin + path },
     });
     if (error || data?.error) {
       return { error: error?.message || data?.error || "Failed to start Gmail OAuth" };
