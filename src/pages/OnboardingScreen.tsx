@@ -107,6 +107,7 @@ interface PersistedState {
 }
 
 function loadState(): Partial<PersistedState> {
+  if (isTestingMode()) return {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : {};
