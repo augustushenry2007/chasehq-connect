@@ -79,10 +79,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [invoices, setInvoices] = useState<FrontendInvoice[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(true);
   const [notifications, setNotifications] = useState<NotificationSettings>(() => {
+    if (isTestingMode()) return { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
     const s = localStorage.getItem("notifications");
     return s ? JSON.parse(s) : { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
   });
   const [schedule, setSchedule] = useState<ScheduleRow[]>(() => {
+    if (isTestingMode()) return DEFAULT_SCHEDULE;
     const s = localStorage.getItem("schedule");
     return s ? JSON.parse(s) : DEFAULT_SCHEDULE;
   });
