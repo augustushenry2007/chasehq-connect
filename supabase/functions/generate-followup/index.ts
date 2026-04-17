@@ -5,11 +5,24 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const TONE_INSTRUCTIONS: Record<string, string> = {
+  Polite:
+    "Warm, respectful, slightly apologetic. Assume the client simply forgot. Use soft language ('just a gentle nudge', 'whenever you have a moment'). 4-6 sentences.",
+  Friendly:
+    "Casual, upbeat, conversational. Use contractions and a personal tone. Sound like a human checking in, not a collections department. 4-6 sentences.",
+  Firm:
+    "Direct, matter-of-fact, professional. No apologies, no padding. State the facts and the expected action clearly. 4-6 sentences.",
+  Urgent:
+    "Serious and time-sensitive. Emphasize that this is now overdue and needs immediate attention. Mention that further action may follow. 4-6 sentences.",
+  "Final Notice":
+    "Formal, escalation-level final communication. Reference that multiple prior reminders have been sent. State clearly that if payment is not received within 7 days, next steps may include referral to a third-party collections agency or further recovery action. Do NOT make legal threats or claims a lawyer would make. Do NOT cite specific laws. Stay professional and offer one last chance to resolve amicably. The subject line MUST start with 'FINAL NOTICE — '. 6-9 sentences.",
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { invoice, tone } = await req.json();
+    const { invoice, tone, previousMessage } = await req.json();
 
     if (!invoice || !tone) {
       return new Response(JSON.stringify({ error: "Missing invoice or tone" }), {
@@ -21,14 +34,24 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    const systemPrompt = `You are a professional follow-up email writer for freelancers and agencies chasing unpaid invoices. 
+    const toneInstruction = TONE_INSTRUCTIONS[tone] || `Use a ${tone.toLowerCase()} tone.`;
+
+    const systemPrompt = `You are a professional follow-up email writer for freelancers and agencies chasing unpaid invoices.
 Write a follow-up email for the given invoice using the specified tone.
 Return ONLY a JSON object with "subject" and "message" fields.
-The message should be the full email body text (no HTML).
-Keep it concise, professional, and appropriate for the tone.
-Sign off as the sender name from the invoice.`;
+The message should be the full email body text (no HTML, no markdown).
+Sign off as the sender name from the invoice.
+Each generation should produce a meaningfully different variation in wording, structure, and opening — never reuse the same sentences.
 
-    const userPrompt = `Write a ${tone.toLowerCase()} follow-up email for this invoice:
+TONE GUIDELINES for "${tone}":
+${toneInstruction}`;
+
+    const variationSeed = crypto.randomUUID();
+    const previousBlock = previousMessage
+      ? `\n\nThe previous draft was:\n"""\n${previousMessage}\n"""\nWrite a meaningfully different variation — different opening, different sentence structure, different word choices. Do not repeat phrases.`
+      : "";
+
+    const userPrompt = `Write a ${tone} follow-up email for this invoice:
 - Invoice: ${invoice.invoice_number || invoice.id}
 - Client: ${invoice.client}
 - Amount: $${invoice.amount}
@@ -37,7 +60,7 @@ Sign off as the sender name from the invoice.`;
 - Sender: ${invoice.sent_from || invoice.sentFrom || "Jamie Doe"}
 - Description: ${invoice.description}
 
-Tone: ${tone}`;
+Variation seed: ${variationSeed}${previousBlock}`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -46,7 +69,8 @@ Tone: ${tone}`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-flash",
+        temperature: 0.95,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },

@@ -1,6 +1,6 @@
 import type { Invoice } from "@/lib/data";
 
-type Tone = "Polite" | "Friendly" | "Firm" | "Urgent";
+export type Tone = "Polite" | "Friendly" | "Firm" | "Urgent" | "Final Notice";
 
 export function getDefaultDraft(invoice: Invoice, tone: Tone): { subject: string; message: string } {
   const { client, id, amount, dueDate, daysPastDue, sentFrom } = invoice;
@@ -23,6 +23,10 @@ export function getDefaultDraft(invoice: Invoice, tone: Tone): { subject: string
     Urgent: {
       subject: `URGENT: Immediate payment required – Invoice ${id}`,
       message: `Dear ${client} team,\n\nThis is an urgent follow-up regarding invoice ${id} for ${amountStr}, which was due on ${dueDate}${daysPastDue > 0 ? ` and is now ${daysPastDue} days past due` : ""}.\n\nMultiple reminders have been sent without response. If payment is not received within the next 48 hours, I may need to escalate this matter further.\n\nPlease treat this as a priority and confirm payment arrangements immediately.\n\nRegards,\n${senderName}`,
+    },
+    "Final Notice": {
+      subject: `FINAL NOTICE — Invoice ${id} (${amountStr}) requires immediate action`,
+      message: `Dear ${client} team,\n\nThis is a FINAL NOTICE regarding invoice ${id} for ${amountStr}, originally due on ${dueDate}${daysPastDue > 0 ? ` and now ${daysPastDue} days past due` : ""}.\n\nDespite multiple reminders sent over the past several weeks, this invoice remains unpaid and we have not received a response addressing the outstanding balance.\n\nPlease consider this our final attempt to resolve this matter directly. If full payment is not received within 7 calendar days from the date of this notice, we will have no choice but to consider next steps, which may include referring this account to a third-party collections agency or pursuing other recovery options available to us.\n\nWe would much prefer to resolve this amicably. If there is a reason for the delay or if you would like to discuss a payment arrangement, please contact me immediately so we can avoid further escalation.\n\nThank you for your prompt attention to this matter.\n\nRegards,\n${senderName}`,
     },
   };
 
