@@ -59,13 +59,10 @@ export function useGmailConnection() {
     }
     const err = params.get("gmail_error");
     if (err) {
-      // Lazy import to avoid circular concerns
-      import("sonner").then(({ toast }) => {
-        toast.error("Gmail connection failed", {
-          description: err === "redirect_uri_mismatch"
-            ? "The OAuth redirect URI isn't whitelisted. Add the callback URL in Google Cloud Console."
-            : decodeURIComponent(err),
-        });
+      toast.error("Gmail connection failed", {
+        description: err === "redirect_uri_mismatch"
+          ? "The OAuth redirect URI isn't whitelisted. Add the callback URL in Google Cloud Console."
+          : decodeURIComponent(err),
       });
       url.searchParams.delete("gmail_error");
       window.history.replaceState({}, "", url.toString());
