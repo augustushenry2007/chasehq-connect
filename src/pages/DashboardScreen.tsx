@@ -11,6 +11,7 @@ import {
   Plus, FileText, Sparkles, ArrowRight, Loader2, Settings as SettingsIcon,
 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
+import TrialBanner from "@/components/TrialBanner";
 import { toast } from "sonner";
 
 function StatCard({ label, value, sub, icon: Icon, iconColor, valueColor }: {

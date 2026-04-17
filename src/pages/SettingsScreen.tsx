@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useApp, type ScheduleRow } from "@/context/AppContext";
 import {
   ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2, Mail, Loader2,
-  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, Server,
+  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, Server, CreditCard, ChevronRight,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
