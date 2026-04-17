@@ -33,21 +33,25 @@ export interface Integration {
 
 interface AppContextType {
   isAuthenticated: boolean;
+  authReady: boolean;
   user: User | null;
   hasCompletedOnboarding: boolean;
+  isDemoUser: boolean;
   profile: UserProfile;
   notifications: NotificationSettings;
   schedule: ScheduleRow[];
   integrations: Integration[];
   signIn: () => void;
   signOut: () => void;
-  completeOnboarding: () => void;
-  restartOnboarding: () => void;
+  completeOnboarding: () => Promise<void>;
+  restartOnboarding: () => Promise<void>;
   updateProfile: (profile: UserProfile) => void;
   updateNotifications: (settings: NotificationSettings) => void;
   updateSchedule: (schedule: ScheduleRow[]) => void;
   toggleIntegration: (id: string) => void;
 }
+
+const DEMO_EMAIL = "demo@chasehq.app";
 
 const DEFAULT_SCHEDULE: ScheduleRow[] = [
   { id: 1, day: 0, action: "Invoice sent", status: "sent" },
@@ -68,7 +72,8 @@ const AppContext = createContext<AppContextType | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(() => localStorage.getItem("hasCompletedOnboarding") === "true");
+  const [authReady, setAuthReady] = useState(false);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(() => {
     const s = localStorage.getItem("profile");
     return s ? JSON.parse(s) : { name: "Jamie Doe", email: "jamie@studio.co", paymentDetails: "Bank transfer · Account: 12345678 · Sort code: 12-34-56" };
@@ -86,17 +91,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return s ? JSON.parse(s) : DEFAULT_INTEGRATIONS;
   });
 
+  const isDemoUser = user?.email === DEMO_EMAIL;
+
+  // Load onboarding state from profiles table whenever the user changes
   useEffect(() => {
-    // Set up auth listener BEFORE checking session
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    if (!user) {
+      setHasCompletedOnboarding(false);
+      return;
+    }
+    // Demo account always skips onboarding
+    if (user.email === DEMO_EMAIL) {
+      setHasCompletedOnboarding(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("onboarding_completed")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      if (data) {
+        setHasCompletedOnboarding(!!data.onboarding_completed);
+      } else {
+        // Profile row doesn't exist yet (e.g. trigger lag) — create it
+        await supabase.from("profiles").insert({ user_id: user.id, onboarding_completed: false });
+        setHasCompletedOnboarding(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       setIsAuthenticated(!!session?.user);
+      setAuthReady(true);
     });
 
-    // Then check existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setIsAuthenticated(!!session?.user);
+      setAuthReady(true);
     });
 
     return () => subscription.unsubscribe();
@@ -111,17 +148,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsAuthenticated(false);
     setUser(null);
     setHasCompletedOnboarding(false);
-    localStorage.removeItem("hasCompletedOnboarding");
   }
 
-  function completeOnboarding() {
+  async function completeOnboarding() {
     setHasCompletedOnboarding(true);
-    localStorage.setItem("hasCompletedOnboarding", "true");
+    if (user && !isDemoUser) {
+      await supabase
+        .from("profiles")
+        .upsert({ user_id: user.id, onboarding_completed: true }, { onConflict: "user_id" });
+    }
   }
 
-  function restartOnboarding() {
+  async function restartOnboarding() {
     setHasCompletedOnboarding(false);
-    localStorage.setItem("hasCompletedOnboarding", "false");
+    if (user && !isDemoUser) {
+      await supabase
+        .from("profiles")
+        .upsert({ user_id: user.id, onboarding_completed: false }, { onConflict: "user_id" });
+    }
   }
 
   function updateProfile(p: UserProfile) {
@@ -150,7 +194,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ isAuthenticated, user, hasCompletedOnboarding, profile, notifications, schedule, integrations, signIn, signOut, completeOnboarding, restartOnboarding, updateProfile, updateNotifications, updateSchedule, toggleIntegration }}>
+    <AppContext.Provider value={{ isAuthenticated, authReady, user, hasCompletedOnboarding, isDemoUser, profile, notifications, schedule, integrations, signIn, signOut, completeOnboarding, restartOnboarding, updateProfile, updateNotifications, updateSchedule, toggleIntegration }}>
       {children}
     </AppContext.Provider>
   );
