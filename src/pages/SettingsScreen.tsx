@@ -321,30 +321,14 @@ export default function SettingsScreen() {
   const { user, fullName, notifications, schedule, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
   const { invoices } = useInvoices();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
-  const { gmail, loading: gmailLoading, connectGmail, disconnectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
-  const mailbox = useSendingMailbox();
-  const [gmailBusy, setGmailBusy] = useState(false);
+  const { signedInWithGoogle } = useGmailConnection();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [smtpOpen, setSmtpOpen] = useState(false);
 
   function toggleSection(key: SectionKey) { setOpenSection((prev) => (prev === key ? null : key)); }
 
   async function handleSignOut() { await signOut(); navigate("/auth", { replace: true }); }
   async function handleRestartOnboarding() { await restartOnboarding(); await signOut(); navigate("/auth", { replace: true }); }
-
-  async function handleGrantGmail() {
-    setGmailBusy(true);
-    const result = await connectGmail();
-    if (result.error) { toast.error(result.error); setGmailBusy(false); }
-  }
-
-  async function handleDisconnectGmail() {
-    setGmailBusy(true);
-    await disconnectGmail();
-    toast.success("Gmail send permission revoked");
-    setGmailBusy(false);
-  }
 
   function handleExport() {
     const payload = {
