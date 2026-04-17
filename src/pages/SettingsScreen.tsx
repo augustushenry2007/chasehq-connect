@@ -134,14 +134,15 @@ export default function SettingsScreen() {
     setOpenSection((prev) => (prev === key ? null : key));
   }
 
-  function handleSignOut() {
-    signOut();
+  async function handleSignOut() {
+    await signOut();
     navigate("/auth", { replace: true });
   }
 
-  function handleRestartOnboarding() {
-    restartOnboarding();
-    navigate("/onboarding", { replace: true });
+  async function handleRestartOnboarding() {
+    await restartOnboarding();
+    await signOut();
+    navigate("/auth", { replace: true });
   }
 
   async function handleConnectGmail() {
