@@ -329,8 +329,8 @@ export default function SettingsScreen() {
 
   function toggleSection(key: SectionKey) { setOpenSection((prev) => (prev === key ? null : key)); }
 
-  async function handleSignOut() { await signOut(); navigate("/auth", { replace: true }); }
-  async function handleRestartOnboarding() { await restartOnboarding(); await signOut(); navigate("/auth", { replace: true }); }
+  async function handleSignOut() { await signOut(); navigate("/onboarding", { replace: true }); }
+  async function handleRestartOnboarding() { await restartOnboarding(); await signOut(); navigate("/onboarding", { replace: true }); }
 
   function handleExport() {
     const payload = {
@@ -359,7 +359,7 @@ export default function SettingsScreen() {
       await supabase.from("profiles").delete().eq("user_id", user.id);
       toast.success("Your data has been deleted");
       await signOut();
-      navigate("/auth", { replace: true });
+      navigate("/onboarding", { replace: true });
     } catch (e) {
       toast.error("Failed to delete data");
       setDeleting(false);
