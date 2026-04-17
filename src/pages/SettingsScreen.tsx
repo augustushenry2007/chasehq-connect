@@ -32,7 +32,7 @@ const SMTP_PRESETS: SmtpPreset[] = [
   { id: "custom", label: "Custom SMTP", host: "", port: 587 },
 ];
 
-type SectionKey = "notifications" | "schedule" | null;
+type SectionKey = "notifications" | "schedule" | "data" | null;
 
 function CollapsibleSection({ title, subtitle, isOpen, onToggle, children }: {
   title: string; subtitle: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode;
@@ -321,30 +321,14 @@ export default function SettingsScreen() {
   const { user, fullName, notifications, schedule, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
   const { invoices } = useInvoices();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
-  const { gmail, loading: gmailLoading, connectGmail, disconnectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
-  const mailbox = useSendingMailbox();
-  const [gmailBusy, setGmailBusy] = useState(false);
+  const { signedInWithGoogle } = useGmailConnection();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [smtpOpen, setSmtpOpen] = useState(false);
 
   function toggleSection(key: SectionKey) { setOpenSection((prev) => (prev === key ? null : key)); }
 
   async function handleSignOut() { await signOut(); navigate("/auth", { replace: true }); }
   async function handleRestartOnboarding() { await restartOnboarding(); await signOut(); navigate("/auth", { replace: true }); }
-
-  async function handleGrantGmail() {
-    setGmailBusy(true);
-    const result = await connectGmail();
-    if (result.error) { toast.error(result.error); setGmailBusy(false); }
-  }
-
-  async function handleDisconnectGmail() {
-    setGmailBusy(true);
-    await disconnectGmail();
-    toast.success("Gmail send permission revoked");
-    setGmailBusy(false);
-  }
 
   function handleExport() {
     const payload = {
@@ -383,17 +367,7 @@ export default function SettingsScreen() {
 
   const authMethod = signedInWithGoogle ? "Google" : "Email";
 
-  // Gmail connection states
-  const gmailLabel = gmail.connected
-    ? `Sending as ${gmail.email}`
-    : signedInWithGoogle
-      ? `Allow ChaseHQ to send follow-ups from ${googleEmail}`
-      : "Connect Gmail to send follow-ups from your inbox";
-  const gmailButtonLabel = gmail.connected
-    ? "Revoke"
-    : signedInWithGoogle
-      ? "Grant permission"
-      : "Connect";
+
 
   return (
     <div className="flex-1 overflow-auto pb-24">
@@ -413,86 +387,6 @@ export default function SettingsScreen() {
               <p className="text-xs text-muted-foreground mt-0.5">Signed in with {authMethod}</p>
             </div>
           </div>
-        </div>
-
-        {/* CONNECTED SERVICES */}
-        <SectionLabel>Sending mailbox</SectionLabel>
-        <div className="flex flex-col gap-3 mb-5">
-          {/* Active sender selector — only when both connected */}
-          {mailbox.hasGmail && mailbox.hasSmtp && (
-            <div className="bg-card border border-border rounded-2xl p-4">
-              <p className="text-xs font-medium text-muted-foreground mb-2">Send follow-ups using</p>
-              <div className="flex gap-2">
-                {(["gmail", "smtp"] as const).map((opt) => (
-                  <button
-                    key={opt}
-                    onClick={() => mailbox.setActiveSender(opt)}
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
-                      mailbox.activeSender === opt
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-background text-muted-foreground border-border hover:border-primary/40"
-                    }`}
-                  >
-                    {opt === "gmail" ? "Gmail" : "Other email (SMTP)"}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Gmail card */}
-          <div className="bg-card border border-border rounded-2xl p-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center shrink-0">
-                <Mail className="w-5 h-5 text-destructive" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-foreground">Gmail</p>
-                  {gmail.connected && mailbox.activeSender === "gmail" && (
-                    <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                      Active
-                    </span>
-                  )}
-                </div>
-                {gmailLoading ? (
-                  <p className="text-xs text-muted-foreground mt-0.5">Checking permission…</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground mt-0.5">{gmailLabel}</p>
-                )}
-                {!gmail.connected && (
-                  <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
-                    We only request the <code className="bg-muted px-1 py-0.5 rounded">gmail.send</code> scope.
-                    We never read your inbox.
-                  </p>
-                )}
-              </div>
-              {gmailLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground mt-1" />
-              ) : (
-                <button
-                  onClick={gmail.connected ? handleDisconnectGmail : handleGrantGmail}
-                  disabled={gmailBusy}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 shrink-0 ${
-                    gmail.connected
-                      ? "bg-destructive/10 text-destructive"
-                      : "bg-primary text-primary-foreground"
-                  }`}
-                >
-                  {gmailBusy ? "…" : gmailButtonLabel}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* SMTP card */}
-          <SmtpCard
-            open={smtpOpen}
-            setOpen={setSmtpOpen}
-            mailbox={mailbox}
-            defaultFromEmail={user?.email || ""}
-            defaultFromName={fullName || ""}
-          />
         </div>
 
         {/* PREFERENCES */}
@@ -517,23 +411,32 @@ export default function SettingsScreen() {
           </CollapsibleSection>
         </div>
 
-        {/* DATA CONTROLS */}
+        {/* DATA CONTROLS — collapsible */}
         <SectionLabel>Data controls</SectionLabel>
-        <div className="bg-card border border-border rounded-2xl divide-y divide-border mb-5">
-          <button onClick={handleExport} className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
-            <Download className="w-4 h-4 text-muted-foreground" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-foreground">Export my data</p>
-              <p className="text-xs text-muted-foreground">Download a JSON copy of your invoices and account info</p>
+        <div className="mb-5">
+          <CollapsibleSection
+            title="Data control panel"
+            subtitle="Export or permanently delete your data"
+            isOpen={openSection === "data"}
+            onToggle={() => toggleSection("data")}
+          >
+            <div className="flex flex-col divide-y divide-border -mx-4 -my-4">
+              <button onClick={handleExport} className="flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
+                <Download className="w-4 h-4 text-muted-foreground" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">Export my data</p>
+                  <p className="text-xs text-muted-foreground">Download a JSON copy of your invoices and account info</p>
+                </div>
+              </button>
+              <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
+                <AlertTriangle className="w-4 h-4 text-destructive" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-destructive">Delete my data</p>
+                  <p className="text-xs text-muted-foreground">Permanently remove your invoices, follow-ups, and connections</p>
+                </div>
+              </button>
             </div>
-          </button>
-          <button onClick={() => setConfirmDelete(true)} className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
-            <AlertTriangle className="w-4 h-4 text-destructive" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-destructive">Delete my data</p>
-              <p className="text-xs text-muted-foreground">Permanently remove your invoices, follow-ups, and Gmail connection</p>
-            </div>
-          </button>
+          </CollapsibleSection>
         </div>
 
         {/* LEGAL */}
