@@ -146,6 +146,7 @@ export default function OnboardingScreen() {
 
   // Persist progress so authentication round-trip doesn't lose context
   useEffect(() => {
+    if (isTestingMode()) return;
     const data: PersistedState = {
       step,
       selected0: Array.from(selected0),
