@@ -32,6 +32,19 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // === Subscription gate ===
+    // Backend is the single source of truth for entitlement.
+    // Returns 402 Payment Required if user doesn't have an active trial or paid sub.
+    const { data: hasEnt, error: entErr } = await supabaseAdmin
+      .rpc("has_active_entitlement", { _user_id: user.id });
+    if (entErr) {
+      console.error("entitlement check error:", entErr);
+      return json({ error: "Could not verify subscription" }, 500);
+    }
+    if (!hasEnt) {
+      return json({ error: "subscription_required", message: "Your trial has ended. Subscribe to keep sending follow-ups." }, 402);
+    }
+
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("sender_type")
