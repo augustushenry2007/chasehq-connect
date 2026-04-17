@@ -1,6 +1,32 @@
-import React, { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
+import type { Tables } from "@/integrations/supabase/types";
+import type { Invoice as FrontendInvoice } from "@/lib/data";
+
+type DbInvoice = Tables<"invoices">;
+
+function dbToFrontend(db: DbInvoice): FrontendInvoice {
+  return {
+    id: db.invoice_number,
+    client: db.client,
+    clientEmail: db.client_email,
+    description: db.description,
+    amount: Number(db.amount),
+    dueDate: new Date(db.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }),
+    dueDateISO: db.due_date,
+    status: db.status as FrontendInvoice["status"],
+    daysPastDue: db.days_past_due,
+    sentFrom: db.sent_from,
+    paymentDetails: db.payment_details,
+    clientReply: db.client_reply_snippet ? {
+      snippet: db.client_reply_snippet,
+      receivedAt: db.client_reply_received_at ? new Date(db.client_reply_received_at).toLocaleString() : "Recently",
+      channel: "email" as const,
+      senderEmail: db.client_reply_sender_email || db.client_email,
+    } : undefined,
+  };
+}
 
 interface NotificationSettings {
   emailNotifications: boolean;
@@ -23,6 +49,9 @@ interface AppContextType {
   hasCompletedOnboarding: boolean;
   notifications: NotificationSettings;
   schedule: ScheduleRow[];
+  invoices: FrontendInvoice[];
+  invoicesLoading: boolean;
+  refetchInvoices: () => Promise<void>;
   signIn: () => void;
   signOut: () => void;
   completeOnboarding: () => Promise<void>;
@@ -46,6 +75,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [authReady, setAuthReady] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [fullName, setFullName] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<FrontendInvoice[]>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(true);
   const [notifications, setNotifications] = useState<NotificationSettings>(() => {
     const s = localStorage.getItem("notifications");
     return s ? JSON.parse(s) : { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
@@ -86,6 +117,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [user]);
 
+  const refetchInvoices = useCallback(async () => {
+    if (!user) {
+      setInvoices([]);
+      setInvoicesLoading(false);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error) setInvoices(data ? data.map(dbToFrontend) : []);
+    setInvoicesLoading(false);
+  }, [user]);
+
+  // Fetch invoices once when user is set, then subscribe to realtime changes
+  useEffect(() => {
+    if (!authReady) return;
+    if (!user) {
+      setInvoices([]);
+      setInvoicesLoading(false);
+      return;
+    }
+    setInvoicesLoading(true);
+    refetchInvoices();
+
+    const channel = supabase
+      .channel(`invoices-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "invoices", filter: `user_id=eq.${user.id}` },
+        () => { refetchInvoices(); }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user, authReady, refetchInvoices]);
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
@@ -115,6 +183,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsAuthenticated(false);
     setUser(null);
     setHasCompletedOnboarding(false);
+    setInvoices([]);
     setNotifications({ emailNotifications: true, autoChase: true, defaultTone: "Friendly" });
     setSchedule(DEFAULT_SCHEDULE);
   }
@@ -148,7 +217,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ isAuthenticated, authReady, user, fullName, hasCompletedOnboarding, notifications, schedule, signIn, signOut, completeOnboarding, restartOnboarding, updateNotifications, updateSchedule }}>
+    <AppContext.Provider value={{ isAuthenticated, authReady, user, fullName, hasCompletedOnboarding, notifications, schedule, invoices, invoicesLoading, refetchInvoices, signIn, signOut, completeOnboarding, restartOnboarding, updateNotifications, updateSchedule }}>
       {children}
     </AppContext.Provider>
   );

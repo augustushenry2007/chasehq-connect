@@ -1,67 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/context/AppContext";
 import type { Tables } from "@/integrations/supabase/types";
-import type { Invoice as FrontendInvoice } from "@/lib/data";
 import { toast } from "sonner";
+import type { Invoice as FrontendInvoice } from "@/lib/data";
 
 export type DbInvoice = Tables<"invoices">;
 export type DbFollowup = Tables<"followups">;
 
-function dbToFrontend(db: DbInvoice): FrontendInvoice {
-  return {
-    id: db.invoice_number,
-    client: db.client,
-    clientEmail: db.client_email,
-    description: db.description,
-    amount: Number(db.amount),
-    dueDate: new Date(db.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }),
-    dueDateISO: db.due_date,
-    status: db.status as FrontendInvoice["status"],
-    daysPastDue: db.days_past_due,
-    sentFrom: db.sent_from,
-    paymentDetails: db.payment_details,
-    clientReply: db.client_reply_snippet ? {
-      snippet: db.client_reply_snippet,
-      receivedAt: db.client_reply_received_at ? new Date(db.client_reply_received_at).toLocaleString() : "Recently",
-      channel: "email",
-      senderEmail: db.client_reply_sender_email || db.client_email,
-    } : undefined,
-  };
-}
-
 export function useInvoices() {
-  const { user, authReady } = useApp();
-  const [invoices, setInvoices] = useState<FrontendInvoice[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchInvoices = useCallback(async () => {
-    if (!authReady) return;
-    if (!user) {
-      setInvoices([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("invoices")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching invoices:", error);
-      setInvoices([]);
-    } else {
-      setInvoices(data ? data.map(dbToFrontend) : []);
-    }
-    setLoading(false);
-  }, [user, authReady]);
-
-  useEffect(() => {
-    fetchInvoices();
-  }, [fetchInvoices]);
-
-  return { invoices, loading, refetch: fetchInvoices };
+  const { invoices, invoicesLoading, refetchInvoices } = useApp();
+  return { invoices, loading: invoicesLoading, refetch: refetchInvoices };
 }
 
 export async function createInvoice(userId: string, data: {
