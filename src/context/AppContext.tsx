@@ -159,7 +159,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [user, authReady, refetchInvoices]);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Testing mode: wipe persisted local state on every sign-in so each session starts fresh
+      if (isTestingMode() && event === "SIGNED_IN") {
+        clearTestingState();
+        setNotifications({ emailNotifications: true, autoChase: true, defaultTone: "Friendly" });
+        setSchedule(DEFAULT_SCHEDULE);
+        setHasCompletedOnboarding(false);
+      }
       setUser(session?.user ?? null);
       setIsAuthenticated(!!session?.user);
       setAuthReady(true);
