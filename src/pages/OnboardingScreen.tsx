@@ -1,8 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
-import { ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles, AlertCircle, Loader2 } from "lucide-react";
+import { lovable } from "@/integrations/lovable/index";
+import { GoogleIcon } from "@/components/GoogleIcon";
+import { validatePassword } from "@/lib/passwordValidation";
+import { toast } from "sonner";
+import {
+  ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles,
+  AlertCircle, Loader2, Eye, EyeOff, Lock, User, Shield, X,
+} from "lucide-react";
 
 const Q0 = {
   label: "Just checking in",
@@ -40,7 +47,9 @@ const Q2 = {
   ],
 };
 
-const TOTAL_STEPS = 5;
+// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth
+const TOTAL_STEPS = 7;
+const STORAGE_KEY = "onboarding_state";
 
 function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
   config: typeof Q0; selected: Set<string>; onToggle: (id: string) => void; customText: string; setCustomText: (s: string) => void;
@@ -86,39 +95,106 @@ interface Personalization {
   benefits: { title: string; detail: string }[];
 }
 
+interface PersistedState {
+  step: number;
+  selected0: string[];
+  selected1: string[];
+  selected2: string[];
+  custom0: string;
+  custom1: string;
+  custom2: string;
+}
+
+function loadState(): Partial<PersistedState> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
 export default function OnboardingScreen() {
   const navigate = useNavigate();
-  const { completeOnboarding, user } = useApp();
+  const { completeOnboarding, user, isAuthenticated } = useApp();
 
-  const [step, setStep] = useState(0);
-  const [selected0, setSelected0] = useState<Set<string>>(new Set());
-  const [selected1, setSelected1] = useState<Set<string>>(new Set());
-  const [selected2, setSelected2] = useState<Set<string>>(new Set());
-  const [custom0, setCustom0] = useState("");
-  const [custom1, setCustom1] = useState("");
-  const [custom2, setCustom2] = useState("");
+  const initial = useMemo(() => loadState(), []);
+  const [step, setStep] = useState<number>(initial.step ?? 0);
+  const [selected0, setSelected0] = useState<Set<string>>(new Set(initial.selected0 ?? []));
+  const [selected1, setSelected1] = useState<Set<string>>(new Set(initial.selected1 ?? []));
+  const [selected2, setSelected2] = useState<Set<string>>(new Set(initial.selected2 ?? []));
+  const [custom0, setCustom0] = useState(initial.custom0 ?? "");
+  const [custom1, setCustom1] = useState(initial.custom1 ?? "");
+  const [custom2, setCustom2] = useState(initial.custom2 ?? "");
   const [personalization, setPersonalization] = useState<Personalization | null>(null);
   const [personalizing, setPersonalizing] = useState(false);
   const [personalizationError, setPersonalizationError] = useState<string | null>(null);
 
-  const progress = (step / TOTAL_STEPS) * 100;
+  // Auth step state
+  const [authMode, setAuthMode] = useState<"signup" | "signin">("signup");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [finishingTrial, setFinishingTrial] = useState(false);
 
-  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "";
+  const progress = ((step + 1) / TOTAL_STEPS) * 100;
+  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || name.split(" ")[0] || "";
+
+  // Persist progress so authentication round-trip doesn't lose context
+  useEffect(() => {
+    const data: PersistedState = {
+      step,
+      selected0: Array.from(selected0),
+      selected1: Array.from(selected1),
+      selected2: Array.from(selected2),
+      custom0, custom1, custom2,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }, [step, selected0, selected1, selected2, custom0, custom1, custom2]);
+
+  // If a user comes back authenticated mid-onboarding, jump them to the auth-success path
+  useEffect(() => {
+    if (isAuthenticated && step < 6) {
+      // Resume at auth step so finalize logic runs
+      setStep(6);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  // Auto-finalize when authenticated and on auth step
+  useEffect(() => {
+    if (step !== 6 || !isAuthenticated || finishingTrial) return;
+    (async () => {
+      setFinishingTrial(true);
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (token) {
+          await supabase.functions.invoke("start-trial", {
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {});
+        }
+      } finally {
+        await completeOnboarding();
+        localStorage.removeItem(STORAGE_KEY);
+        navigate("/dashboard", { replace: true });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, isAuthenticated]);
 
   function canAdvance() {
     if (step === 0) return selected0.size > 0 || custom0.trim().length > 0;
     if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
     if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
-    return step < TOTAL_STEPS;
+    if (step === 3) return !personalizing; // gate while loading
+    return step < TOTAL_STEPS - 1;
   }
 
-  function next() { setStep((s) => s + 1); }
+  function next() { setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1)); }
   function back() { if (step > 0) setStep((s) => s - 1); }
-
-  function finish() {
-    completeOnboarding();
-    navigate("/dashboard", { replace: true });
-  }
 
   function makeToggle(setter: React.Dispatch<React.SetStateAction<Set<string>>>) {
     return (id: string) => {
@@ -154,7 +230,7 @@ export default function OnboardingScreen() {
         } else {
           setPersonalization(data);
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) setPersonalizationError("Couldn't personalize right now.");
       } finally {
         if (!cancelled) setPersonalizing(false);
@@ -163,6 +239,58 @@ export default function OnboardingScreen() {
     return () => { cancelled = true; };
   }, [step]);
 
+  // ===== Auth handlers (step 6) =====
+  const pwCheck = useMemo(() => validatePassword(password), [password]);
+  const isSignup = authMode === "signup";
+  const showPwRules = isSignup && (passwordTouched || password.length > 0);
+  const canSubmitAuth =
+    !!email && !!password && (!isSignup || (name.trim().length > 0 && pwCheck.isValid));
+
+  async function handleGoogle() {
+    setGoogleLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin + "/onboarding",
+      });
+      if (result.error) {
+        toast.error("Google sign-in failed: " + result.error.message);
+        setGoogleLoading(false);
+        return;
+      }
+      if (result.redirected) return;
+    } catch {
+      toast.error("Google sign-in failed");
+      setGoogleLoading(false);
+    }
+  }
+
+  async function handleAuthSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmitAuth) {
+      if (isSignup && !pwCheck.isValid) setPasswordTouched(true);
+      toast.error("Please fill in all fields");
+      return;
+    }
+    setSubmitLoading(true);
+    try {
+      if (isSignup) {
+        const { error } = await supabase.auth.signUp({
+          email, password,
+          options: {
+            data: { full_name: name.trim() },
+            emailRedirectTo: window.location.origin + "/onboarding",
+          },
+        });
+        if (error) { toast.error(error.message); setSubmitLoading(false); return; }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) { toast.error(error.message); setSubmitLoading(false); return; }
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      setSubmitLoading(false);
+    }
+  }
 
   function renderCta() {
     if (step < 3) {
@@ -177,9 +305,14 @@ export default function OnboardingScreen() {
       );
     }
     if (step === 3) {
+      const disabled = personalizing;
       return (
-        <button onClick={next} className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-          Show me how <ArrowRight className="w-4 h-4" />
+        <button
+          onClick={next}
+          disabled={disabled}
+          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {disabled ? (<><Loader2 className="w-4 h-4 animate-spin" /> Personalizing…</>) : (<>Show me how <ArrowRight className="w-4 h-4" /></>)}
         </button>
       );
     }
@@ -190,12 +323,21 @@ export default function OnboardingScreen() {
         </button>
       );
     }
-    return (
-      <button onClick={finish} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-        Go to Dashboard
-      </button>
-    );
+    if (step === 5) {
+      return (
+        <button onClick={next} className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+          Start free trial <ArrowRight className="w-4 h-4" />
+        </button>
+      );
+    }
+    // step 6 — auth has its own form CTA
+    return null;
   }
+
+  const billingDate = useMemo(() => {
+    const d = new Date(Date.now() + 30 * 86400_000);
+    return d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+  }, []);
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -203,7 +345,7 @@ export default function OnboardingScreen() {
       <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-3 shrink-0">
         <button
           onClick={back}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 && step !== 6 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <ChevronLeft className="w-4 h-4 text-muted-foreground" />
         </button>
@@ -212,7 +354,8 @@ export default function OnboardingScreen() {
         </div>
         <button
           onClick={() => canAdvance() && next()}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${canAdvance() ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          disabled={!canAdvance() || step === 3 && personalizing}
+          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${canAdvance() && step !== 6 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <ChevronRight className="w-4 h-4 text-muted-foreground" />
         </button>
@@ -318,14 +461,145 @@ export default function OnboardingScreen() {
           )}
 
           {step === 5 && (
-            <div className="text-center py-4">
-              <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
-                <Check className="w-8 h-8 text-primary-foreground" />
-              </div>
-              <h2 className="text-xl font-bold text-foreground mb-2">You're all set</h2>
-              <p className="text-sm text-muted-foreground">
-                ChaseHQ will handle the follow-ups so you can focus on the work.
+            <div>
+              <span className="text-xs font-semibold text-primary uppercase tracking-wider">Try it free</span>
+              <h2 className="text-xl font-bold text-foreground mt-2 mb-2">30 days free, then $5/month</h2>
+              <p className="text-sm text-muted-foreground mb-5">
+                Start with full access. We'll remind you before billing begins on <span className="font-semibold text-foreground">{billingDate}</span>. Cancel anytime in Settings.
               </p>
+
+              <div className="border border-primary/30 bg-accent/40 rounded-xl p-4 mb-4">
+                <div className="flex items-baseline gap-1.5 mb-3">
+                  <span className="text-3xl font-bold text-foreground">$5</span>
+                  <span className="text-sm text-muted-foreground">/ month after trial</span>
+                </div>
+                <ul className="flex flex-col gap-2.5">
+                  {[
+                    "AI-drafted follow-ups in 4 tones",
+                    "Smart timing — we tell you when to send",
+                    "Send via your connected Gmail",
+                    "Final-notice escalation when needed",
+                    "Cancel anytime, no questions asked",
+                  ].map((f) => (
+                    <li key={f} className="flex items-start gap-2.5 text-sm text-foreground">
+                      <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center shrink-0 mt-0.5">
+                        <Check className="w-2.5 h-2.5 text-primary-foreground" />
+                      </div>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-muted">
+                <Shield className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  No charge today. We'll email you 3 days before your trial ends. Manage or cancel from Settings → Billing.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {step === 6 && (
+            <div>
+              <span className="text-xs font-semibold text-primary uppercase tracking-wider">Last step</span>
+              <h2 className="text-xl font-bold text-foreground mt-2 mb-2">
+                {isSignup ? "Create your account" : "Welcome back"}
+              </h2>
+              <p className="text-sm text-muted-foreground mb-5">
+                {isSignup ? "Save your setup and start your free trial." : "Sign in to access your dashboard."}
+              </p>
+
+              {finishingTrial ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Setting up your trial…
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={handleGoogle}
+                    disabled={googleLoading || submitLoading}
+                    className="w-full flex items-center justify-center gap-3 bg-card border border-border rounded-xl py-3 mb-4 disabled:opacity-60"
+                  >
+                    {googleLoading ? <Loader2 className="w-5 h-5 animate-spin text-foreground" /> : (
+                      <>
+                        <GoogleIcon className="w-5 h-5" />
+                        <span className="text-sm font-medium text-foreground">
+                          {isSignup ? "Sign up with Google" : "Sign in with Google"}
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="flex-1 h-px bg-border" />
+                    <span className="text-[11px] text-muted-foreground uppercase tracking-wider">Or</span>
+                    <div className="flex-1 h-px bg-border" />
+                  </div>
+
+                  <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
+                    {isSignup && (
+                      <FieldWrap icon={<User className="w-4 h-4" />}>
+                        <input
+                          type="text" value={name} onChange={(e) => setName(e.target.value)}
+                          placeholder="Full name" autoComplete="name"
+                          className="w-full bg-transparent pl-10 pr-3 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                        />
+                      </FieldWrap>
+                    )}
+                    <FieldWrap icon={<Mail className="w-4 h-4" />}>
+                      <input
+                        type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                        placeholder="Email" autoComplete="email"
+                        className="w-full bg-transparent pl-10 pr-3 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                      />
+                    </FieldWrap>
+                    <FieldWrap icon={<Lock className="w-4 h-4" />}>
+                      <input
+                        type={showPassword ? "text" : "password"} value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        onBlur={() => setPasswordTouched(true)}
+                        placeholder={isSignup ? "Create password" : "Password"}
+                        autoComplete={isSignup ? "new-password" : "current-password"}
+                        className="w-full bg-transparent pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                      />
+                      <button type="button" onClick={() => setShowPassword((s) => !s)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </FieldWrap>
+
+                    {showPwRules && (
+                      <ul className="flex flex-col gap-1 px-1" aria-live="polite">
+                        {pwCheck.results.map((r) => (
+                          <li key={r.id} className="flex items-center gap-1.5 text-[12px]">
+                            {r.passed ? <Check className="w-3.5 h-3.5 text-primary shrink-0" /> : <X className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+                            <span className={r.passed ? "text-foreground" : "text-muted-foreground"}>{r.label}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={submitLoading || googleLoading || (isSignup && !canSubmitAuth)}
+                      className="mt-2 flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-50"
+                    >
+                      {submitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (isSignup ? "Start my free trial" : "Sign in")}
+                    </button>
+                  </form>
+
+                  <p className="text-center text-xs text-muted-foreground mt-4">
+                    {isSignup ? "Already have an account?" : "New to ChaseHQ?"}{" "}
+                    <button
+                      onClick={() => { setAuthMode(isSignup ? "signin" : "signup"); setPasswordTouched(false); }}
+                      className="font-semibold text-primary"
+                    >
+                      {isSignup ? "Sign in" : "Create one"}
+                    </button>
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -333,6 +607,15 @@ export default function OnboardingScreen() {
           {renderCta()}
         </div>
       </div>
+    </div>
+  );
+}
+
+function FieldWrap({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="relative border border-border bg-card rounded-xl focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary">
+      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground">{icon}</span>
+      {children}
     </div>
   );
 }
