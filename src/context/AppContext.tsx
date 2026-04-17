@@ -76,11 +76,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setHasCompletedOnboarding(false);
       return;
     }
-    // Demo account always skips onboarding
-    if (user.email === DEMO_EMAIL) {
-      setHasCompletedOnboarding(true);
-      return;
-    }
     let cancelled = false;
     (async () => {
       const { data } = await supabase
