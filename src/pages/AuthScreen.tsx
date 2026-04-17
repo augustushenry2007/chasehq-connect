@@ -8,14 +8,19 @@ import { toast } from "sonner";
 
 export default function AuthScreen() {
   const navigate = useNavigate();
-  const { isAuthenticated, hasCompletedOnboarding, authReady } = useApp();
+  const { isAuthenticated, hasCompletedOnboarding, authReady, restartOnboarding } = useApp();
   const [loading, setLoading] = useState(false);
+  const [forceQuiz, setForceQuiz] = useState(false);
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return;
+    if (forceQuiz) {
+      navigate("/onboarding", { replace: true });
+      return;
+    }
     if (hasCompletedOnboarding) navigate("/dashboard", { replace: true });
     else navigate("/onboarding", { replace: true });
-  }, [authReady, isAuthenticated, hasCompletedOnboarding, navigate]);
+  }, [authReady, isAuthenticated, hasCompletedOnboarding, navigate, forceQuiz]);
 
   async function handleSignIn() {
     setLoading(true);
@@ -38,6 +43,7 @@ export default function AuthScreen() {
   async function handleQuiz() {
     // Sign in as demo and route directly to onboarding quiz
     setLoading(true);
+    setForceQuiz(true);
     const { error } = await supabase.auth.signInWithPassword({
       email: "demo@chasehq.app",
       password: "demo123456",
@@ -50,11 +56,12 @@ export default function AuthScreen() {
       if (signUpError) {
         toast.error("Failed: " + signUpError.message);
         setLoading(false);
+        setForceQuiz(false);
         return;
       }
     }
+    await restartOnboarding();
     setLoading(false);
-    navigate("/onboarding", { replace: true });
   }
 
   return (
