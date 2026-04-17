@@ -9,6 +9,7 @@ const corsHeaders = {
 const TRIAL_DAYS = 30;
 
 serve(async (req) => {
+  console.log("start-trial: invoked", req.method);
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
