@@ -359,7 +359,7 @@ export default function SettingsScreen() {
       await supabase.from("profiles").delete().eq("user_id", user.id);
       toast.success("Your data has been deleted");
       await signOut();
-      navigate("/auth", { replace: true });
+      navigate("/onboarding", { replace: true });
     } catch (e) {
       toast.error("Failed to delete data");
       setDeleting(false);
