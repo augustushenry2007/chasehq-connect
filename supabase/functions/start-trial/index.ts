@@ -3,16 +3,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const TRIAL_DAYS = 30;
 
 serve(async (req) => {
+  console.log("start-trial: invoked", req.method);
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const authHeader = req.headers.get("Authorization");
+    console.log("auth header present:", !!authHeader);
     if (!authHeader) return json({ error: "Not authenticated" }, 401);
 
     const supabaseUser = createClient(
@@ -21,6 +23,7 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
     const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
+    console.log("getUser:", { userId: user?.id, authError: authError?.message });
     if (authError || !user) return json({ error: "Invalid session" }, 401);
 
     const admin = createClient(
@@ -28,10 +31,10 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { data: existing } = await admin
+    const { data: existing, error: selError } = await admin
       .from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
+    console.log("select existing:", { existing, selError: selError?.message });
 
-    // If user already has any non-'none' subscription, don't restart trial.
     if (existing && existing.status !== "none") {
       return json({
         ok: true,
@@ -51,17 +54,19 @@ serve(async (req) => {
       trial_ends_at: trialEndsAt,
       last_event_at: nowIso,
     }, { onConflict: "user_id" }).select().maybeSingle();
+    console.log("upsert result:", { data: upsert.data, error: upsert.error?.message });
 
     if (upsert.error) {
       console.error("start-trial upsert error:", upsert.error);
-      return json({ error: "Could not start trial" }, 500);
+      return json({ error: upsert.error.message || "Could not start trial" }, 500);
     }
 
-    await admin.from("subscription_events").insert({
+    const evt = await admin.from("subscription_events").insert({
       user_id: user.id,
       event_type: "trial_started",
       payload: { trial_ends_at: trialEndsAt, plan: "chasehq_pro_monthly" },
     });
+    console.log("event insert:", { error: evt.error?.message });
 
     return json({ ok: true, status: "trialing", trial_ends_at: trialEndsAt });
   } catch (e) {
