@@ -3,10 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useApp, type ScheduleRow } from "@/context/AppContext";
 import {
   ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2, Mail, Loader2,
-  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle,
+  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, Server,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
+import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -14,6 +15,22 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+type SmtpPreset = {
+  id: string;
+  label: string;
+  host: string;
+  port: number;
+  helpUrl?: string;
+  helpText?: string;
+};
+
+const SMTP_PRESETS: SmtpPreset[] = [
+  { id: "outlook", label: "Outlook / Microsoft 365", host: "smtp.office365.com", port: 587, helpUrl: "https://support.microsoft.com/en-us/account-billing/manage-app-passwords-for-two-step-verification-d6dc8c6d-4bf7-4851-ad95-6d07799387e9", helpText: "Use an app password if you have 2FA enabled." },
+  { id: "yahoo", label: "Yahoo Mail", host: "smtp.mail.yahoo.com", port: 587, helpUrl: "https://help.yahoo.com/kb/SLN15241.html", helpText: "Yahoo requires an app password — generate one in your account settings." },
+  { id: "icloud", label: "iCloud Mail", host: "smtp.mail.me.com", port: 587, helpUrl: "https://support.apple.com/en-us/102654", helpText: "iCloud requires an app-specific password." },
+  { id: "custom", label: "Custom SMTP", host: "", port: 587 },
+];
 
 type SectionKey = "notifications" | "schedule" | null;
 
