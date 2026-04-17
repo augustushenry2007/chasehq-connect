@@ -21,16 +21,6 @@ export interface ScheduleRow {
   status: "sent" | "reminder-1" | "reminder-2" | "checkpoint";
 }
 
-export interface Integration {
-  id: string;
-  name: string;
-  description: string;
-  color: string;
-  initial: string;
-  connected: boolean;
-  lastSynced?: string;
-}
-
 interface AppContextType {
   isAuthenticated: boolean;
   authReady: boolean;
@@ -40,7 +30,6 @@ interface AppContextType {
   profile: UserProfile;
   notifications: NotificationSettings;
   schedule: ScheduleRow[];
-  integrations: Integration[];
   signIn: () => void;
   signOut: () => void;
   completeOnboarding: () => Promise<void>;
@@ -48,7 +37,6 @@ interface AppContextType {
   updateProfile: (profile: UserProfile) => void;
   updateNotifications: (settings: NotificationSettings) => void;
   updateSchedule: (schedule: ScheduleRow[]) => void;
-  toggleIntegration: (id: string) => void;
 }
 
 const DEMO_EMAIL = "demo@chasehq.app";
@@ -58,13 +46,6 @@ const DEFAULT_SCHEDULE: ScheduleRow[] = [
   { id: 2, day: 7, action: "Friendly reminder", status: "reminder-1" },
   { id: 3, day: 14, action: "Firm reminder", status: "reminder-2" },
   { id: 4, day: 21, action: "Formal notice — your approval needed", status: "checkpoint" },
-];
-
-const DEFAULT_INTEGRATIONS: Integration[] = [
-  { id: "freshbooks", name: "FreshBooks", description: "Sync invoices automatically when marked as sent", color: "#1AB5D1", initial: "FB", connected: true, lastSynced: "2 hours ago" },
-  { id: "xero", name: "Xero", description: "Import approved invoices and track payment status", color: "#13B5EA", initial: "X", connected: false },
-  { id: "quickbooks", name: "QuickBooks", description: "Connect to pull invoices and monitor overdue accounts", color: "#2BA01B", initial: "QB", connected: false },
-  { id: "bonsai", name: "Bonsai", description: "Automatically trigger chase sequences on unpaid invoices", color: "#6C47FF", initial: "B", connected: false },
 ];
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -85,10 +66,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [schedule, setSchedule] = useState<ScheduleRow[]>(() => {
     const s = localStorage.getItem("schedule");
     return s ? JSON.parse(s) : DEFAULT_SCHEDULE;
-  });
-  const [integrations, setIntegrations] = useState<Integration[]>(() => {
-    const s = localStorage.getItem("integrations");
-    return s ? JSON.parse(s) : DEFAULT_INTEGRATIONS;
   });
 
   const isDemoUser = user?.email === DEMO_EMAIL;
@@ -183,18 +160,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("schedule", JSON.stringify(s));
   }
 
-  function toggleIntegration(id: string) {
-    setIntegrations((prev) => {
-      const updated = prev.map((t) =>
-        t.id === id ? { ...t, connected: !t.connected, lastSynced: !t.connected ? "Just now" : undefined } : t
-      );
-      localStorage.setItem("integrations", JSON.stringify(updated));
-      return updated;
-    });
-  }
-
   return (
-    <AppContext.Provider value={{ isAuthenticated, authReady, user, hasCompletedOnboarding, isDemoUser, profile, notifications, schedule, integrations, signIn, signOut, completeOnboarding, restartOnboarding, updateProfile, updateNotifications, updateSchedule, toggleIntegration }}>
+    <AppContext.Provider value={{ isAuthenticated, authReady, user, hasCompletedOnboarding, isDemoUser, profile, notifications, schedule, signIn, signOut, completeOnboarding, restartOnboarding, updateProfile, updateNotifications, updateSchedule }}>
       {children}
     </AppContext.Provider>
   );

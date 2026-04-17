@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useApp, type ScheduleRow, type Integration } from "@/context/AppContext";
+import { useApp, type ScheduleRow } from "@/context/AppContext";
 import { ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2, Mail, Loader2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { toast } from "sonner";
 
-type SectionKey = "profile" | "notifications" | "schedule" | "integrations" | null;
+type SectionKey = "profile" | "notifications" | "schedule" | null;
 
 function CollapsibleSection({ title, subtitle, isOpen, onToggle, children }: {
   title: string; subtitle: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode;
@@ -161,32 +161,9 @@ function ScheduleSection({ schedule, updateSchedule }: { schedule: ScheduleRow[]
   );
 }
 
-function IntegrationRow({ integration, onToggle }: { integration: Integration; onToggle: () => void }) {
-  return (
-    <div className="flex items-center gap-3 py-3 px-1 border-b border-border last:border-0">
-      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-primary-foreground font-bold text-sm shrink-0" style={{ backgroundColor: integration.color }}>
-        {integration.initial}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground">{integration.name}</p>
-        <p className="text-xs text-muted-foreground">{integration.description}</p>
-        {integration.connected && integration.lastSynced && (
-          <p className="text-xs text-primary mt-0.5">Synced {integration.lastSynced}</p>
-        )}
-      </div>
-      <button
-        onClick={onToggle}
-        className={`px-3 py-1.5 rounded-lg text-xs font-medium ${integration.connected ? "bg-destructive/10 text-destructive" : "bg-primary text-primary-foreground"}`}
-      >
-        {integration.connected ? "Disconnect" : "Connect"}
-      </button>
-    </div>
-  );
-}
-
 export default function SettingsScreen() {
   const navigate = useNavigate();
-  const { profile, notifications, schedule, integrations, updateProfile, updateNotifications, updateSchedule, toggleIntegration, signOut, restartOnboarding } = useApp();
+  const { profile, notifications, schedule, updateProfile, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
   const { gmail, loading: gmailLoading, connectGmail, disconnectGmail } = useGmailConnection();
   const [gmailConnecting, setGmailConnecting] = useState(false);
@@ -266,14 +243,6 @@ export default function SettingsScreen() {
 
           <CollapsibleSection title="Follow-Up Schedule" subtitle="Customize when each follow-up fires" isOpen={openSection === "schedule"} onToggle={() => toggleSection("schedule")}>
             <ScheduleSection schedule={schedule} updateSchedule={updateSchedule} />
-          </CollapsibleSection>
-
-          <CollapsibleSection title="Integrations" subtitle={`${integrations.filter(i => i.connected).length} active connection${integrations.filter(i => i.connected).length !== 1 ? "s" : ""}`} isOpen={openSection === "integrations"} onToggle={() => toggleSection("integrations")}>
-            <div className="-mx-4 -mb-4">
-              {integrations.map((integ) => (
-                <IntegrationRow key={integ.id} integration={integ} onToggle={() => toggleIntegration(integ.id)} />
-              ))}
-            </div>
           </CollapsibleSection>
         </div>
 
