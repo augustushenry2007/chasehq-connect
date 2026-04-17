@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
+import { isTestingMode } from "@/lib/testingMode";
 import { GoogleIcon } from "@/components/GoogleIcon";
 import { validatePassword } from "@/lib/passwordValidation";
 import { toast } from "sonner";
