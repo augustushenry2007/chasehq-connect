@@ -149,20 +149,12 @@ export default function DashboardScreen() {
             </div>
           </div>
 
-          {/* Get-started checklist */}
+          {/* Get-started checklist (Gmail only — invoice CTA is the hero above) */}
           <div className="mt-4 mx-5">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
               Get set up
             </h3>
             <div className="flex flex-col gap-2.5">
-              <GetStartedStep
-                done={!isEmpty}
-                title="Add your first invoice"
-                description="Track what clients owe and watch ChaseHQ chase for you."
-                action="Add invoice"
-                onAction={() => setShowNew(true)}
-                icon={FileText}
-              />
               <GetStartedStep
                 done={gmail.connected}
                 title="Connect your inbox"
