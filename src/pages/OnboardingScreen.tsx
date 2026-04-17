@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
-import { ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles, AlertCircle, Loader2 } from "lucide-react";
 
 const Q0 = {
   label: "Just checking in",
@@ -78,9 +79,16 @@ function MultiSelectStep({ config, selected, onToggle, customText, setCustomText
   );
 }
 
+interface Personalization {
+  headline: string;
+  subhead: string;
+  painPoints: { title: string; detail: string }[];
+  benefits: { title: string; detail: string }[];
+}
+
 export default function OnboardingScreen() {
   const navigate = useNavigate();
-  const { completeOnboarding } = useApp();
+  const { completeOnboarding, user } = useApp();
 
   const [step, setStep] = useState(0);
   const [selected0, setSelected0] = useState<Set<string>>(new Set());
@@ -89,8 +97,13 @@ export default function OnboardingScreen() {
   const [custom0, setCustom0] = useState("");
   const [custom1, setCustom1] = useState("");
   const [custom2, setCustom2] = useState("");
+  const [personalization, setPersonalization] = useState<Personalization | null>(null);
+  const [personalizing, setPersonalizing] = useState(false);
+  const [personalizationError, setPersonalizationError] = useState<string | null>(null);
 
   const progress = (step / TOTAL_STEPS) * 100;
+
+  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "";
 
   function canAdvance() {
     if (step === 0) return selected0.size > 0 || custom0.trim().length > 0;
@@ -117,16 +130,39 @@ export default function OnboardingScreen() {
     };
   }
 
-  function buildFeelingLabel() {
-    const labels = Array.from(selected0).map((id) => Q0.options.find((o) => o.id === id)?.label.toLowerCase() ?? id);
-    if (custom0.trim()) labels.push(custom0.trim().toLowerCase());
-    if (labels.length === 0) return "";
-    if (labels.length === 1) return labels[0];
-    if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
-    return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
-  }
+  // Generate AI personalization when entering step 3
+  useEffect(() => {
+    if (step !== 3 || personalization || personalizing) return;
+    let cancelled = false;
+    (async () => {
+      setPersonalizing(true);
+      setPersonalizationError(null);
+      const feelings = Array.from(selected0).map((id) => Q0.options.find((o) => o.id === id)?.label || id);
+      const worries = Array.from(selected1).map((id) => Q1.options.find((o) => o.id === id)?.label || id);
+      const goals = Array.from(selected2).map((id) => Q2.options.find((o) => o.id === id)?.label || id);
+      try {
+        const { data, error } = await supabase.functions.invoke("generate-personalization", {
+          body: {
+            feelings, worries, goals,
+            custom: { feelings: custom0, worries: custom1, goals: custom2 },
+            firstName,
+          },
+        });
+        if (cancelled) return;
+        if (error || data?.error) {
+          setPersonalizationError(data?.error || error?.message || "Couldn't personalize right now.");
+        } else {
+          setPersonalization(data);
+        }
+      } catch (e) {
+        if (!cancelled) setPersonalizationError("Couldn't personalize right now.");
+      } finally {
+        if (!cancelled) setPersonalizing(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step]);
 
-  const feelingLabel = buildFeelingLabel();
 
   function renderCta() {
     if (step < 3) {
