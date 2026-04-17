@@ -2,9 +2,14 @@ import { Capacitor } from "@capacitor/core";
 
 export const PRODUCT_ID = "chasehq_pro_monthly";
 
-export type PurchaseResult =
-  | { ok: true; receipt: string; productId: string; mock?: boolean }
-  | { ok: false; error: string; canceled?: boolean };
+export interface PurchaseResult {
+  ok: boolean;
+  receipt?: string;
+  productId?: string;
+  mock?: boolean;
+  error?: string;
+  canceled?: boolean;
+}
 
 /**
  * Abstraction over Apple StoreKit. On iOS native this calls the
