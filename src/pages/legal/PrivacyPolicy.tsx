@@ -127,7 +127,27 @@ export default function PrivacyPolicy() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">9. Changes to this policy</h2>
+            <h2 className="text-lg font-semibold mb-2">9. Subscriptions &amp; billing</h2>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              ChaseHQ offers a paid subscription. On iOS, all purchases are
+              processed by Apple through the App Store using your Apple ID. We
+              never see, store, or process your payment card details. Apple
+              shares with us a transaction identifier and subscription status
+              (active, expired, canceled, refunded) so we can grant or revoke
+              access. We store this information together with your account so
+              you can use ChaseHQ on multiple devices.
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-2">
+              You can manage, pause, or cancel your subscription at any time
+              from <span className="text-foreground font-medium">Settings → Apple ID → Subscriptions</span> on your
+              device, or from Settings → Billing inside ChaseHQ. Refunds for
+              App Store purchases are handled by Apple under their{" "}
+              <a href="https://support.apple.com/billing" target="_blank" rel="noreferrer" className="text-primary underline">refund policy</a>.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold mb-2">10. Changes to this policy</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               We may update this policy from time to time. Material changes will be communicated
               in-app or by email at least 7 days before they take effect.
@@ -135,7 +155,7 @@ export default function PrivacyPolicy() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">10. Governing law &amp; contact</h2>
+            <h2 className="text-lg font-semibold mb-2">11. Governing law &amp; contact</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               This policy is governed by the laws of the State of Delaware, United States,
               without regard to conflict-of-law principles. Questions or requests can be sent to{" "}
