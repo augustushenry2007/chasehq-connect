@@ -10,6 +10,8 @@ import DashboardScreen from "./pages/DashboardScreen";
 import InvoicesScreen from "./pages/InvoicesScreen";
 import InvoiceDetailScreen from "./pages/InvoiceDetailScreen";
 import SettingsScreen from "./pages/SettingsScreen";
+import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
+import TermsOfUse from "./pages/legal/TermsOfUse";
 import NotFound from "./pages/NotFound";
 
 const App = () => (
@@ -27,6 +29,8 @@ const App = () => (
             <Route path="/settings" element={<SettingsScreen />} />
           </Route>
           <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
+          <Route path="/legal/privacy" element={<PrivacyPolicy />} />
+          <Route path="/legal/terms" element={<TermsOfUse />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

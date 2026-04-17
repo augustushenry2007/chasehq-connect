@@ -58,7 +58,7 @@ export default function DashboardScreen() {
   const navigate = useNavigate();
   const { user } = useApp();
   const { invoices, refetch } = useInvoices();
-  const { gmail, connectGmail } = useGmailConnection();
+  const { gmail, connectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
   const [showNew, setShowNew] = useState(false);
   const [connectingGmail, setConnectingGmail] = useState(false);
 
@@ -139,23 +139,29 @@ export default function DashboardScreen() {
             </div>
           </div>
 
-          {/* Get-started checklist (Gmail only — invoice CTA is the hero above) */}
-          <div className="mt-4 mx-5">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
-              Get set up
-            </h3>
-            <div className="flex flex-col gap-2.5">
-              <GetStartedStep
-                done={gmail.connected}
-                title="Connect your inbox"
-                description={gmail.connected ? `Connected as ${gmail.email}` : "Send follow-ups from your own Gmail so replies land where you'd expect."}
-                action="Connect Gmail"
-                onAction={handleConnectGmail}
-                loading={connectingGmail}
-                icon={Mail}
-              />
+          {/* Get-started checklist — only show if Gmail send permission isn't granted yet */}
+          {!gmail.connected && (
+            <div className="mt-4 mx-5">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+                Get set up
+              </h3>
+              <div className="flex flex-col gap-2.5">
+                <GetStartedStep
+                  done={false}
+                  title={signedInWithGoogle ? "Allow ChaseHQ to send follow-ups" : "Connect your inbox"}
+                  description={
+                    signedInWithGoogle
+                      ? `One-click permission to send from ${googleEmail}. We never read your inbox.`
+                      : "Send follow-ups from your own Gmail so replies land where you'd expect."
+                  }
+                  action={signedInWithGoogle ? "Grant permission" : "Connect Gmail"}
+                  onAction={handleConnectGmail}
+                  loading={connectingGmail}
+                  icon={Mail}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* What ChaseHQ does */}
           <div className="mt-4 mx-5 bg-card border border-border rounded-2xl p-4 mb-4">
