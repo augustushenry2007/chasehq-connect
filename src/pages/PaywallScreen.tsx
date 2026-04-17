@@ -42,7 +42,7 @@ export default function PaywallScreen() {
       return;
     }
     const { data, error } = await supabase.functions.invoke("validate-apple-receipt", {
-      body: { receipt: result.receipt, productId: result.productId, mock: (result as any).mock },
+      body: { receipt: result.receipt, productId: result.productId, mock: result.mock },
     });
     setBusy(null);
     if (error || (data as any)?.error) {
@@ -63,7 +63,7 @@ export default function PaywallScreen() {
       return;
     }
     const { data, error } = await supabase.functions.invoke("validate-apple-receipt", {
-      body: { receipt: result.receipt, productId: result.productId, mock: (result as any).mock, restore: true },
+      body: { receipt: result.receipt, productId: result.productId, mock: result.mock, restore: true },
     });
     setBusy(null);
     if (error || (data as any)?.error) {
