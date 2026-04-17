@@ -7,9 +7,10 @@ import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
 import {
   TrendingUp, AlertTriangle, CheckCircle, Mail, Eye, Clock, MessageSquare, Check,
-  Plus, FileText, Sparkles, Settings as SettingsIcon, ArrowRight,
+  Plus, FileText, Sparkles, ArrowRight, Loader2,
 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
+import { toast } from "sonner";
 import type { ActivityType } from "@/lib/data";
 
 const ACTIVITY_ICON: Record<ActivityType, { bg: string; icon: React.ElementType; color: string }> = {
