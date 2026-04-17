@@ -5,11 +5,6 @@ import { AppProvider } from "@/context/AppContext";
 import RootRedirect from "./pages/RootRedirect";
 import AuthScreen from "./pages/AuthScreen";
 import OnboardingScreen from "./pages/OnboardingScreen";
-import WelcomeScreen from "./pages/quickstart/WelcomeScreen";
-import AskScreen from "./pages/quickstart/AskScreen";
-import QuickInvoiceScreen from "./pages/quickstart/InvoiceScreen";
-import DraftScreen from "./pages/quickstart/DraftScreen";
-import SentScreen from "./pages/quickstart/SentScreen";
 import TabLayout from "./components/TabLayout";
 import DashboardScreen from "./pages/DashboardScreen";
 import InvoicesScreen from "./pages/InvoicesScreen";
@@ -30,11 +25,6 @@ const App = () => (
           <Route path="/" element={<RootRedirect />} />
           <Route path="/auth" element={<AuthScreen />} />
           <Route path="/onboarding" element={<OnboardingScreen />} />
-          <Route path="/quickstart/welcome" element={<WelcomeScreen />} />
-          <Route path="/quickstart/ask" element={<AskScreen />} />
-          <Route path="/quickstart/invoice" element={<QuickInvoiceScreen />} />
-          <Route path="/quickstart/draft" element={<DraftScreen />} />
-          <Route path="/quickstart/sent" element={<SentScreen />} />
           <Route element={<TabLayout />}>
             <Route path="/dashboard" element={<DashboardScreen />} />
             <Route path="/invoices" element={<InvoicesScreen />} />

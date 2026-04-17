@@ -1,80 +1,124 @@
 
 
-## Plan — Rebuild first-run UX around the "magic moment"
+## Plan — Subscription system for ChaseHQ (iOS)
 
-### What the PDFs prescribe
-The current onboarding asks 3 emotional questions, generates AI personalization, then dumps user on a Dashboard. The PDFs argue the opposite: **deliver one piece of value before asking for anything**. User should see a real follow-up message drafted for *their* situation within ~60 seconds — that's the hook. Auth/Gmail/feature explanations come *after* the wow moment.
+### Scope decisions
 
-### New flow
+- **Apple IAP is the source of truth on iOS** (App Store policy requires it for digital subscriptions). Stripe is **not** used in parallel for iOS users — adding it creates double-billing risk and violates App Store guidelines for iOS-purchased subs. I'll wire Stripe as an **optional path for the web/PWA build only**, gated by platform detection. For this iteration, I recommend shipping iOS-only and deferring web Stripe to phase 2.
+- **Lovable preview runs in a browser**, not in iOS. So during development you'll test the paywall UI + backend in the web preview using a **mock IAP layer** (returns fake receipts). Real StoreKit integration only runs in the native iOS build via Capacitor + the `@capgo/capacitor-purchases` plugin (RevenueCat-compatible). 
+- **Receipt validation**: done server-side via an edge function calling Apple's `verifyReceipt` / App Store Server API. Never trust the client.
+- **Trial enforcement**: backend computes entitlement from `subscriptions` table — client only reads it. No localStorage flags.
+
+### Architecture
 
 ```text
-/auth (signup)
-   ↓
-/welcome              ← NEW. One line: "Following up on payments shouldn't feel this hard." + Start button
-   ↓
-/quickstart/ask       ← NEW. "Do you have a payment you're waiting on?"   [Yes] [Not right now]
-   ↓                                          ↘ (Not right now → demo invoice prefilled)
-/quickstart/invoice   ← NEW. 3 fields only: Client name, Amount (optional), Status (Due soon / Due today / Overdue)
-   ↓ [Create follow-up]
-/quickstart/draft     ← NEW. THE MOMENT. Typing animation → message appears.
-                          Tone chip: "Friendly nudge"   Timing: "Send now"
-                          Subtle line: "If no reply, we'll follow up again in 3 days — slightly firmer."
-                          [Send via Gmail]   [Edit tone]
-   ↓ (tap Send → NOW prompt Gmail connect if missing)
-/quickstart/sent      ← NEW. "Nice. Most freelancers delay this by 2–3 days."
-                          "We'll handle the next follow-up if needed."   [Go to dashboard]
-   ↓
-/dashboard            ← invoice already exists, next follow-up scheduled
+iOS app (Capacitor)
+    │
+    ├─ @capgo/capacitor-purchases  →  Apple StoreKit  →  App Store
+    │                                                         │
+    │                                                         ▼
+    │                                              Apple Server-to-Server
+    │                                              Notifications (V2)
+    │                                                         │
+    ▼                                                         ▼
+  edge fn: validate-receipt   ◄──────────────  edge fn: apple-webhook
+              │                                               │
+              ▼                                               ▼
+         subscriptions table  (single source of truth for entitlement)
+              │
+              ▼
+         useEntitlement() hook  →  gates UI + send-email function
 ```
 
-The current 5-step emotional/personalization onboarding is **removed from the critical path**. We keep the `generate-personalization` edge function but only surface tailored copy passively on Dashboard later (not as a gate).
+### Database (one migration)
 
-### Architectural changes
+New table `subscriptions`:
+- `user_id` (uuid, unique, FK to auth.users)
+- `status` enum: `trialing | active | past_due | canceled | expired | none`
+- `plan` text (default `chasehq_pro_monthly`)
+- `trial_ends_at` timestamptz
+- `current_period_end` timestamptz
+- `canceled_at` timestamptz nullable
+- `apple_original_transaction_id` text nullable (links to Apple)
+- `apple_latest_receipt` text nullable (encrypted at rest via column or just stored — RLS-protected)
+- `stripe_customer_id`, `stripe_subscription_id` nullable (future web use)
+- `last_event_at` timestamptz
+- RLS: user can SELECT own row; only service role can INSERT/UPDATE (writes happen exclusively in edge functions).
 
-1. **New route group `/quickstart/*`** with shared layout (no tab bar, calm spacing, single CTA per screen).
-2. **`OnboardingScreen.tsx` becomes a thin redirector** to `/quickstart/welcome` for new users (keeps `completeOnboarding()` semantics — fires after `/quickstart/sent`, or after "Not right now" path lands them on dashboard).
-3. **Gmail connect is deferred**: removed from any pre-value step. Triggered inline by Send button on draft screen if `!hasGmail`. Modal sheet, not a full screen.
-4. **Empty states killed**: Dashboard never shows "No invoices yet". If somehow empty, it shows a single card "Add your first follow-up" that opens the quickstart flow inline.
-5. **Button placement**:
-   - Primary CTA always bottom-pinned, full-width, single action per screen.
-   - Secondary actions become tertiary (small text link), e.g. "Not right now", "Edit tone".
-   - Back chevron top-left only after step 2 (welcome has no back).
-6. **AI draft generation**: reuse existing `generate-followup` edge function. New `useQuickDraft()` hook calls it with `{client, amount, status}` and returns text streamed into typing animation.
-7. **Invoice persistence**: the quickstart invoice IS a real DB invoice (created on `/quickstart/draft` mount). After Send → status updates + first followup row created → dashboard already populated.
+New table `subscription_events` (audit + analytics):
+- `id, user_id, event_type, payload jsonb, created_at`
+- Events: `trial_started, trial_ending_soon, converted, renewed, payment_failed, canceled, expired, restored`
 
-### Files
+Server-side function `public.has_active_entitlement(_user uuid) returns boolean` — checks `status in ('trialing','active') AND (trial_ends_at > now() OR current_period_end > now())`. Used by `send-email` edge function to hard-gate sending.
 
-**New**:
-- `src/pages/quickstart/QuickstartLayout.tsx` — shared shell (progress dots, safe-area)
-- `src/pages/quickstart/WelcomeScreen.tsx`
-- `src/pages/quickstart/AskScreen.tsx`
-- `src/pages/quickstart/InvoiceScreen.tsx` (3-field form, status chips not date picker)
-- `src/pages/quickstart/DraftScreen.tsx` (typing animation, tone chip, scheduling line, Send/Edit)
-- `src/pages/quickstart/SentScreen.tsx`
-- `src/components/quickstart/TypingMessage.tsx` (reveals AI text char-by-char, ~30ms/char, max 1.5s)
-- `src/components/quickstart/GmailConnectSheet.tsx` (bottom sheet, only shown on Send tap)
+### Edge functions
 
-**Edited**:
-- `src/App.tsx` — add 5 quickstart routes
-- `src/pages/RootRedirect.tsx` — new authenticated user → `/quickstart/welcome` (was `/onboarding`)
-- `src/pages/OnboardingScreen.tsx` — keep file but route old `/onboarding` to `/quickstart/welcome` for backward compat
-- `src/pages/DashboardScreen.tsx` — remove "Get started" Gmail nag from top; replace empty state with "Add a follow-up" card that opens quickstart; move Gmail connect into a quieter Settings hint
-- `src/components/invoice/AIDraftComposer.tsx` — extract draft+tone UI into reusable piece used by both DraftScreen and InvoiceDetail
+1. **`start-trial`** — called when user taps "Start Free Trial" before any purchase. Creates `subscriptions` row with `status=trialing`, `trial_ends_at = now() + 30 days`. Idempotent (won't re-trigger if user already has a row). Logs `trial_started`.
+2. **`validate-apple-receipt`** — accepts `{ receipt, productId }` from client after StoreKit purchase. Calls Apple's verifyReceipt endpoint, parses, upserts subscription row with real `current_period_end`. Logs `converted` or `renewed`.
+3. **`apple-notifications`** — public endpoint (verify_jwt=false) for Apple Server-to-Server Notifications V2. Verifies the signed JWS payload using Apple's public keys, then updates the subscription row based on `notificationType` (`DID_RENEW`, `EXPIRED`, `GRACE_PERIOD_EXPIRED`, `DID_FAIL_TO_RENEW`, `CANCEL`, `REFUND`, etc.). Logs corresponding events.
+4. **`get-entitlement`** — returns the user's current entitlement state (status, days left in trial, next billing date, can_send: bool).
+5. **Update `send-email`** — at the top, call `has_active_entitlement(auth.uid())`. If false, return 402 with `{ error: 'subscription_required' }`. This is the actual access enforcement.
 
-### Copy & visual rules (from PDFs)
-- No "AI-powered", "Generate", "Smart". Use "Ready to send", "We'll handle this".
-- Soft surfaces, generous spacing, no red alerts in onboarding (overdue uses muted amber, not destructive red).
-- Typing animation only on first draft — subsequent drafts appear instantly.
+### Secrets needed (will request via add_secret after plan approval)
 
-### What stays the same
-- Auth screen (signup still first — required by Supabase RLS to write the invoice).
-- Subscription/paywall logic — trial starts on signup as today; paywall never shown during quickstart.
-- Personalization edge function — kept, repurposed later as Dashboard greeting copy.
+- `APPLE_SHARED_SECRET` (App Store Connect → app-specific shared secret for receipt validation)
+- `APPLE_BUNDLE_ID` (already known: `app.lovable.ded4d25121ff41a498f3e10fd0fa9c51`)
+- `APPLE_ISSUER_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (App Store Server API — needed for V2 notifications signature verification)
 
-### Out of scope
-- Demo mode for "Not right now" path will be minimal: prefilled sample invoice ("Acme Co, $1,200, Overdue"). Full sandbox can come later.
-- No A/B testing harness this round.
+### Frontend
 
-### Open question (will ask after approval if needed)
-Whether to keep the existing 3-question emotional survey accessible later (e.g. as a one-time prompt on Dashboard day 2) or retire it entirely. Default: retire it — keep the codebase lean.
+**New files**:
+- `src/hooks/useEntitlement.ts` — fetches from `subscriptions` table (with realtime subscription so UI reacts to webhook updates instantly), returns `{ status, daysLeftInTrial, nextBillingDate, canSend, loading }`.
+- `src/lib/iap.ts` — abstraction layer. On native: calls `@capgo/capacitor-purchases`. On web: returns mock results so paywall flow is testable in Lovable preview.
+- `src/pages/PaywallScreen.tsx` — calm, minimal: headline "Keep follow-ups flowing", price "$5/month after 30-day free trial", "Cancel anytime", primary CTA "Start Free Trial", small "Restore purchases" link, legal links to Terms + Privacy.
+- `src/pages/BillingScreen.tsx` — Settings → Billing subpage. Shows current status, trial countdown or next billing date, "Manage subscription" button (deep-links to `itms-apps://apps.apple.com/account/subscriptions` on iOS), "Restore purchases" button.
+- `src/components/TrialBanner.tsx` — inline banner shown when `daysLeftInTrial <= 7`: "Your trial ends in N days. Keep your account active." with CTA. Auto-hides on paid status.
+
+**Edited files**:
+- `src/App.tsx` — add `/paywall` and `/settings/billing` routes.
+- `src/pages/SettingsScreen.tsx` — add "Billing" row under Account section, shows current status badge.
+- `src/components/invoice/AIDraftComposer.tsx` — wrap "Send" handler: if `!canSend`, navigate to `/paywall` instead of sending. Show subtle lock icon + tooltip on the button when locked.
+- `src/pages/legal/PrivacyPolicy.tsx` and `TermsOfUse.tsx` — append subscription/billing sections (Apple IAP processing, no card storage, auto-renewal disclosure required by Apple, refund policy points to Apple, cancellation instructions).
+
+### Paywall trigger logic
+
+No paywall at signup. Triggers:
+1. **Time-based**: when trial ends and user attempts a gated action (sending a follow-up).
+2. **Reminder-based**: trial banner appears at T-7, T-3, T-1 days. At T-1, banner becomes prominent.
+3. **Hard gate**: post-trial without active subscription → "Send" button opens paywall.
+
+Read-only access is preserved: viewing invoices, dashboard, and history all stay unrestricted. Only **outbound actions** (send follow-up, send final notice) are gated.
+
+### Native build steps (documented for user)
+
+After this lands, the user runs locally:
+```
+npm install @capgo/capacitor-purchases
+npx cap sync ios
+```
+Then in App Store Connect: create the `chasehq_pro_monthly` auto-renewable subscription product, set 30-day intro free trial, configure Server-to-Server notifications V2 URL pointing to the deployed `apple-notifications` edge function URL.
+
+### Analytics
+
+Every state change writes to `subscription_events`. Phase-2 dashboard could read from it; for now the audit table is enough and queryable.
+
+### Edge cases handled
+
+- **Failed payment** → Apple sends `DID_FAIL_TO_RENEW` → status set to `past_due`, grace period read from Apple's `gracePeriodExpiresDate`. UI shows banner "Payment issue — update your billing in App Store settings." Send is allowed during grace.
+- **Expired trial, no purchase** → status flips to `expired` via daily-cron-less approach: `has_active_entitlement` checks `trial_ends_at > now()` live, so no cron needed.
+- **Cancellation** → status stays `active` until `current_period_end`, then `apple-notifications` flips it to `canceled` then `expired`.
+- **Refund** → `REFUND` notification → immediate `expired`.
+- **Restore purchases** on a new device → calls `validate-apple-receipt` with the restored receipt → re-links to user.
+- **Lovable preview testing** → mock IAP returns success, real DB row gets created, full flow testable end-to-end without iOS.
+
+### What I'll request from you after approval
+
+1. The 4 Apple secrets above (I'll send the `add_secret` prompts with instructions on where to find each one in App Store Connect).
+2. Confirmation that `chasehq_pro_monthly` is the product ID you want me to wire (you can rename later in App Store Connect — the code uses a single constant).
+
+### Out of scope for this iteration
+
+- Stripe web checkout (deferred — would only matter once you ship a non-iOS client).
+- Promo codes / annual plan / family sharing (Apple supports these later via the same product).
+- A self-serve admin dashboard for subscriptions (the `subscription_events` table is the audit trail for now).
 

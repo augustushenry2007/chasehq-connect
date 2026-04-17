@@ -141,36 +141,78 @@ export default function DashboardScreen() {
 
       {isEmpty ? (
         <>
-          {/* Single calm CTA — no nag, no checklist */}
-          <div className="mt-5 mx-5 bg-card border border-border rounded-2xl p-5">
-            <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center mb-3">
-              <FileText className="w-5 h-5 text-primary" />
-            </div>
-            <h2 className="text-lg font-bold text-foreground">Add a follow-up</h2>
-            <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-              Tell us who owes you. We'll draft the message and send it when you're ready.
-            </p>
-            <button
-              onClick={() => navigate("/quickstart/ask")}
-              className="mt-4 inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold"
-            >
-              <Plus className="w-4 h-4" /> Get started
-            </button>
-          </div>
-
-          {/* Quiet Gmail hint — only if not yet connected, tucked away */}
-          {!canSend && (
-            <div className="mt-3 mx-5">
+          {/* Hero CTA */}
+          <div className="mt-5 mx-5 bg-card border border-border rounded-2xl p-5 relative overflow-hidden">
+            <div className="absolute -top-6 -right-6 w-24 h-24 rounded-full bg-accent/60" />
+            <div className="relative">
+              <div className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center mb-3">
+                <FileText className="w-5 h-5 text-primary-foreground" />
+              </div>
+              <h2 className="text-lg font-bold text-foreground">Add your first invoice</h2>
+              <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                Tell us who owes you and how much. We'll handle the awkward part — drafting and sending the follow-ups for you.
+              </p>
               <button
-                onClick={() => navigate("/settings")}
-                className="w-full flex items-center gap-2.5 text-left px-4 py-3 rounded-xl bg-muted/50 border border-border hover:bg-muted transition-colors"
+                onClick={() => setShowNew(true)}
+                className="mt-4 inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold"
               >
-                <Mail className="w-4 h-4 text-muted-foreground shrink-0" />
-                <span className="text-xs text-muted-foreground flex-1">Connect your email when you're ready to send</span>
-                <ArrowRight className="w-3.5 h-3.5 text-muted-foreground" />
+                <Plus className="w-4 h-4" /> Create invoice
               </button>
             </div>
+          </div>
+
+          {/* Get-started checklist — show until any sender is connected */}
+          {!canSend && (
+            <div className="mt-4 mx-5">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+                Get set up
+              </h3>
+              <div className="flex flex-col gap-2.5">
+                {signedInWithGoogle ? (
+                  <GetStartedStep
+                    done={hasGmail}
+                    title="Allow ChaseHQ to send follow-ups"
+                    description={`One-click permission to send from ${googleEmail}. We never read your inbox.`}
+                    action="Grant permission"
+                    onAction={handleConnectGmail}
+                    loading={connectingGmail}
+                    icon={Mail}
+                  />
+                ) : (
+                  <GetStartedStep
+                    done={hasSmtp}
+                    title="Connect your email to send follow-ups"
+                    description="Add your email's SMTP details so ChaseHQ can send on your behalf."
+                    action="Open Settings"
+                    onAction={() => navigate("/settings")}
+                    icon={SettingsIcon}
+                  />
+                )}
+              </div>
+            </div>
           )}
+
+          {/* What ChaseHQ does */}
+          <div className="mt-4 mx-5 bg-card border border-border rounded-2xl p-4 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">What happens next</h3>
+            </div>
+            <div className="flex flex-col gap-2.5">
+              {[
+                "Drafts every follow-up in your tone — no blank screens.",
+                "Sends them on the schedule you set in Settings.",
+                "Pauses automatically when a client replies.",
+              ].map((line) => (
+                <div key={line} className="flex items-start gap-2.5">
+                  <div className="w-4 h-4 rounded-full bg-accent flex items-center justify-center shrink-0 mt-0.5">
+                    <Check className="w-2.5 h-2.5 text-primary" />
+                  </div>
+                  <p className="text-sm text-foreground">{line}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </>
       ) : (
         <>
