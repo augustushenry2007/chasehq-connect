@@ -29,7 +29,7 @@ export default function WelcomeScreen() {
         </p>
 
         <button
-          onClick={() => navigate("/onboarding")}
+          onClick={() => sendFlow("START")}
           className="mt-10 w-full max-w-xs flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] hover:bg-primary/90 animate-fade-in"
           style={{ animationDelay: "520ms", animationFillMode: "both" }}
         >
