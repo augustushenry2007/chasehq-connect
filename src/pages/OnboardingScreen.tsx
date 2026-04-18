@@ -84,8 +84,8 @@ const Q2 = {
   ],
 };
 
-// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth · 7 first-invoice prompt
-const TOTAL_STEPS = 8;
+// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth
+const TOTAL_STEPS = 7;
 const STORAGE_KEY = "onboarding_state";
 
 function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
