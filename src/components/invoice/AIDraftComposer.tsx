@@ -1,14 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { RefreshCw, Send, Loader2, AlertTriangle, Lock, Check } from "lucide-react";
+import { RefreshCw, Send, Loader2, AlertTriangle, Lock, Check, Mail } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
-import { generateFollowup, sendFollowupEmail } from "@/hooks/useSupabaseData";
+import { generateFollowup, sendFollowupEmail, recordFollowup } from "@/hooks/useSupabaseData";
 import { advanceScheduleAfterSend } from "@/hooks/useNotifications";
 import NotificationPermissionCard from "@/components/NotificationPermissionCard";
 import { getDefaultDraft, type Tone } from "./DraftTemplates";
 import { useEntitlement } from "@/hooks/useEntitlement";
-import { supabase } from "@/integrations/supabase/client";
+import { useSendingMailbox } from "@/hooks/useSendingMailbox";
+import { useGmailConnection } from "@/hooks/useGmailConnection";
+import { useApp } from "@/context/AppContext";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +26,10 @@ const TONES: Tone[] = ["Polite", "Friendly", "Firm", "Urgent", "Final Notice"];
 
 export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
   const navigate = useNavigate();
+  const { user } = useApp();
   const { canSend, loading: entLoading } = useEntitlement();
+  const { canSend: hasMailbox, loading: mailboxLoading } = useSendingMailbox();
+  const { connectGmail, signedInWithGoogle } = useGmailConnection();
   const [tone, setTone] = useState<Tone>("Friendly");
   const [currentSubject, setCurrentSubject] = useState("");
   const [currentDraft, setCurrentDraft] = useState("");
@@ -33,6 +38,7 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
   const [sent, setSent] = useState(false);
   const [isAiGenerated, setIsAiGenerated] = useState(false);
   const [confirmFinalOpen, setConfirmFinalOpen] = useState(false);
+  const [connectMailboxOpen, setConnectMailboxOpen] = useState(false);
   const draftRef = useRef<HTMLDivElement>(null);
   const userEditedRef = useRef(false);
 
@@ -49,6 +55,7 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
   }, [tone, invoice]);
 
   async function handleGenerate() {
+    if (isGenerating) return; // dedupe rapid clicks
     setIsGenerating(true);
     const result = await generateFollowup(invoice, tone, isAiGenerated ? currentDraft : undefined);
     if (result) {
@@ -69,24 +76,56 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
   }
 
   async function doSend() {
-    if (!currentDraft) {
-      toast.error("No draft to send");
+    if (sending) return;
+    if (!currentDraft || !currentSubject) {
+      toast.error("Subject and message are required");
+      return;
+    }
+    if (!invoice.clientEmail) {
+      toast.error("This invoice has no client email — add one to send.");
       return;
     }
     setSending(true);
-    // Testing mode: short-circuit. Always succeed with warm confirmation, no network call.
-    await new Promise((r) => setTimeout(r, 450));
-    // Advance the schedule: cancel the next pending reminder for this invoice
+
+    const result = await sendFollowupEmail(invoice.clientEmail, currentSubject, currentDraft, invoice.id);
+
+    if (!result.ok) {
+      setSending(false);
+      if (result.reason === "subscription_required") {
+        toast.error(result.message || "Your trial has ended. Subscribe to keep sending follow-ups.");
+        navigate("/paywall");
+        return;
+      }
+      if (result.reason === "no_mailbox") {
+        // Don't error — open the connect dialog instead.
+        setConnectMailboxOpen(true);
+        return;
+      }
+      if (result.reason === "rate_limited") {
+        toast.error(result.message || "Daily send limit reached. Try again tomorrow.");
+        return;
+      }
+      toast.error(result.message || "Couldn't send. Please try again.");
+      return;
+    }
+
+    // Persist follow-up history so the timeline reflects reality.
+    if (user?.id) {
+      await recordFollowup(user.id, invoice.id, {
+        subject: currentSubject,
+        message: currentDraft,
+        tone,
+        isAiGenerated,
+      });
+    }
+    // Cancel the next pending reminder for this invoice.
     await advanceScheduleAfterSend(invoice.id);
+
     setSending(false);
     setSent(true);
-    const warmDescriptions = [
-      "Done. Your reminder is on its way.",
-      "We'll handle the follow-up from here.",
-      "We'll keep an eye on this and nudge again if needed.",
-    ];
-    const description = warmDescriptions[Math.floor(Math.random() * warmDescriptions.length)];
-    toast.success("Sent. We'll take it from here.", { description });
+    toast.success("Sent. We'll take it from here.", {
+      description: "Your follow-up is on its way.",
+    });
     setTimeout(() => setSent(false), 3000);
   }
 
@@ -95,10 +134,26 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
       navigate("/paywall");
       return;
     }
+    // No mailbox? Show the connect dialog right at the moment of value.
+    if (!mailboxLoading && !hasMailbox) {
+      setConnectMailboxOpen(true);
+      return;
+    }
     if (isFinalNotice) {
       setConfirmFinalOpen(true);
     } else {
       doSend();
+    }
+  }
+
+  async function handleConnectMailbox() {
+    setConnectMailboxOpen(false);
+    if (signedInWithGoogle) {
+      const r = await connectGmail(`/invoice/${invoice.id}`);
+      if (r.error) toast.error(r.error);
+      // Browser redirects to Google on success.
+    } else {
+      navigate("/settings");
     }
   }
 
@@ -235,6 +290,29 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
               className="bg-amber-600 hover:bg-amber-700 text-white"
             >
               Send Final Notice
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Connect-mailbox dialog: only shown when user taps Send without a mailbox. */}
+      <AlertDialog open={connectMailboxOpen} onOpenChange={setConnectMailboxOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-primary" />
+              One quick step before we send
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {signedInWithGoogle
+                ? "Grant ChaseHQ permission to send from your Gmail. We never read your inbox — just send the follow-up you wrote."
+                : "Connect your email so ChaseHQ can send this follow-up on your behalf."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Not now</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConnectMailbox}>
+              {signedInWithGoogle ? "Grant permission" : "Open Settings"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

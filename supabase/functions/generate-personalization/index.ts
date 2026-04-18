@@ -1,12 +1,29 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    // Require a valid session — prevents anonymous credit-drain on LOVABLE_API_KEY.
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return json({ error: "Not authenticated" }, 401);
+    }
+    const supabaseUser = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    const { data: claims, error: claimsErr } = await supabaseUser.auth.getClaims(authHeader.replace("Bearer ", ""));
+    if (claimsErr || !claims?.claims?.sub) {
+      return json({ error: "Invalid session" }, 401);
+    }
+
     const { feelings = [], worries = [], goals = [], custom = {}, firstName = "" } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
@@ -43,7 +60,7 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
                 properties: {
                   headline: {
                     type: "string",
-                    description: "Short, personal headline (max 12 words). Use their name if known. Example: 'Anna, here's why chasing feels heavy.'",
+                    description: "Short, personal headline (max 12 words). Use their name if known.",
                   },
                   subhead: {
                     type: "string",
@@ -51,7 +68,7 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
                   },
                   painPoints: {
                     type: "array",
-                    description: "2-3 pain points reflecting their inputs. Each is a short title + one-line detail.",
+                    description: "2-3 pain points reflecting their inputs.",
                     items: {
                       type: "object",
                       properties: {
@@ -64,7 +81,7 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
                   },
                   benefits: {
                     type: "array",
-                    description: "2-3 outcome-driven benefits tailored to their goals. Each is a short title + one-line detail.",
+                    description: "2-3 outcome-driven benefits tailored to their goals.",
                     items: {
                       type: "object",
                       properties: {
@@ -88,14 +105,14 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
 
     if (!response.ok) {
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited, try again shortly." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return json({ error: "Rate limited, try again shortly." }, 429);
       }
       if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return json({ error: "AI credits exhausted." }, 402);
       }
       const t = await response.text();
       console.error("AI gateway error:", response.status, t);
-      return new Response(JSON.stringify({ error: "AI gateway error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return json({ error: "AI gateway error" }, 500);
     }
 
     const data = await response.json();
@@ -103,14 +120,16 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
     if (!toolCall) throw new Error("No tool call returned");
     const args = JSON.parse(toolCall.function.arguments);
 
-    return new Response(JSON.stringify(args), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json(args);
   } catch (e) {
     console.error("generate-personalization error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
 });
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
