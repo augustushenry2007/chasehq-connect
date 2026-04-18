@@ -116,7 +116,7 @@ function loadState(): Partial<PersistedState> {
 
 export default function OnboardingScreen() {
   const navigate = useNavigate();
-  const { completeOnboarding, user, isAuthenticated } = useApp();
+  const { completeOnboarding, user } = useApp();
   const { send: sendFlow } = useFlow();
 
   const initial = useMemo(() => loadState(), []);
@@ -136,22 +136,12 @@ export default function OnboardingScreen() {
   const [personalization, setPersonalization] = useState<Personalization | null>(null);
   const [personalizing, setPersonalizing] = useState(false);
   const [personalizationError, setPersonalizationError] = useState<string | null>(null);
-
-  // Auth step state
-  const [authMode, setAuthMode] = useState<"signup" | "signin">("signup");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [passwordTouched, setPasswordTouched] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [finishingTrial, setFinishingTrial] = useState(false);
+  const [finishing, setFinishing] = useState(false);
 
   const progress = ((step + 1) / TOTAL_STEPS) * 100;
-  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || name.split(" ")[0] || "";
+  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "";
 
-  // Persist progress so authentication round-trip doesn't lose context
+  // Persist progress so reloads don't lose context
   useEffect(() => {
     if (isTestingMode()) return;
     const data: PersistedState = {
@@ -164,56 +154,34 @@ export default function OnboardingScreen() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [step, selected0, selected1, selected2, custom0, custom1, custom2]);
 
-  // If a user comes back authenticated mid-onboarding, jump them to the auth-success path.
-  // But never rewind if they've already reached the final step.
-  useEffect(() => {
-    if (completedRef.current) return;
-    if (isAuthenticated && step < 6) {
-      setStep(6);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
-
-  // Auto-finalize trial when authenticated and on auth step, then advance via FlowMachine
-  useEffect(() => {
-    if (step !== 6 || !isAuthenticated || finishingTrial) return;
-    (async () => {
-      setFinishingTrial(true);
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData.session?.access_token;
-        if (token) {
-          await supabase.functions.invoke("start-trial", {
-            headers: { Authorization: `Bearer ${token}` },
-          }).catch(() => {});
-        }
-      } finally {
-        await completeOnboarding();
-        localStorage.removeItem(STORAGE_KEY);
-        if (!isTestingMode()) {
-          try { localStorage.setItem("onboarding_done_session", "1"); } catch {}
-        }
-        completedRef.current = true;
-        setFinishingTrial(false);
-        // Advance the FlowMachine: ONBOARDING -> AUTH -> PRE_DASHBOARD_DECISION
-        sendFlow("ONBOARDING_DONE");
-        sendFlow("AUTH_SUCCESS");
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, isAuthenticated]);
-
   function canAdvance() {
     if (step === 0) return selected0.size > 0 || custom0.trim().length > 0;
     if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
     if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
     if (step === 3) return !personalizing; // gate while loading
-    if (step === 6) return false; // custom CTAs
     return step < TOTAL_STEPS - 1;
   }
 
   function next() { setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1)); }
   function back() { if (step > 0) setStep((s) => s - 1); }
+
+  // Final CTA on the trial step → mark guest as onboarded and advance the flow.
+  async function handleFinish() {
+    if (finishing) return;
+    setFinishing(true);
+    try {
+      markGuestOnboarded();
+      await completeOnboarding();
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      if (!isTestingMode()) {
+        try { localStorage.setItem("onboarding_done_session", "1"); } catch {}
+      }
+      completedRef.current = true;
+      sendFlow("ONBOARDING_DONE");
+    } finally {
+      setFinishing(false);
+    }
+  }
 
   function makeToggle(setter: React.Dispatch<React.SetStateAction<Set<string>>>) {
     return (id: string) => {
