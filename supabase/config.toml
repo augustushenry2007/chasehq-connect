@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.apple-notifications]
 verify_jwt = false
+
+[functions.dispatch-notifications]
+verify_jwt = false
