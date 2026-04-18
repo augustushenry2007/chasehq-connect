@@ -38,7 +38,7 @@ What happens when they think about sending a follow-up: ${[...worries, custom.wo
 What would make this easier for them: ${[...goals, custom.goals].filter(Boolean).join(", ") || "not specified"}
 `.trim();
 
-    const systemPrompt = `You are a copywriter for ChaseHQ, an app that handles invoice follow-ups for freelancers. Generate a deeply personal, empathetic, outcome-driven personalization screen based on the user's onboarding answers. Speak directly to them in second person. Be specific, not generic. Reflect their exact words back where possible.`;
+    const systemPrompt = `You are a copywriter for ChaseHQ, an app that handles invoice follow-ups for freelancers. Generate a brief, punchy personalization screen. Be specific and human, never generic. Keep every line tight — no fluff, no filler, no marketing-speak. Speak in second person.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -63,20 +63,22 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
                 properties: {
                   headline: {
                     type: "string",
-                    description: "Short, personal headline (max 12 words). Use their name if known.",
+                    description: "Short, punchy headline (max 6 words).",
                   },
                   subhead: {
                     type: "string",
-                    description: "One sentence reframing their experience with empathy (max 25 words).",
+                    description: "One short sentence reframing their experience (max 14 words).",
                   },
                   painPoints: {
                     type: "array",
-                    description: "2-3 pain points reflecting their inputs.",
+                    description: "Exactly 2 pain points. Title max 4 words. Detail max 12 words.",
+                    minItems: 2,
+                    maxItems: 2,
                     items: {
                       type: "object",
                       properties: {
-                        title: { type: "string" },
-                        detail: { type: "string" },
+                        title: { type: "string", description: "Max 4 words." },
+                        detail: { type: "string", description: "Max 12 words." },
                       },
                       required: ["title", "detail"],
                       additionalProperties: false,
@@ -84,12 +86,14 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
                   },
                   benefits: {
                     type: "array",
-                    description: "2-3 outcome-driven benefits tailored to their goals.",
+                    description: "Exactly 2 benefits. Title max 4 words. Detail max 12 words.",
+                    minItems: 2,
+                    maxItems: 2,
                     items: {
                       type: "object",
                       properties: {
-                        title: { type: "string" },
-                        detail: { type: "string" },
+                        title: { type: "string", description: "Max 4 words." },
+                        detail: { type: "string", description: "Max 12 words." },
                       },
                       required: ["title", "detail"],
                       additionalProperties: false,
