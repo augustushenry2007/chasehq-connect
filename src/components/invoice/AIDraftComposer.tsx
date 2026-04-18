@@ -89,24 +89,22 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
 
     const result = await sendFollowupEmail(invoice.clientEmail, currentSubject, currentDraft, invoice.id);
 
-    if (result.ok !== true) {
+    if (result.ok === false) {
       setSending(false);
-      const reason = result.reason;
-      const errMsg = result.message;
-      if (reason === "subscription_required") {
-        toast.error(errMsg || "Your trial has ended. Subscribe to keep sending follow-ups.");
+      if (result.reason === "subscription_required") {
+        toast.error(result.message || "Your trial has ended. Subscribe to keep sending follow-ups.");
         navigate("/paywall");
         return;
       }
-      if (reason === "no_mailbox") {
+      if (result.reason === "no_mailbox") {
         setConnectMailboxOpen(true);
         return;
       }
-      if (reason === "rate_limited") {
-        toast.error(errMsg || "Daily send limit reached. Try again tomorrow.");
+      if (result.reason === "rate_limited") {
+        toast.error(result.message || "Daily send limit reached. Try again tomorrow.");
         return;
       }
-      toast.error(errMsg || "Couldn't send. Please try again.");
+      toast.error(result.message || "Couldn't send. Please try again.");
       return;
     }
 
