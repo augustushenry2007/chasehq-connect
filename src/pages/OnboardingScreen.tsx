@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -119,7 +119,9 @@ export default function OnboardingScreen() {
   const { completeOnboarding, user, isAuthenticated } = useApp();
 
   const initial = useMemo(() => loadState(), []);
-  const [step, setStep] = useState<number>(initial.step ?? 0);
+  const sessionDoneFlag = !isTestingMode() && typeof window !== "undefined" && localStorage.getItem("onboarding_done_session") === "1";
+  const [step, setStep] = useState<number>(sessionDoneFlag ? 7 : (initial.step ?? 0));
+  const completedRef = useRef<boolean>(sessionDoneFlag);
   const [selected0, setSelected0] = useState<Set<string>>(new Set(initial.selected0 ?? []));
   const [selected1, setSelected1] = useState<Set<string>>(new Set(initial.selected1 ?? []));
   const [selected2, setSelected2] = useState<Set<string>>(new Set(initial.selected2 ?? []));
@@ -157,8 +159,10 @@ export default function OnboardingScreen() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [step, selected0, selected1, selected2, custom0, custom1, custom2]);
 
-  // If a user comes back authenticated mid-onboarding, jump them to the auth-success path
+  // If a user comes back authenticated mid-onboarding, jump them to the auth-success path.
+  // But never rewind if they've already reached the final step.
   useEffect(() => {
+    if (completedRef.current) return;
     if (isAuthenticated && step < 6) {
       setStep(6);
     }
@@ -181,6 +185,10 @@ export default function OnboardingScreen() {
       } finally {
         await completeOnboarding();
         localStorage.removeItem(STORAGE_KEY);
+        if (!isTestingMode()) {
+          try { localStorage.setItem("onboarding_done_session", "1"); } catch {}
+        }
+        completedRef.current = true;
         setFinishingTrial(false);
         setStep(7);
       }
