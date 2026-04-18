@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { formatUSD, type Invoice } from "@/lib/data";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -37,6 +37,7 @@ const TABS: { id: FilterTab; label: string }[] = [
 
 export default function InvoicesScreen() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
@@ -44,6 +45,17 @@ export default function InvoicesScreen() {
   const { invoices, loading, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
   const isEmptyWorkspace = invoices.length === 0;
+
+  // Auto-open the New Invoice modal when arriving via ?new=1 (from onboarding/dashboard)
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      setShowNew(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("new");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (loading) {
     return (
@@ -80,7 +92,7 @@ export default function InvoicesScreen() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
       <div className="px-5 pt-5 pb-3 flex items-start justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground">Invoices</h1>

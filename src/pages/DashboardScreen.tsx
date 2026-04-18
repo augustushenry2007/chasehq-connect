@@ -100,7 +100,7 @@ export default function DashboardScreen() {
   }
 
   return (
-    <div className="flex-1 overflow-auto pb-24">
+    <div className="flex-1 overflow-auto pb-24 animate-fade-in">
       <TrialBanner />
       <div className="px-5 pt-5">
         <h1 className="text-xl font-bold text-foreground">
@@ -141,24 +141,43 @@ export default function DashboardScreen() {
 
       {isEmpty ? (
         <>
-          {/* Hero CTA */}
-          <div className="mt-5 mx-5 bg-card border border-border rounded-2xl p-5 relative overflow-hidden">
+          {/* Empty-state hero */}
+          <div className="mt-5 mx-5 bg-card border border-border rounded-2xl p-5 relative overflow-hidden animate-fade-in">
             <div className="absolute -top-6 -right-6 w-24 h-24 rounded-full bg-accent/60" />
             <div className="relative">
               <div className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center mb-3">
                 <FileText className="w-5 h-5 text-primary-foreground" />
               </div>
-              <h2 className="text-lg font-bold text-foreground">Add your first invoice</h2>
+              <h2 className="text-lg font-bold text-foreground">No invoices yet — let's create your first one</h2>
               <p className="text-sm text-muted-foreground mt-1 max-w-sm">
                 Tell us who owes you and how much. We'll handle the awkward part — drafting and sending the follow-ups for you.
               </p>
               <button
                 onClick={() => setShowNew(true)}
-                className="mt-4 inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold"
+                className="mt-4 inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97]"
               >
                 <Plus className="w-4 h-4" /> Create invoice
               </button>
             </div>
+          </div>
+
+          {/* Ghost preview cards (visual hint of what's coming) */}
+          <div className="mt-3 mx-5 flex flex-col gap-2.5">
+            {[0, 1].map((i) => (
+              <div
+                key={i}
+                className="bg-card border border-dashed border-border rounded-2xl p-4 opacity-60"
+                aria-hidden
+              >
+                <div className="flex items-center justify-between">
+                  <div className="space-y-2 flex-1">
+                    <div className="h-3.5 w-32 bg-muted rounded-md" />
+                    <div className="h-3 w-48 bg-muted rounded-md" />
+                  </div>
+                  <div className="h-4 w-16 bg-muted rounded-md ml-3" />
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Get-started checklist — show until any sender is connected */}
