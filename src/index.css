@@ -73,3 +73,12 @@ html, body, #root {
   width: 0;
   display: none;
 }
+
+/* Smooth step transitions for onboarding */
+@keyframes step-in {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-step-in {
+  animation: step-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
