@@ -162,8 +162,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { supabase.removeChannel(channel); };
   }, [user, authReady, refetchInvoices]);
 
-  const lastUserIdRef = useRef<string | null>(null);
-  const completedThisSessionRef = useRef(false);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
