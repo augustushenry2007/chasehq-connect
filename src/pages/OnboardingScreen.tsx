@@ -124,7 +124,11 @@ export default function OnboardingScreen() {
 
   const initial = useMemo(() => loadState(), []);
   const sessionDoneFlag = !isTestingMode() && typeof window !== "undefined" && localStorage.getItem("onboarding_done_session") === "1";
-  const [step, setStep] = useState<number>(sessionDoneFlag ? 6 : (initial.step ?? 0));
+  const clampStep = (n: unknown): number => {
+    const v = typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : 0;
+    return Math.max(0, Math.min(v, TOTAL_STEPS - 1));
+  };
+  const [step, setStep] = useState<number>(sessionDoneFlag ? TOTAL_STEPS - 1 : clampStep(initial.step ?? 0));
   const completedRef = useRef<boolean>(sessionDoneFlag);
   const [selected0, setSelected0] = useState<Set<string>>(new Set(initial.selected0 ?? []));
   const [selected1, setSelected1] = useState<Set<string>>(new Set(initial.selected1 ?? []));
