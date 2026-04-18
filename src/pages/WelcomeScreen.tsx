@@ -1,8 +1,8 @@
-import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
+import { useFlow } from "@/flow/FlowMachine";
 
 export default function WelcomeScreen() {
-  const navigate = useNavigate();
+  const { send: sendFlow } = useFlow();
 
   return (
     <div className="h-screen bg-background flex flex-col items-center justify-center px-6 overflow-hidden">
