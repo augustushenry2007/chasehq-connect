@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      email_send_log: {
+        Row: {
+          id: string
+          invoice_id: string | null
+          recipient: string
+          sent_at: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          invoice_id?: string | null
+          recipient: string
+          sent_at?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          invoice_id?: string | null
+          recipient?: string
+          sent_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       followup_schedules: {
         Row: {
           created_at: string
