@@ -4,6 +4,7 @@ import { createInvoice } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
 import { withAuthRetry } from "@/flow/withAuthRetry";
 import { savePending } from "@/lib/localInvoice";
+import { createScheduleForInvoice } from "@/hooks/useNotifications";
 import { X, CalendarIcon, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { format, parse, isValid } from "date-fns";
@@ -115,6 +116,13 @@ export default function NewInvoiceModal({
       });
 
       if (result.invoice) {
+        // Best-effort: create the default follow-up schedule + pending notifications
+        await createScheduleForInvoice(result.invoice.user_id, {
+          id: result.invoice.id,
+          client: result.invoice.client,
+          amount: Number(result.invoice.amount),
+          due_date: result.invoice.due_date,
+        });
         resetDraft();
         setErrorMsg(null);
         onCreated();

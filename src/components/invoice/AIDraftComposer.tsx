@@ -4,6 +4,8 @@ import { RefreshCw, Send, Loader2, AlertTriangle, Lock, Check } from "lucide-rea
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
 import { generateFollowup, sendFollowupEmail } from "@/hooks/useSupabaseData";
+import { advanceScheduleAfterSend } from "@/hooks/useNotifications";
+import NotificationPermissionCard from "@/components/NotificationPermissionCard";
 import { getDefaultDraft, type Tone } from "./DraftTemplates";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { supabase } from "@/integrations/supabase/client";
@@ -74,6 +76,8 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
     setSending(true);
     // Testing mode: short-circuit. Always succeed with warm confirmation, no network call.
     await new Promise((r) => setTimeout(r, 450));
+    // Advance the schedule: cancel the next pending reminder for this invoice
+    await advanceScheduleAfterSend(invoice.id);
     setSending(false);
     setSent(true);
     const warmDescriptions = [
@@ -209,6 +213,9 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
           )}
         </button>
       </div>
+
+      {/* Post-send: contextual permission ask */}
+      {sent && <NotificationPermissionCard />}
 
       <AlertDialog open={confirmFinalOpen} onOpenChange={setConfirmFinalOpen}>
         <AlertDialogContent>
