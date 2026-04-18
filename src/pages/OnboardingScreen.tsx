@@ -48,8 +48,8 @@ const Q2 = {
   ],
 };
 
-// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth
-const TOTAL_STEPS = 7;
+// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth · 7 first-invoice prompt
+const TOTAL_STEPS = 8;
 const STORAGE_KEY = "onboarding_state";
 
 function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
@@ -166,7 +166,7 @@ export default function OnboardingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // Auto-finalize when authenticated and on auth step
+  // Auto-finalize trial when authenticated and on auth step, then advance to first-invoice prompt
   useEffect(() => {
     if (step !== 6 || !isAuthenticated || finishingTrial) return;
     (async () => {
@@ -182,7 +182,8 @@ export default function OnboardingScreen() {
       } finally {
         await completeOnboarding();
         localStorage.removeItem(STORAGE_KEY);
-        navigate("/dashboard", { replace: true });
+        setFinishingTrial(false);
+        setStep(7);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
