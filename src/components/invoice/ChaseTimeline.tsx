@@ -14,7 +14,8 @@ interface TimelineEvent {
 
 function getTimeline(invoice: Invoice, customDates?: Record<number, string>): TimelineEvent[] {
   const due = new Date(invoice.dueDateISO);
-  const sentDate = new Date(due);
+  const safeDue = isNaN(due.getTime()) ? new Date() : due;
+  const sentDate = new Date(safeDue);
   sentDate.setDate(sentDate.getDate() - 30);
 
   const defaults: string[] = [];
@@ -68,7 +69,8 @@ export default function ChaseTimeline({ invoice }: { invoice: Invoice }) {
   const [customDates, setCustomDates] = useState<Record<number, string>>({});
 
   const due = new Date(invoice.dueDateISO);
-  const sentDate = new Date(due);
+  const safeDue = isNaN(due.getTime()) ? new Date() : due;
+  const sentDate = new Date(safeDue);
   sentDate.setDate(sentDate.getDate() - 30);
   const rawDates: string[] = [];
   for (let i = 0; i < 5; i++) {
