@@ -13,40 +13,7 @@ import {
   AlertCircle, Loader2, Eye, EyeOff, Lock, User, Shield, X,
 } from "lucide-react";
 
-function PostAuthDecision() {
-  const { send, pending, setPending } = useFlow();
-  function handle(decision: "yes" | "skip") {
-    if (pending) return;
-    setPending(true);
-    setTimeout(() => setPending(false), 400);
-    send(decision === "yes" ? "DECIDE_YES" : "DECIDE_SKIP");
-  }
-  return (
-    <div className="animate-page-enter">
-      <span className="text-xs font-semibold text-primary uppercase tracking-wider">You're in</span>
-      <h2 className="text-xl font-bold text-foreground mt-2 mb-2">Want to add your first invoice now?</h2>
-      <p className="text-sm text-muted-foreground mb-5">
-        Takes about a minute. Or skip — you can do it anytime from the dashboard.
-      </p>
-      <div className="flex flex-col gap-2.5">
-        <button
-          onClick={() => handle("yes")}
-          disabled={pending}
-          className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-60"
-        >
-          Yes, create invoice <ArrowRight className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => handle("skip")}
-          disabled={pending}
-          className="w-full py-3.5 rounded-xl font-semibold text-sm text-muted-foreground border border-border bg-card transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-60"
-        >
-          Skip for now
-        </button>
-      </div>
-    </div>
-  );
-}
+// Note: the post-auth "You're in" decision lives at /pre-dashboard, driven by the FlowMachine.
 
 const Q0 = {
   label: "Just checking in",
@@ -84,8 +51,8 @@ const Q2 = {
   ],
 };
 
-// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth · 7 first-invoice prompt
-const TOTAL_STEPS = 8;
+// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth
+const TOTAL_STEPS = 7;
 const STORAGE_KEY = "onboarding_state";
 
 function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
@@ -153,10 +120,11 @@ function loadState(): Partial<PersistedState> {
 export default function OnboardingScreen() {
   const navigate = useNavigate();
   const { completeOnboarding, user, isAuthenticated } = useApp();
+  const { send: sendFlow } = useFlow();
 
   const initial = useMemo(() => loadState(), []);
   const sessionDoneFlag = !isTestingMode() && typeof window !== "undefined" && localStorage.getItem("onboarding_done_session") === "1";
-  const [step, setStep] = useState<number>(sessionDoneFlag ? 7 : (initial.step ?? 0));
+  const [step, setStep] = useState<number>(sessionDoneFlag ? 6 : (initial.step ?? 0));
   const completedRef = useRef<boolean>(sessionDoneFlag);
   const [selected0, setSelected0] = useState<Set<string>>(new Set(initial.selected0 ?? []));
   const [selected1, setSelected1] = useState<Set<string>>(new Set(initial.selected1 ?? []));
@@ -205,7 +173,7 @@ export default function OnboardingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // Auto-finalize trial when authenticated and on auth step, then advance to first-invoice prompt
+  // Auto-finalize trial when authenticated and on auth step, then advance via FlowMachine
   useEffect(() => {
     if (step !== 6 || !isAuthenticated || finishingTrial) return;
     (async () => {
@@ -226,7 +194,9 @@ export default function OnboardingScreen() {
         }
         completedRef.current = true;
         setFinishingTrial(false);
-        setStep(7);
+        // Advance the FlowMachine: ONBOARDING -> AUTH -> PRE_DASHBOARD_DECISION
+        sendFlow("ONBOARDING_DONE");
+        sendFlow("AUTH_SUCCESS");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -237,7 +207,7 @@ export default function OnboardingScreen() {
     if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
     if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
     if (step === 3) return !personalizing; // gate while loading
-    if (step === 6 || step === 7) return false; // custom CTAs
+    if (step === 6) return false; // custom CTAs
     return step < TOTAL_STEPS - 1;
   }
 
@@ -659,7 +629,7 @@ export default function OnboardingScreen() {
             </div>
           )}
 
-          {step === 7 && <PostAuthDecision />}
+          {/* Post-auth "You're in" decision is rendered at /pre-dashboard via FlowMachine. */}
 
           {/* CTA sits directly below the user's responses */}
           {renderCta()}
