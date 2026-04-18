@@ -1,4 +1,15 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// Simple in-memory per-IP rate limiter (per warm instance).
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 10;
+const rateMap = new Map<string, number[]>();
+function checkRate(ip: string): boolean {
+  const now = Date.now();
+  const arr = (rateMap.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (arr.length >= RATE_MAX) return false;
+  arr.push(now);
+  rateMap.set(ip, arr);
+  return true;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,19 +20,11 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // Require a valid session — prevents anonymous credit-drain on LOVABLE_API_KEY.
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return json({ error: "Not authenticated" }, 401);
-    }
-    const supabaseUser = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: claims, error: claimsErr } = await supabaseUser.auth.getClaims(authHeader.replace("Bearer ", ""));
-    if (claimsErr || !claims?.claims?.sub) {
-      return json({ error: "Invalid session" }, 401);
+    // Onboarding runs before signup, so guests must be allowed.
+    // Lightweight per-IP soft rate limit to deter credit-drain abuse.
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    if (!checkRate(ip)) {
+      return json({ error: "Too many requests, please slow down." }, 429);
     }
 
     const { feelings = [], worries = [], goals = [], custom = {}, firstName = "" } = await req.json();
