@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import type { Tables } from "@/integrations/supabase/types";
@@ -158,21 +158,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { supabase.removeChannel(channel); };
   }, [user, authReady, refetchInvoices]);
 
+  const lastUserIdRef = useRef<string | null>(null);
+  const completedThisSessionRef = useRef(false);
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Testing mode: wipe persisted local state on every sign-in so each session starts fresh
-      if (isTestingMode() && event === "SIGNED_IN") {
+      const newUserId = session?.user?.id ?? null;
+      // Testing mode: only wipe persisted state on a *fresh* sign-in (different user id),
+      // not on silent token refreshes for the same user.
+      if (
+        isTestingMode() &&
+        event === "SIGNED_IN" &&
+        newUserId &&
+        newUserId !== lastUserIdRef.current &&
+        !completedThisSessionRef.current
+      ) {
         clearTestingState();
         setNotifications({ emailNotifications: true, autoChase: true, defaultTone: "Friendly" });
         setSchedule(DEFAULT_SCHEDULE);
         setHasCompletedOnboarding(false);
       }
+      lastUserIdRef.current = newUserId;
       setUser(session?.user ?? null);
       setIsAuthenticated(!!session?.user);
       setAuthReady(true);
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      lastUserIdRef.current = session?.user?.id ?? null;
       setUser(session?.user ?? null);
       setIsAuthenticated(!!session?.user);
       setAuthReady(true);
@@ -200,6 +213,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function completeOnboarding() {
+    completedThisSessionRef.current = true;
     setHasCompletedOnboarding(true);
     if (user) {
       await supabase

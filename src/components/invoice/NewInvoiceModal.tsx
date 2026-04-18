@@ -163,6 +163,12 @@ export default function NewInvoiceModal({
             )}
           </div>
 
+          {errorMsg && (
+            <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-[12px] text-destructive">
+              {errorMsg}
+            </div>
+          )}
+
           <button
             onClick={handleCreate}
             disabled={!canSubmit}
