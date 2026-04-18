@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProvider } from "@/context/AppContext";
 import RootRedirect from "./pages/RootRedirect";
 import AuthScreen from "./pages/AuthScreen";
+import WelcomeScreen from "./pages/WelcomeScreen";
 import OnboardingScreen from "./pages/OnboardingScreen";
 import TabLayout from "./components/TabLayout";
 import DashboardScreen from "./pages/DashboardScreen";
@@ -23,6 +24,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<RootRedirect />} />
+          <Route path="/welcome" element={<WelcomeScreen />} />
           <Route path="/auth" element={<AuthScreen />} />
           <Route path="/onboarding" element={<OnboardingScreen />} />
           <Route element={<TabLayout />}>
