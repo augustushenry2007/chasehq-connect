@@ -282,7 +282,7 @@ export default function OnboardingScreen() {
       <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-3 shrink-0">
         <button
           onClick={back}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 && step !== 6 && step !== 7 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center transition-transform duration-150 ease-out active:scale-[0.92] ${step > 0 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <ChevronLeft className="w-4 h-4 text-muted-foreground" />
         </button>
@@ -292,7 +292,7 @@ export default function OnboardingScreen() {
         <button
           onClick={() => canAdvance() && next()}
           disabled={!canAdvance() || (step === 3 && personalizing)}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${canAdvance() && step !== 6 && step !== 7 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center transition-transform duration-150 ease-out active:scale-[0.92] ${canAdvance() ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <ChevronRight className="w-4 h-4 text-muted-foreground" />
         </button>

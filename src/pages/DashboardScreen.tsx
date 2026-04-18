@@ -59,7 +59,7 @@ function GetStartedStep({
 
 export default function DashboardScreen() {
   const navigate = useNavigate();
-  const { user, fullName } = useApp();
+  const { user, fullName, isAuthenticated } = useApp();
   const { invoices, loading, refetch } = useInvoices();
   const { connectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
   const { canSend, hasGmail, hasSmtp } = useSendingMailbox();
@@ -102,8 +102,20 @@ export default function DashboardScreen() {
   }
 
   return (
-    <div className="flex-1 overflow-auto pb-24 animate-fade-in">
+    <div className="flex-1 overflow-auto pb-24 animate-page-enter">
       <TrialBanner />
+      {!isAuthenticated && (
+        <button
+          onClick={() => flowSend("REQUEST_AUTH")}
+          className="w-full bg-accent/60 border-b border-border px-5 py-2.5 text-left flex items-center justify-between transition-colors active:bg-accent"
+        >
+          <span className="text-xs text-foreground">
+            <span className="font-semibold">You're exploring as a guest.</span>{" "}
+            <span className="text-muted-foreground">Create an account to save your work</span>
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 text-primary shrink-0" />
+        </button>
+      )}
       <div className="px-5 pt-5">
         <h1 className="text-xl font-bold text-foreground">
           {isEmpty ? `Welcome, ${firstName}` : `Good morning, ${firstName}`}

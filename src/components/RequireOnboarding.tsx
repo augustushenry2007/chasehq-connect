@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
+import { isGuestOnboarded } from "@/lib/localInvoice";
 
 export default function RequireOnboarding() {
   const { authReady, isAuthenticated, hasCompletedOnboarding } = useApp();
@@ -13,8 +14,10 @@ export default function RequireOnboarding() {
     );
   }
 
-  if (!isAuthenticated) return <Navigate to="/welcome" replace />;
-  if (!hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
-  // Allow /pre-dashboard for authed + onboarded users (machine routes them here on first run).
+  // Guests who finished onboarding can explore dashboard / invoices / pre-dashboard.
+  const guestOk = !isAuthenticated && isGuestOnboarded();
+
+  if (!isAuthenticated && !guestOk) return <Navigate to="/welcome" replace />;
+  if (isAuthenticated && !hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
   return <Outlet key={location.pathname} />;
 }

@@ -20,6 +20,7 @@ import TermsOfUse from "./pages/legal/TermsOfUse";
 import NotFound from "./pages/NotFound";
 import PaywallScreen from "./pages/PaywallScreen";
 import BillingScreen from "./pages/BillingScreen";
+import PostInvoiceAuthScreen from "./pages/PostInvoiceAuthScreen";
 import RequireOnboarding from "./components/RequireOnboarding";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -37,6 +38,7 @@ const App = () => (
               <Route path="/welcome" element={<WelcomeScreen />} />
               <Route path="/auth" element={<AuthScreen />} />
               <Route path="/onboarding" element={<OnboardingScreen />} />
+              <Route path="/auth-after-invoice" element={<PostInvoiceAuthScreen />} />
               <Route element={<RequireOnboarding />}>
                 <Route path="/pre-dashboard" element={<PreDashboardDecisionScreen />} />
                 <Route element={<TabLayout />}>

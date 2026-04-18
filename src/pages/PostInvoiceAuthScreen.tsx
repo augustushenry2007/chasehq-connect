@@ -1,7 +1,24 @@
+import { useEffect } from "react";
 import { Sparkles } from "lucide-react";
 import AuthForm from "@/components/auth/AuthForm";
+import { useApp } from "@/context/AppContext";
+import { useFlow } from "@/flow/FlowMachine";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function PostInvoiceAuthScreen() {
+  const { isAuthenticated } = useApp();
+  const { send } = useFlow();
+
+  // When auth flips to true (Google redirect or email submit), kick off start-trial
+  // and advance the flow. AppContext will flush the pending invoice draft.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    (async () => {
+      try { await supabase.functions.invoke("start-trial"); } catch { /* non-fatal */ }
+      send("AUTH_SUCCESS");
+    })();
+  }, [isAuthenticated, send]);
+
   return (
     <div className="min-h-screen bg-background flex flex-col px-6 py-8 animate-page-enter">
       <div className="w-full max-w-sm mx-auto flex-1 flex flex-col justify-center">
