@@ -3,6 +3,7 @@ import { useApp } from "@/context/AppContext";
 import { useFlow } from "./FlowMachine";
 import { FlowState } from "./states";
 import { FIRST_RUN_SESSION_KEY } from "./states";
+import { isGuestOnboarded } from "@/lib/localInvoice";
 
 /**
  * Drives boot-time and reactive transitions:
@@ -22,21 +23,35 @@ export function FlowBootstrap() {
     bootedRef.current = true;
 
     if (state !== FlowState.APP_LAUNCH) {
-      // Already mid-flow from a persisted state. If user is signed out, force LANDING.
-      if (!isAuthenticated && state !== FlowState.LANDING && state !== FlowState.ONBOARDING && state !== FlowState.AUTH) {
+      // Already mid-flow from a persisted state. If user is signed out AND not a guest who
+      // completed onboarding, force LANDING.
+      const guestOk = isGuestOnboarded();
+      const allowedUnauthStates = [
+        FlowState.LANDING,
+        FlowState.ONBOARDING,
+        FlowState.AUTH,
+        FlowState.PRE_DASHBOARD_DECISION,
+        FlowState.CREATE_INVOICE,
+        FlowState.POST_INVOICE_AUTH,
+        FlowState.DASHBOARD_EMPTY,
+      ] as const;
+      const allowed = (allowedUnauthStates as readonly string[]).includes(state);
+      if (!isAuthenticated && !(guestOk && allowed)) {
         send("SIGN_OUT");
       }
       return;
     }
 
     if (!isAuthenticated) {
-      send("BOOT_NO_SESSION");
+      if (isGuestOnboarded()) {
+        send("BOOT_GUEST_ONBOARDED");
+      } else {
+        send("BOOT_NO_SESSION");
+      }
       return;
     }
     if (!hasCompletedOnboarding) {
-      // Authenticated but onboarding not done — drop them into onboarding flow.
-      send("BOOT_NO_SESSION"); // landing
-      // The app guards will route them through onboarding.
+      send("BOOT_NO_SESSION"); // landing — guards route to onboarding
       return;
     }
     // Authenticated + onboarded.
