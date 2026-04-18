@@ -340,31 +340,26 @@ export default function OnboardingScreen() {
                     {personalization.subhead}
                   </p>
 
-                  <div className="border border-border rounded-xl divide-y divide-border mb-4">
-                    <div className="px-4 py-2.5 bg-muted/50">
-                      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">What's weighing on you</span>
-                    </div>
+                  <div className="flex flex-col gap-2 mb-4">
                     {personalization.painPoints.map((p, i) => (
-                      <div key={i} className="p-3.5">
-                        <p className="text-sm font-semibold text-foreground">{p.title}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{p.detail}</p>
+                      <div key={i} className="flex items-start gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 mt-2 shrink-0" />
+                        <p className="text-sm text-foreground">
+                          <span className="font-semibold">{p.title}.</span>{" "}
+                          <span className="text-muted-foreground">{p.detail}</span>
+                        </p>
                       </div>
                     ))}
                   </div>
 
-                  <div className="border border-primary/30 bg-accent/40 rounded-xl divide-y divide-border">
-                    <div className="px-4 py-2.5">
-                      <span className="text-[11px] font-semibold text-primary uppercase tracking-wider">How ChaseHQ helps</span>
-                    </div>
+                  <div className="flex flex-col gap-2">
                     {personalization.benefits.map((b, i) => (
-                      <div key={i} className="p-3.5 flex gap-3">
-                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0 mt-0.5">
-                          <Check className="w-3 h-3 text-primary-foreground" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">{b.title}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{b.detail}</p>
-                        </div>
+                      <div key={i} className="flex items-start gap-2.5">
+                        <Check className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                        <p className="text-sm text-foreground">
+                          <span className="font-semibold">{b.title}.</span>{" "}
+                          <span className="text-muted-foreground">{b.detail}</span>
+                        </p>
                       </div>
                     ))}
                   </div>
