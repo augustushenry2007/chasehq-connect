@@ -14,7 +14,8 @@ interface TimelineEvent {
 
 function getTimeline(invoice: Invoice, customDates?: Record<number, string>): TimelineEvent[] {
   const due = new Date(invoice.dueDateISO);
-  const sentDate = new Date(due);
+  const safeDue = isNaN(due.getTime()) ? new Date() : due;
+  const sentDate = new Date(safeDue);
   sentDate.setDate(sentDate.getDate() - 30);
 
   const defaults: string[] = [];
