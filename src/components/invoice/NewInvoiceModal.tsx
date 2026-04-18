@@ -11,6 +11,7 @@ import { format, parse, isValid } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { newInvoiceSchema } from "@/lib/validation";
 
 function formatDateMask(input: string): string {
   const digits = input.replace(/\D/g, "").slice(0, 8);
@@ -80,20 +81,32 @@ export default function NewInvoiceModal({
   async function handleCreate() {
     if (creating) return; // double-submit guard
     setErrorMsg(null);
-    if (!client || !amount || !dueDateISO) {
-      setErrorMsg("Please fill in required fields with a valid date.");
+
+    // zod-validate before doing anything (prevents bad data hitting DB / email).
+    const parsed = newInvoiceSchema.safeParse({
+      client,
+      clientEmail: email,
+      description,
+      amount: parseFloat(amount),
+      dueDate: dueDateISO,
+    });
+    if (!parsed.success) {
+      const first = parsed.error.errors[0]?.message || "Please check the form and try again.";
+      setErrorMsg(first);
       return;
     }
+    const v = parsed.data;
+
     setCreating(true);
     try {
       // Guest path: persist locally and let the parent advance the flow.
       if (!isAuthenticated) {
         savePending({
-          client,
-          clientEmail: email,
-          description,
-          amount: parseFloat(amount),
-          dueDate: dueDateISO,
+          client: v.client,
+          clientEmail: v.clientEmail,
+          description: v.description,
+          amount: v.amount,
+          dueDate: v.dueDate,
         });
         resetDraft();
         setErrorMsg(null);
@@ -107,11 +120,11 @@ export default function NewInvoiceModal({
         const uid = await resolveUserId();
         if (!uid) throw new Error("auth/no-user-id");
         return await createInvoice(uid, {
-          client,
-          clientEmail: email,
-          description,
-          amount: parseFloat(amount),
-          dueDate: dueDateISO,
+          client: v.client,
+          clientEmail: v.clientEmail,
+          description: v.description,
+          amount: v.amount,
+          dueDate: v.dueDate,
         });
       });
 

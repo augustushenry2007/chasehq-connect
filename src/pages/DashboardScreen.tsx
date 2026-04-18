@@ -3,17 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { getStats, getChaseFeed, formatUSD } from "@/lib/data";
 import { useApp } from "@/context/AppContext";
-import { useGmailConnection } from "@/hooks/useGmailConnection";
-import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
 import { useFlow } from "@/flow/FlowMachine";
 import {
-  TrendingUp, AlertTriangle, CheckCircle, Mail, Check,
-  Plus, FileText, Sparkles, ArrowRight, Loader2, Settings as SettingsIcon,
+  TrendingUp, AlertTriangle, CheckCircle, Check,
+  Plus, FileText, Sparkles, ArrowRight,
 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 import TrialBanner from "@/components/TrialBanner";
-import { toast } from "sonner";
 
 function StatCard({ label, value, sub, icon: Icon, iconColor, valueColor }: {
   label: string; value: string; sub: string; icon: React.ElementType; iconColor: string; valueColor?: string;
@@ -30,42 +27,19 @@ function StatCard({ label, value, sub, icon: Icon, iconColor, valueColor }: {
   );
 }
 
-function GetStartedStep({
-  done, title, description, action, onAction, loading, icon: Icon,
-}: {
-  done: boolean; title: string; description: string; action: string; onAction: () => void; loading?: boolean; icon: React.ElementType;
-}) {
-  return (
-    <div className={`flex items-start gap-3 p-4 rounded-xl border ${done ? "bg-accent/40 border-accent" : "bg-card border-border"}`}>
-      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${done ? "bg-primary" : "bg-accent"}`}>
-        {done ? <Check className="w-4 h-4 text-primary-foreground" /> : <Icon className="w-4 h-4 text-primary" />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground">{title}</p>
-        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-        {!done && (
-          <button
-            onClick={onAction}
-            disabled={loading}
-            className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-primary disabled:opacity-50"
-          >
-            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <>{action} <ArrowRight className="w-3 h-3" /></>}
-          </button>
-        )}
-      </div>
-    </div>
-  );
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 export default function DashboardScreen() {
   const navigate = useNavigate();
   const { user, fullName, isAuthenticated } = useApp();
   const { invoices, loading, refetch } = useInvoices();
-  const { connectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
-  const { canSend, hasGmail, hasSmtp } = useSendingMailbox();
   const { send: flowSend } = useFlow();
   const [showNew, setShowNew] = useState(false);
-  const [connectingGmail, setConnectingGmail] = useState(false);
 
   const stats = getStats(invoices);
   const chaseFeed = getChaseFeed(invoices);
@@ -91,16 +65,6 @@ export default function DashboardScreen() {
 
   const firstName = fullName?.split(" ")[0] || user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
 
-  async function handleConnectGmail() {
-    setConnectingGmail(true);
-    const result = await connectGmail();
-    if (result.error) {
-      toast.error(result.error);
-      setConnectingGmail(false);
-    }
-    // On success, browser redirects to Google
-  }
-
   return (
     <div className="flex-1 overflow-auto pb-24 animate-page-enter">
       <TrialBanner />
@@ -118,7 +82,7 @@ export default function DashboardScreen() {
       )}
       <div className="px-5 pt-5">
         <h1 className="text-xl font-bold text-foreground">
-          {isEmpty ? `Welcome, ${firstName}` : `Good morning, ${firstName}`}
+          {isEmpty ? `Welcome, ${firstName}` : `${greeting()}, ${firstName}`}
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           {isEmpty ? "Let's get you set up so ChaseHQ can chase invoices for you." : "Here's what needs your attention today."}
@@ -193,37 +157,6 @@ export default function DashboardScreen() {
               </div>
             ))}
           </div>
-
-          {/* Get-started checklist — show until any sender is connected */}
-          {!canSend && (
-            <div className="mt-4 mx-5">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
-                Get set up
-              </h3>
-              <div className="flex flex-col gap-2.5">
-                {signedInWithGoogle ? (
-                  <GetStartedStep
-                    done={hasGmail}
-                    title="Allow ChaseHQ to send follow-ups"
-                    description={`One-click permission to send from ${googleEmail}. We never read your inbox.`}
-                    action="Grant permission"
-                    onAction={handleConnectGmail}
-                    loading={connectingGmail}
-                    icon={Mail}
-                  />
-                ) : (
-                  <GetStartedStep
-                    done={hasSmtp}
-                    title="Connect your email to send follow-ups"
-                    description="Add your email's SMTP details so ChaseHQ can send on your behalf."
-                    action="Open Settings"
-                    onAction={() => navigate("/settings")}
-                    icon={SettingsIcon}
-                  />
-                )}
-              </div>
-            </div>
-          )}
 
           {/* What ChaseHQ does */}
           <div className="mt-4 mx-5 bg-card border border-border rounded-2xl p-4 mb-4">
