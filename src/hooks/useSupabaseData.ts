@@ -18,10 +18,16 @@ export async function createInvoice(userId: string, data: {
   description: string;
   amount: number;
   dueDate: string;
-}, senderEmail = "") {
-  const { count } = await supabase.from("invoices").select("*", { count: "exact", head: true });
-  const num = (count || 0) + 1;
-  const invoiceNumber = `INV-${String(num).padStart(3, "0")}`;
+}, senderEmail = ""): Promise<{ invoice: DbInvoice | null; error: string | null }> {
+  // Generate invoice number scoped to this user (RLS-safe).
+  const { count, error: countError } = await supabase
+    .from("invoices")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  // If the count fails (e.g. transient RLS), fall back to a timestamp-based suffix.
+  const baseNum = countError ? Math.floor(Date.now() / 1000) % 100000 : (count || 0) + 1;
+  const invoiceNumber = `INV-${String(baseNum).padStart(3, "0")}`;
 
   const { data: invoice, error } = await supabase.from("invoices").insert({
     user_id: userId,
@@ -38,12 +44,13 @@ export async function createInvoice(userId: string, data: {
   }).select().single();
 
   if (error) {
-    toast.error("Failed to create invoice: " + error.message);
-    return null;
+    const msg = `Failed to create invoice: ${error.message}${error.code ? ` (${error.code})` : ""}`;
+    toast.error(msg);
+    return { invoice: null, error: msg };
   }
 
   toast.success(`Invoice ${invoiceNumber} created!`);
-  return invoice;
+  return { invoice, error: null };
 }
 
 export async function deleteInvoice(invoiceId: string): Promise<boolean> {

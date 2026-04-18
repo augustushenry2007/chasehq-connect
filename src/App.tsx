@@ -16,6 +16,7 @@ import TermsOfUse from "./pages/legal/TermsOfUse";
 import NotFound from "./pages/NotFound";
 import PaywallScreen from "./pages/PaywallScreen";
 import BillingScreen from "./pages/BillingScreen";
+import RequireOnboarding from "./components/RequireOnboarding";
 
 const App = () => (
   <AppProvider>
@@ -27,14 +28,16 @@ const App = () => (
           <Route path="/welcome" element={<WelcomeScreen />} />
           <Route path="/auth" element={<AuthScreen />} />
           <Route path="/onboarding" element={<OnboardingScreen />} />
-          <Route element={<TabLayout />}>
-            <Route path="/dashboard" element={<DashboardScreen />} />
-            <Route path="/invoices" element={<InvoicesScreen />} />
-            <Route path="/settings" element={<SettingsScreen />} />
+          <Route element={<RequireOnboarding />}>
+            <Route element={<TabLayout />}>
+              <Route path="/dashboard" element={<DashboardScreen />} />
+              <Route path="/invoices" element={<InvoicesScreen />} />
+              <Route path="/settings" element={<SettingsScreen />} />
+            </Route>
+            <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
+            <Route path="/settings/billing" element={<BillingScreen />} />
           </Route>
-          <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
           <Route path="/paywall" element={<PaywallScreen />} />
-          <Route path="/settings/billing" element={<BillingScreen />} />
           <Route path="/legal/privacy" element={<PrivacyPolicy />} />
           <Route path="/legal/terms" element={<TermsOfUse />} />
           <Route path="*" element={<NotFound />} />
