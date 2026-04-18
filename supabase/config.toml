@@ -4,7 +4,7 @@ project_id = "smkvskatoblrfgplntqe"
 verify_jwt = false
 
 [functions.generate-personalization]
-verify_jwt = true
+verify_jwt = false
 
 [functions.apple-notifications]
 verify_jwt = false
