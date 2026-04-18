@@ -629,7 +629,7 @@ export default function OnboardingScreen() {
             </div>
           )}
 
-          {step === 7 && <PostAuthDecision />}
+          {/* Post-auth "You're in" decision is rendered at /pre-dashboard via FlowMachine. */}
 
           {/* CTA sits directly below the user's responses */}
           {renderCta()}
