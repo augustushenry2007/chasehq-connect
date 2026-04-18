@@ -21,6 +21,7 @@ import NotFound from "./pages/NotFound";
 import PaywallScreen from "./pages/PaywallScreen";
 import BillingScreen from "./pages/BillingScreen";
 import RequireOnboarding from "./components/RequireOnboarding";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 const App = () => (
   <AppProvider>
