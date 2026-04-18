@@ -65,11 +65,31 @@ export async function deleteInvoice(invoiceId: string): Promise<boolean> {
   return true;
 }
 
+// Wraps a promise with a timeout. Resolves to the inner value or rejects with `timeout`.
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 export async function generateFollowup(invoice: FrontendInvoice, tone: string, previousMessage?: string): Promise<{ subject: string; message: string } | null> {
   try {
-    const { data, error } = await supabase.functions.invoke("generate-followup", {
-      body: { invoice, tone, previousMessage },
-    });
+    const { data, error } = await withTimeout(
+      supabase.functions.invoke("generate-followup", {
+        body: { invoice, tone, previousMessage },
+      }),
+      15_000,
+    );
 
     if (error) {
       toast.error("AI generation failed: " + error.message);
@@ -83,45 +103,75 @@ export async function generateFollowup(invoice: FrontendInvoice, tone: string, p
 
     return data;
   } catch (e) {
-    toast.error("Failed to generate follow-up");
+    if (e instanceof Error && e.message === "timeout") {
+      toast.error("AI took too long. Please try again.");
+    } else {
+      toast.error("Failed to generate follow-up");
+    }
     return null;
   }
 }
 
+export type SendResult =
+  | { ok: true }
+  | { ok: false; reason: "subscription_required" | "no_mailbox" | "rate_limited" | "error"; message?: string };
+
 export async function sendFollowupEmail(
   to: string,
   subject: string,
-  message: string
-): Promise<boolean> {
+  message: string,
+  invoiceId?: string,
+): Promise<SendResult> {
   try {
-    const { data, error } = await supabase.functions.invoke("send-email", {
-      body: { to, subject, message },
-    });
+    const { data, error } = await withTimeout(
+      supabase.functions.invoke("send-email", {
+        body: { to, subject, message, invoiceId },
+      }),
+      15_000,
+    );
 
     if (error) {
-      toast.error("Send failed: " + error.message);
-      return false;
+      return { ok: false, reason: "error", message: error.message };
     }
 
     if (data?.error) {
       if (data.error === "subscription_required") {
-        toast.error(data.message || "Subscribe to keep sending follow-ups.");
-        // Best-effort redirect to paywall
-        if (typeof window !== "undefined") window.location.assign("/paywall");
-        return false;
+        return { ok: false, reason: "subscription_required", message: data.message };
       }
-      if (data.error.includes("Gmail access token") || data.error.includes("Gmail token")) {
-        toast.error("Gmail not connected. Connect Gmail in Settings to send emails.");
-      } else {
-        toast.error(data.error);
+      if (data.error === "rate_limited") {
+        return { ok: false, reason: "rate_limited", message: data.message };
       }
-      return false;
+      if (data.error === "no_mailbox" || /Gmail.*not connected|No sending mailbox/i.test(data.error)) {
+        return { ok: false, reason: "no_mailbox", message: data.message || data.error };
+      }
+      return { ok: false, reason: "error", message: data.error };
     }
 
-    toast.success("Follow-up sent successfully!");
-    return true;
+    return { ok: true };
   } catch (e) {
-    toast.error("Failed to send email");
-    return false;
+    if (e instanceof Error && e.message === "timeout") {
+      return { ok: false, reason: "error", message: "Send timed out. Please try again." };
+    }
+    return { ok: false, reason: "error", message: "Failed to send email" };
+  }
+}
+
+// Persist a follow-up in the timeline after a successful send.
+export async function recordFollowup(
+  userId: string,
+  invoiceId: string,
+  payload: { subject: string; message: string; tone: string; isAiGenerated: boolean },
+) {
+  const { error } = await supabase.from("followups").insert({
+    user_id: userId,
+    invoice_id: invoiceId,
+    subject: payload.subject,
+    message: payload.message,
+    tone: payload.tone,
+    is_ai_generated: payload.isAiGenerated,
+    sent_at: new Date().toISOString(),
+  });
+  if (error) {
+    console.error("recordFollowup error:", error);
   }
 }

@@ -7,13 +7,20 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Per-user daily send cap.
+const DAILY_SEND_CAP = 50;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { to, subject, message } = await req.json();
+    const { to, subject, message, invoiceId } = await req.json();
     if (!to || !subject || !message) {
       return json({ error: "Missing to, subject, or message" }, 400);
+    }
+    // Basic email shape check — defence in depth, client also validates.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to))) {
+      return json({ error: "Invalid recipient email" }, 400);
     }
 
     const authHeader = req.headers.get("Authorization");
@@ -33,8 +40,6 @@ serve(async (req) => {
     );
 
     // === Subscription gate ===
-    // Backend is the single source of truth for entitlement.
-    // Returns 402 Payment Required if user doesn't have an active trial or paid sub.
     const { data: hasEnt, error: entErr } = await supabaseAdmin
       .rpc("has_active_entitlement", { _user_id: user.id });
     if (entErr) {
@@ -45,6 +50,22 @@ serve(async (req) => {
       return json({ error: "subscription_required", message: "Your trial has ended. Subscribe to keep sending follow-ups." }, 402);
     }
 
+    // === Per-user daily rate limit ===
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count: sendCount, error: countErr } = await supabaseAdmin
+      .from("email_send_log")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("sent_at", since);
+    if (countErr) {
+      console.error("rate-limit count error:", countErr);
+    } else if ((sendCount ?? 0) >= DAILY_SEND_CAP) {
+      return json({
+        error: "rate_limited",
+        message: `You've hit today's limit of ${DAILY_SEND_CAP} sends. Try again tomorrow.`,
+      }, 429);
+    }
+
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("sender_type")
@@ -53,7 +74,6 @@ serve(async (req) => {
 
     let senderType: "gmail" | "smtp" | "none" = (profile?.sender_type as any) ?? "none";
 
-    // Auto-resolve if 'none' but a connection exists
     if (senderType === "none") {
       const { data: gm } = await supabaseAdmin.from("gmail_connections").select("user_id").eq("user_id", user.id).maybeSingle();
       if (gm) senderType = "gmail";
@@ -63,14 +83,24 @@ serve(async (req) => {
       }
     }
 
+    let result: Response;
     if (senderType === "gmail") {
-      return await sendViaGmail(supabaseAdmin, user.id, to, subject, message);
-    }
-    if (senderType === "smtp") {
-      return await sendViaSmtp(supabaseAdmin, user.id, to, subject, message);
+      result = await sendViaGmail(supabaseAdmin, user.id, to, subject, message);
+    } else if (senderType === "smtp") {
+      result = await sendViaSmtp(supabaseAdmin, user.id, to, subject, message);
+    } else {
+      return json({ error: "no_mailbox", message: "No sending mailbox connected." }, 400);
     }
 
-    return json({ error: "No sending mailbox connected. Please connect Gmail or your email in Settings." }, 400);
+    // Log successful sends only (status 2xx).
+    if (result.status >= 200 && result.status < 300) {
+      await supabaseAdmin.from("email_send_log").insert({
+        user_id: user.id,
+        recipient: to,
+        invoice_id: invoiceId ?? null,
+      });
+    }
+    return result;
   } catch (e) {
     console.error("send-email error:", e);
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
@@ -85,7 +115,7 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
     .single();
 
   if (connError || !gmailConn) {
-    return json({ error: "Gmail not connected. Please connect Gmail in Settings." }, 401);
+    return json({ error: "no_mailbox", message: "Gmail not connected. Please connect Gmail in Settings." }, 401);
   }
 
   let accessToken = gmailConn.access_token;
@@ -105,8 +135,8 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
     });
     const refreshData = await refreshRes.json();
     if (!refreshRes.ok || !refreshData.access_token) {
-      console.error("Token refresh failed:", refreshData);
-      return json({ error: "Gmail token expired. Please reconnect Gmail in Settings." }, 401);
+      console.error("Token refresh failed");
+      return json({ error: "no_mailbox", message: "Gmail token expired. Please reconnect Gmail in Settings." }, 401);
     }
     accessToken = refreshData.access_token;
     const newExpiry = new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString();
@@ -139,10 +169,11 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
   );
 
   if (!gmailResponse.ok) {
-    const errorText = await gmailResponse.text();
-    console.error("Gmail API error:", gmailResponse.status, errorText);
-    if (gmailResponse.status === 401) {
-      return json({ error: "Gmail token expired. Please reconnect Gmail in Settings." }, 401);
+    const status = gmailResponse.status;
+    // Don't log raw body to avoid leaking tokens / sensitive context.
+    console.error("Gmail API error status:", status);
+    if (status === 401) {
+      return json({ error: "no_mailbox", message: "Gmail token expired. Please reconnect Gmail in Settings." }, 401);
     }
     return json({ error: "Failed to send email via Gmail" }, 500);
   }
@@ -154,7 +185,7 @@ async function sendViaSmtp(supabaseAdmin: any, userId: string, to: string, subje
   const { data: conn, error } = await supabaseAdmin
     .from("smtp_connections").select("*").eq("user_id", userId).maybeSingle();
   if (error || !conn) {
-    return json({ error: "SMTP not connected. Please connect your email in Settings." }, 401);
+    return json({ error: "no_mailbox", message: "SMTP not connected. Please connect your email in Settings." }, 401);
   }
   const client = new SMTPClient({
     connection: {
@@ -173,8 +204,10 @@ async function sendViaSmtp(supabaseAdmin: any, userId: string, to: string, subje
     });
   } catch (err) {
     await client.close().catch(() => {});
-    console.error("SMTP send error:", err);
-    return json({ error: err instanceof Error ? err.message : "SMTP send failed" }, 500);
+    // Log only the error name/type, not the full message which may include credentials.
+    const safeName = err instanceof Error ? err.name : "UnknownSmtpError";
+    console.error("SMTP send error:", safeName);
+    return json({ error: "SMTP send failed" }, 500);
   }
   await client.close();
   return json({ success: true, via: "smtp" });
