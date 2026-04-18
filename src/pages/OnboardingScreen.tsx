@@ -153,6 +153,7 @@ function loadState(): Partial<PersistedState> {
 export default function OnboardingScreen() {
   const navigate = useNavigate();
   const { completeOnboarding, user, isAuthenticated } = useApp();
+  const { send: sendFlow } = useFlow();
 
   const initial = useMemo(() => loadState(), []);
   const sessionDoneFlag = !isTestingMode() && typeof window !== "undefined" && localStorage.getItem("onboarding_done_session") === "1";
