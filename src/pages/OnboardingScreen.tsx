@@ -300,7 +300,7 @@ export default function OnboardingScreen() {
 
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
-        <div className="bg-card border border-border rounded-2xl p-5 mt-2">
+        <div key={step} className="bg-card border border-border rounded-2xl p-5 mt-2 animate-step-in">
           {step === 0 && <MultiSelectStep config={Q0} selected={selected0} onToggle={makeToggle(setSelected0)} customText={custom0} setCustomText={setCustom0} />}
           {step === 1 && <MultiSelectStep config={Q1} selected={selected1} onToggle={makeToggle(setSelected1)} customText={custom1} setCustomText={setCustom1} />}
           {step === 2 && <MultiSelectStep config={Q2} selected={selected2} onToggle={makeToggle(setSelected2)} customText={custom2} setCustomText={setCustom2} />}
