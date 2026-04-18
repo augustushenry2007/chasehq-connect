@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { createInvoice } from "@/hooks/useSupabaseData";
+import { supabase } from "@/integrations/supabase/client";
 import { X, CalendarIcon } from "lucide-react";
 import { toast } from "sonner";
 import { format, parse, isValid } from "date-fns";
@@ -49,10 +50,20 @@ export default function NewInvoiceModal({
   const canSubmit = client && amount && dueDateISO && !creating;
 
   async function handleCreate() {
-    if (!user) { toast.error("Not signed in"); return; }
     if (!client || !amount || !dueDateISO) { toast.error("Fill in required fields with a valid date"); return; }
     setCreating(true);
-    const result = await createInvoice(user.id, {
+    // Resolve user id from context, falling back to a fresh session lookup if context hasn't hydrated yet
+    let uid = user?.id;
+    if (!uid) {
+      const { data } = await supabase.auth.getSession();
+      uid = data.session?.user?.id;
+    }
+    if (!uid) {
+      setCreating(false);
+      toast.error("Your session expired. Please sign in again.");
+      return;
+    }
+    const result = await createInvoice(uid, {
       client,
       clientEmail: email,
       description,
