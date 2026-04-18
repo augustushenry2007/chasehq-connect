@@ -5,6 +5,7 @@ import { formatUSD, type Invoice } from "@/lib/data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Search, Plus, X, ChevronRight, FileText } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
+import NotificationBell from "@/components/NotificationBell";
 import { useFlow } from "@/flow/FlowMachine";
 import { FlowState } from "@/flow/states";
 import { useApp } from "@/context/AppContext";
@@ -126,16 +127,19 @@ export default function InvoicesScreen() {
           <ChevronRight className="w-3.5 h-3.5 text-primary shrink-0" />
         </button>
       )}
-      <div className="px-5 pt-5 pb-3 flex items-start justify-between">
-        <div>
+      <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-foreground">Invoices</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Manage and track all your client invoices</p>
         </div>
-        {!isEmptyWorkspace && (
-          <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3.5 py-2 rounded-xl text-sm font-semibold">
-            <Plus className="w-4 h-4" /> New
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {isAuthenticated && <NotificationBell />}
+          {!isEmptyWorkspace && (
+            <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3.5 py-2 rounded-xl text-sm font-semibold">
+              <Plus className="w-4 h-4" /> New
+            </button>
+          )}
+        </div>
       </div>
 
       {!isEmptyWorkspace && (
