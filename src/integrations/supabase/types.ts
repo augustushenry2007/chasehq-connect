@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      followup_schedules: {
+        Row: {
+          created_at: string
+          id: string
+          invoice_id: string
+          paused: boolean
+          steps: Json
+          timezone: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invoice_id: string
+          paused?: boolean
+          steps?: Json
+          timezone?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          paused?: boolean
+          steps?: Json
+          timezone?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       followups: {
         Row: {
           created_at: string
@@ -146,6 +179,93 @@ export type Database = {
           payment_details?: string
           sent_from?: string
           status?: Database["public"]["Enums"]["invoice_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notification_preferences: {
+        Row: {
+          created_at: string
+          email_enabled: boolean
+          enabled: boolean
+          push_enabled: boolean
+          quiet_hours_end: number
+          quiet_hours_start: number
+          timezone: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email_enabled?: boolean
+          enabled?: boolean
+          push_enabled?: boolean
+          quiet_hours_end?: number
+          quiet_hours_start?: number
+          timezone?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email_enabled?: boolean
+          enabled?: boolean
+          push_enabled?: boolean
+          quiet_hours_end?: number
+          quiet_hours_start?: number
+          timezone?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          attempts: number
+          body: string
+          created_at: string
+          delivered_at: string | null
+          id: string
+          invoice_id: string
+          read_at: string | null
+          schedule_step_index: number
+          scheduled_for: string
+          status: Database["public"]["Enums"]["notification_status"]
+          title: string
+          type: Database["public"]["Enums"]["notification_type"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          body: string
+          created_at?: string
+          delivered_at?: string | null
+          id?: string
+          invoice_id: string
+          read_at?: string | null
+          schedule_step_index: number
+          scheduled_for: string
+          status?: Database["public"]["Enums"]["notification_status"]
+          title: string
+          type: Database["public"]["Enums"]["notification_type"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          body?: string
+          created_at?: string
+          delivered_at?: string | null
+          id?: string
+          invoice_id?: string
+          read_at?: string | null
+          schedule_step_index?: number
+          scheduled_for?: string
+          status?: Database["public"]["Enums"]["notification_status"]
+          title?: string
+          type?: Database["public"]["Enums"]["notification_type"]
           updated_at?: string
           user_id?: string
         }
@@ -347,6 +467,13 @@ export type Database = {
         | "Follow-up"
         | "Upcoming"
         | "Paid"
+      notification_status:
+        | "pending"
+        | "delivered"
+        | "read"
+        | "canceled"
+        | "failed"
+      notification_type: "due" | "followup" | "escalation"
       subscription_status:
         | "none"
         | "trialing"
@@ -482,6 +609,14 @@ export const Constants = {
   public: {
     Enums: {
       invoice_status: ["Escalated", "Overdue", "Follow-up", "Upcoming", "Paid"],
+      notification_status: [
+        "pending",
+        "delivered",
+        "read",
+        "canceled",
+        "failed",
+      ],
+      notification_type: ["due", "followup", "escalation"],
       subscription_status: [
         "none",
         "trialing",
