@@ -1,5 +1,6 @@
 import { ArrowRight } from "lucide-react";
 import { useFlow } from "@/flow/FlowMachine";
+import appLogo from "@/assets/app-logo.png";
 
 export default function WelcomeScreen() {
   const { send: sendFlow } = useFlow();
@@ -7,12 +8,12 @@ export default function WelcomeScreen() {
   return (
     <div className="h-screen bg-background flex flex-col items-center justify-center px-6 overflow-hidden">
       <div className="w-full max-w-md flex flex-col items-center text-center">
-        <div
-          className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-8 animate-fade-in"
+        <img
+          src={appLogo}
+          alt="ChaseHQ logo"
+          className="w-20 h-20 rounded-2xl mb-8 animate-fade-in shadow-sm"
           style={{ animationDelay: "0ms", animationFillMode: "both" }}
-        >
-          <div className="w-6 h-6 rounded-md bg-primary" />
-        </div>
+        />
 
         <h1
           className="text-[28px] leading-[1.15] font-bold text-foreground tracking-tight animate-fade-in"
