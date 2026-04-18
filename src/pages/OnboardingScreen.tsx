@@ -2,15 +2,12 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { isTestingMode } from "@/lib/testingMode";
-import { GoogleIcon } from "@/components/GoogleIcon";
-import { validatePassword } from "@/lib/passwordValidation";
+import { markGuestOnboarded } from "@/lib/localInvoice";
 import { useFlow } from "@/flow/FlowMachine";
-import { toast } from "sonner";
 import {
   ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles,
-  AlertCircle, Loader2, Eye, EyeOff, Lock, User, Shield, X,
+  AlertCircle, Loader2, Shield,
 } from "lucide-react";
 
 // Note: the post-auth "You're in" decision lives at /pre-dashboard, driven by the FlowMachine.
@@ -51,8 +48,8 @@ const Q2 = {
   ],
 };
 
-// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth
-const TOTAL_STEPS = 7;
+// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial (final, no auth in onboarding)
+const TOTAL_STEPS = 6;
 const STORAGE_KEY = "onboarding_state";
 
 function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
