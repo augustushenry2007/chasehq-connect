@@ -63,20 +63,22 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
                 properties: {
                   headline: {
                     type: "string",
-                    description: "Short, personal headline (max 12 words). Use their name if known.",
+                    description: "Short, punchy headline (max 6 words).",
                   },
                   subhead: {
                     type: "string",
-                    description: "One sentence reframing their experience with empathy (max 25 words).",
+                    description: "One short sentence reframing their experience (max 14 words).",
                   },
                   painPoints: {
                     type: "array",
-                    description: "2-3 pain points reflecting their inputs.",
+                    description: "Exactly 2 pain points. Title max 4 words. Detail max 12 words.",
+                    minItems: 2,
+                    maxItems: 2,
                     items: {
                       type: "object",
                       properties: {
-                        title: { type: "string" },
-                        detail: { type: "string" },
+                        title: { type: "string", description: "Max 4 words." },
+                        detail: { type: "string", description: "Max 12 words." },
                       },
                       required: ["title", "detail"],
                       additionalProperties: false,
@@ -84,12 +86,14 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
                   },
                   benefits: {
                     type: "array",
-                    description: "2-3 outcome-driven benefits tailored to their goals.",
+                    description: "Exactly 2 benefits. Title max 4 words. Detail max 12 words.",
+                    minItems: 2,
+                    maxItems: 2,
                     items: {
                       type: "object",
                       properties: {
-                        title: { type: "string" },
-                        detail: { type: "string" },
+                        title: { type: "string", description: "Max 4 words." },
+                        detail: { type: "string", description: "Max 12 words." },
                       },
                       required: ["title", "detail"],
                       additionalProperties: false,
