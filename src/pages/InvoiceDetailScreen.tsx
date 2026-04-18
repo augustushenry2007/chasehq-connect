@@ -6,6 +6,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ArrowLeft, ChevronDown, Mail, MessageSquare, Trash2 } from "lucide-react";
 import ChaseTimeline from "@/components/invoice/ChaseTimeline";
 import AIDraftComposer from "@/components/invoice/AIDraftComposer";
+import ScheduleEditor from "@/components/invoice/ScheduleEditor";
+import { useApp } from "@/context/AppContext";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +24,7 @@ export default function InvoiceDetailScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { invoices, refetch } = useInvoices();
+  const { isAuthenticated } = useApp();
   const invoice = getInvoiceById(id || "", invoices);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -141,6 +144,9 @@ export default function InvoiceDetailScreen() {
             </div>
           )}
         </div>
+
+        {/* Reminder schedule editor */}
+        {isAuthenticated && invoice.status !== "Paid" && <ScheduleEditor invoice={invoice} />}
 
         {/* AI Draft Composer */}
         {invoice.status !== "Paid" && <AIDraftComposer invoice={invoice} />}
