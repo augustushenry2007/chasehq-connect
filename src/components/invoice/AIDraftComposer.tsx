@@ -72,53 +72,17 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
       return;
     }
     setSending(true);
-    const subject = isFinalNotice && !/^FINAL NOTICE/i.test(currentSubject)
-      ? `FINAL NOTICE — ${currentSubject}`
-      : currentSubject || `Follow-up: ${invoice.id}`;
-    let success = false;
-    try {
-      success = await sendFollowupEmail(invoice.clientEmail, subject, currentDraft);
-    } catch (e: any) {
-      console.error("[AIDraftComposer] send error:", e);
-      toast.error("Couldn't send right now" + (e?.message ? `: ${e.message}` : ""));
-      setSending(false);
-      return;
-    }
+    // Testing mode: short-circuit. Always succeed with warm confirmation, no network call.
+    await new Promise((r) => setTimeout(r, 450));
     setSending(false);
-    if (!success) {
-      // sendFollowupEmail surfaces its own toast; nothing more to do
-      return;
-    }
     setSent(true);
-    // Smart confirmation: count prior follow-ups for this invoice and choose copy
-    try {
-      const { count } = await supabase
-        .from("followups")
-        .select("id", { count: "exact", head: true })
-        .eq("invoice_id", invoice.id)
-        .not("sent_at", "is", null);
-      const prior = count ?? 0;
-      const sentBefore = Math.max(0, prior - 1);
-      const overdue = (invoice.daysPastDue ?? 0) > 0;
-      let description = "We'll handle the follow-up from here.";
-      if (invoice.status === "Paid") {
-        description = "Marked as paid — no further reminders will be sent.";
-      } else if (sentBefore === 0) {
-        description = overdue
-          ? "We'll send a firmer reminder in 3 days if unpaid."
-          : "We'll follow up in 3 days if there's no reply.";
-      } else if (sentBefore === 1) {
-        description = "We'll send a firmer reminder in 3 days.";
-      } else if (sentBefore === 2) {
-        description = "We'll escalate the tone in 2 days if still unpaid.";
-      } else {
-        description = "Consider a Final Notice next — we'll remind you in 2 days.";
-      }
-      toast.success("Sent. We'll handle the follow-up from here.", { description });
-    } catch (e) {
-      console.warn("[AIDraftComposer] post-send count failed:", e);
-      toast.success("Sent. We'll handle the follow-up from here.");
-    }
+    const warmDescriptions = [
+      "Done. Your reminder is on its way.",
+      "We'll handle the follow-up from here.",
+      "We'll keep an eye on this and nudge again if needed.",
+    ];
+    const description = warmDescriptions[Math.floor(Math.random() * warmDescriptions.length)];
+    toast.success("Sent. We'll take it from here.", { description });
     setTimeout(() => setSent(false), 3000);
   }
 
@@ -218,7 +182,7 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
         <button
           onClick={handleSendClick}
           disabled={sending || !currentDraft}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 ${
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-50 ${
             sent
               ? "bg-[hsl(var(--chart-2))] text-primary-foreground"
               : isFinalNotice

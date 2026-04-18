@@ -3,6 +3,7 @@ import { useApp } from "@/context/AppContext";
 import { createInvoice } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
 import { withAuthRetry } from "@/flow/withAuthRetry";
+import { savePending } from "@/lib/localInvoice";
 import { X, CalendarIcon, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { format, parse, isValid } from "date-fns";
@@ -41,7 +42,7 @@ export default function NewInvoiceModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const { user } = useApp();
+  const { user, isAuthenticated } = useApp();
   const [client, setClient] = useState(draftCache.client);
   const [email, setEmail] = useState(draftCache.email);
   const [description, setDescription] = useState(draftCache.description);
@@ -84,6 +85,23 @@ export default function NewInvoiceModal({
     }
     setCreating(true);
     try {
+      // Guest path: persist locally and let the parent advance the flow.
+      if (!isAuthenticated) {
+        savePending({
+          client,
+          clientEmail: email,
+          description,
+          amount: parseFloat(amount),
+          dueDate: dueDateISO,
+        });
+        resetDraft();
+        setErrorMsg(null);
+        toast.success("Draft saved. Create an account to send it.");
+        onCreated();
+        onClose();
+        return;
+      }
+
       const result = await withAuthRetry(async () => {
         const uid = await resolveUserId();
         if (!uid) throw new Error("auth/no-user-id");
