@@ -1,61 +1,51 @@
 
 
-## Plan — Pre-onboarding, empty states, palette, polish
+## Plan — Fix session bug, fix skip loop, harden onboarding flow
 
-### 1. New first screen (Welcome)
-- New `src/pages/WelcomeScreen.tsx` route `/welcome`.
-- Headline + subtext with `animate-fade-in` (staggered via inline `style={{animationDelay}}`), primary "Start" CTA → `/onboarding`.
-- Update `RootRedirect`: unauthenticated + no onboarding-state → `/welcome` (not `/onboarding`).
+### Root causes
 
-### 2. Pre-dashboard "create first invoice?" prompt
-- New step within `OnboardingScreen.tsx` after auth (step 7) OR a new lightweight route `/onboarding/first-invoice` shown once after `completeOnboarding()`.
-- Chosen approach: add as final onboarding step (keeps single flow). "Yes" → `/invoices?new=1` (auto-opens NewInvoiceModal), "Skip" → `/dashboard`.
-- `InvoicesScreen` reads `?new=1` and auto-opens the modal once.
+1. **"Session expired" on Create Invoice** — `NewInvoiceModal.handleCreate` shows a generic "session expired" toast whenever `user.id` isn't in context yet, masking the real RLS/insert error. Even when `uid` is found via `getSession()`, the pre-flight `count(*)` query in `createInvoice()` runs without ensuring the supabase client has the latest token, and any insert error gets a vague message.
 
-### 3. Dashboard empty state
-- In `DashboardScreen.tsx`, when `invoices.length === 0` and `!invoicesLoading`: render empty-state card with message "No invoices yet — let's create your first one.", a "Create Invoice" CTA navigating to `/invoices?new=1`, and 2 ghost skeleton cards below for visual hint.
+2. **Onboarding skip loop** (visible in session replay) — When the user clicks "Skip for now" on step 7 and navigates to `/dashboard`:
+   - In testing mode, `AppContext` forces `hasCompletedOnboarding=false` on every `SIGNED_IN` event (including silent token refreshes).
+   - There's **no route guard** on `/dashboard`, but `OnboardingScreen` itself sets `step=6` whenever `isAuthenticated` flips, and `completeOnboarding()` only fires once at step 6→7. If the user lands back on `/onboarding` for any reason (e.g. a stray nav), they're forced through again.
+   - The skip path uses `navigate("/dashboard", { replace: true })` but the auth state subscriber's `clearTestingState()` wipes the state right after, and the testing-mode `SIGNED_IN` handler runs on every tab focus/token refresh — repeatedly resetting `hasCompletedOnboarding` to `false`.
 
-### 4. Color palette (from screenshot — cool blues)
-Update `src/index.css` HSL tokens:
-- Turquoise `#447F98` → primary (HSL ~199 38% 43%)
-- Slate Blue `#628BB5` → accent foreground / secondary darker
-- Platinum `#DADEE1` → muted / borders
-- Glacier `#B9D8E1` → accent
-- Ice Blue `#D8EBF3` → background-soft / accent-bg
-- Background: very light ice (`210 60% 98%`)
-- Foreground: deep slate (`210 30% 18%`)
-- Keep success/warning/error semantics; tint success toward teal-green to harmonize.
-- No Tailwind config changes needed (all driven by CSS vars).
+3. **"Onboarding screens missing"** — The 8 steps (0–7) exist and render. The perceived "missing" screens are because testing mode + the loop above sometimes drops the user mid-flow. Fixing #2 restores the felt experience.
 
-### 5. Motion polish
-- Add `transition-all duration-200 ease-out active:scale-[0.97]` to primary buttons via a small tweak to `src/components/ui/button.tsx` base classes.
-- Wrap routed pages in a fade-in: add `animate-fade-in` to top-level `div` of each screen (`Welcome`, `Dashboard`, `Invoices`, `Settings`, `InvoiceDetail`).
-- No router-level transition library needed (avoids dep churn).
+### Changes
 
-### 6. Fix Send button + warm confirmation
-- Investigate current error in `AIDraftComposer.doSend()` — likely the `followups` count query running before insert or RLS issue. Will:
-  - Wrap send in robust try/catch, log full error, surface `toast.error` with the actual message instead of silent fail.
-  - On success: replace button label with "Sent. We'll handle the follow-up from here." + Check icon, hold for 3s before resetting. Add `animate-scale-in` on the success state.
-  - Keep existing smart-followup toast as the secondary description.
+**`src/components/invoice/NewInvoiceModal.tsx`**
+- Replace the silent "session expired" path with: try `user?.id` → `supabase.auth.getSession()` → `supabase.auth.refreshSession()` as a third fallback before giving up.
+- Pass real insert errors through (already done in `createInvoice`, just stop swallowing them with the modal's pre-check).
+- Add a small inline error banner so users see what actually went wrong instead of a transient toast.
 
-### Files
+**`src/hooks/useSupabaseData.ts` — `createInvoice`**
+- Drop the `count(*)` pre-flight (it's the RLS-sensitive call that often fails silently and produces wrong invoice numbers under races). Generate the invoice number with `Date.now()`-based suffix or fetch with `.eq("user_id", userId)` so RLS is explicit.
+- Bubble the full Postgres error message to the toast.
 
-**New**
-- `src/pages/WelcomeScreen.tsx`
+**`src/context/AppContext.tsx`**
+- In the testing-mode `SIGNED_IN` branch, only reset state on **fresh sign-ins**, not on token refreshes. Track a `lastUserId` ref and skip the wipe when `session.user.id === lastUserId`. This stops the loop where every silent refresh kicks the user back to onboarding.
+- Keep the testing-mode override of `hasCompletedOnboarding` on initial profile load only; once `completeOnboarding()` has been called this session, don't re-flip it to false.
 
-**Edited**
-- `src/App.tsx` — register `/welcome` route
-- `src/pages/RootRedirect.tsx` — default unauth → `/welcome`
-- `src/pages/OnboardingScreen.tsx` — add final "create first invoice?" step after auth
-- `src/pages/DashboardScreen.tsx` — empty state with skeleton hints + CTA
-- `src/pages/InvoicesScreen.tsx` — auto-open NewInvoiceModal when `?new=1`
-- `src/index.css` — new palette tokens
-- `src/components/ui/button.tsx` — add `active:scale-[0.97] transition-all` to base
-- `src/components/invoice/AIDraftComposer.tsx` — fix send error, warm success state with animation
+**`src/pages/OnboardingScreen.tsx`**
+- Remove the `useEffect` that force-jumps to `step=6` when `isAuthenticated` is true if the user has already passed step 6 (currently `step < 6` guard is correct but combined with re-mounts can replay). Add an in-session `completedRef` so once we hit step 7 we never auto-rewind.
+- After `completeOnboarding()` succeeds at step 6→7, also persist a `localStorage["onboarding_done_session"]` flag (skipped in testing mode) so a remount doesn't restart.
 
-**No DB changes, no new edge functions, no new dependencies.**
+**`src/pages/RootRedirect.tsx` & route guards**
+- Add a lightweight guard component `<RequireOnboarding>` wrapping the `TabLayout` routes. If `authReady && isAuthenticated && !hasCompletedOnboarding`, redirect to `/onboarding`. If `!isAuthenticated`, redirect to `/welcome`. This makes `/dashboard` truly protected and prevents stray returns to `/onboarding` after skip.
+
+**No DB / edge function / dependency changes.**
+
+### Files touched
+- `src/components/invoice/NewInvoiceModal.tsx`
+- `src/hooks/useSupabaseData.ts`
+- `src/context/AppContext.tsx`
+- `src/pages/OnboardingScreen.tsx`
+- `src/App.tsx` (wrap protected routes with new guard)
+- `src/pages/RootRedirect.tsx` (extract guard or add new file `src/components/RequireOnboarding.tsx`)
 
 ### Out of scope
-- Full route-transition framework (Framer Motion) — using CSS keyframes already in tailwind config.
-- Redesigning individual components beyond palette token swap.
+- React Query migration (the cached "lovable-stack-overflow" pattern) — would be a larger refactor; the targeted fixes above resolve the symptoms without it.
+- Visual redesign of any screen.
 
