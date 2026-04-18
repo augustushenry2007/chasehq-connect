@@ -13,40 +13,7 @@ import {
   AlertCircle, Loader2, Eye, EyeOff, Lock, User, Shield, X,
 } from "lucide-react";
 
-function PostAuthDecision() {
-  const { send, pending, setPending } = useFlow();
-  function handle(decision: "yes" | "skip") {
-    if (pending) return;
-    setPending(true);
-    setTimeout(() => setPending(false), 400);
-    send(decision === "yes" ? "DECIDE_YES" : "DECIDE_SKIP");
-  }
-  return (
-    <div className="animate-page-enter">
-      <span className="text-xs font-semibold text-primary uppercase tracking-wider">You're in</span>
-      <h2 className="text-xl font-bold text-foreground mt-2 mb-2">Want to add your first invoice now?</h2>
-      <p className="text-sm text-muted-foreground mb-5">
-        Takes about a minute. Or skip — you can do it anytime from the dashboard.
-      </p>
-      <div className="flex flex-col gap-2.5">
-        <button
-          onClick={() => handle("yes")}
-          disabled={pending}
-          className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-60"
-        >
-          Yes, create invoice <ArrowRight className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => handle("skip")}
-          disabled={pending}
-          className="w-full py-3.5 rounded-xl font-semibold text-sm text-muted-foreground border border-border bg-card transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-60"
-        >
-          Skip for now
-        </button>
-      </div>
-    </div>
-  );
-}
+// Note: the post-auth "You're in" decision lives at /pre-dashboard, driven by the FlowMachine.
 
 const Q0 = {
   label: "Just checking in",
