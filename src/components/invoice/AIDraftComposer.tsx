@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { RefreshCw, Send, Loader2, AlertTriangle, Lock } from "lucide-react";
+import { RefreshCw, Send, Loader2, AlertTriangle, Lock, Check } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
 import { generateFollowup, sendFollowupEmail } from "@/hooks/useSupabaseData";
@@ -75,41 +75,51 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
     const subject = isFinalNotice && !/^FINAL NOTICE/i.test(currentSubject)
       ? `FINAL NOTICE — ${currentSubject}`
       : currentSubject || `Follow-up: ${invoice.id}`;
-    const success = await sendFollowupEmail(invoice.clientEmail, subject, currentDraft);
-    setSending(false);
-    if (success) {
-      setSent(true);
-      // Smart confirmation: count prior follow-ups for this invoice and choose copy
-      try {
-        const { count } = await supabase
-          .from("followups")
-          .select("id", { count: "exact", head: true })
-          .eq("invoice_id", invoice.id)
-          .not("sent_at", "is", null);
-        const prior = count ?? 0; // includes the one just sent if persisted
-        const sentBefore = Math.max(0, prior - 1);
-        const overdue = (invoice.daysPastDue ?? 0) > 0;
-        let title = "Follow-up sent";
-        let description = "We'll follow up in 3 days if there's no reply.";
-        if (invoice.status === "Paid") {
-          description = "Marked as paid — no further reminders will be sent.";
-        } else if (sentBefore === 0) {
-          description = overdue
-            ? "Sent. We'll send a firmer reminder in 3 days if unpaid."
-            : "We'll follow up in 3 days if there's no reply.";
-        } else if (sentBefore === 1) {
-          description = "We'll send a firmer reminder in 3 days.";
-        } else if (sentBefore === 2) {
-          description = "We'll escalate the tone in 2 days if still unpaid.";
-        } else {
-          description = "Consider a Final Notice next — we'll remind you in 2 days.";
-        }
-        toast.success(title, { description });
-      } catch {
-        toast.success("Follow-up sent");
-      }
-      setTimeout(() => setSent(false), 2500);
+    let success = false;
+    try {
+      success = await sendFollowupEmail(invoice.clientEmail, subject, currentDraft);
+    } catch (e: any) {
+      console.error("[AIDraftComposer] send error:", e);
+      toast.error("Couldn't send right now" + (e?.message ? `: ${e.message}` : ""));
+      setSending(false);
+      return;
     }
+    setSending(false);
+    if (!success) {
+      // sendFollowupEmail surfaces its own toast; nothing more to do
+      return;
+    }
+    setSent(true);
+    // Smart confirmation: count prior follow-ups for this invoice and choose copy
+    try {
+      const { count } = await supabase
+        .from("followups")
+        .select("id", { count: "exact", head: true })
+        .eq("invoice_id", invoice.id)
+        .not("sent_at", "is", null);
+      const prior = count ?? 0;
+      const sentBefore = Math.max(0, prior - 1);
+      const overdue = (invoice.daysPastDue ?? 0) > 0;
+      let description = "We'll handle the follow-up from here.";
+      if (invoice.status === "Paid") {
+        description = "Marked as paid — no further reminders will be sent.";
+      } else if (sentBefore === 0) {
+        description = overdue
+          ? "We'll send a firmer reminder in 3 days if unpaid."
+          : "We'll follow up in 3 days if there's no reply.";
+      } else if (sentBefore === 1) {
+        description = "We'll send a firmer reminder in 3 days.";
+      } else if (sentBefore === 2) {
+        description = "We'll escalate the tone in 2 days if still unpaid.";
+      } else {
+        description = "Consider a Final Notice next — we'll remind you in 2 days.";
+      }
+      toast.success("Sent. We'll handle the follow-up from here.", { description });
+    } catch (e) {
+      console.warn("[AIDraftComposer] post-send count failed:", e);
+      toast.success("Sent. We'll handle the follow-up from here.");
+    }
+    setTimeout(() => setSent(false), 3000);
   }
 
   function handleSendClick() {
@@ -217,7 +227,9 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
           }`}
         >
           {sent ? (
-            "Sent ✓"
+            <span className="flex items-center gap-2 animate-scale-in">
+              <Check className="w-4 h-4" /> Sent. We'll take it from here.
+            </span>
           ) : sending ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" /> Sending…
