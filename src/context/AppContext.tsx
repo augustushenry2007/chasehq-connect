@@ -170,6 +170,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { supabase.removeChannel(channel); };
   }, [user, authReady, refetchInvoices]);
 
+  // Flush any pending guest-drafted invoice to the user's account once authenticated.
+  const flushedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    if (flushedRef.current === user.id) return;
+    const pending = readPending();
+    if (!pending) return;
+    flushedRef.current = user.id;
+    (async () => {
+      const result = await createInvoice(user.id, {
+        client: pending.client,
+        clientEmail: pending.clientEmail,
+        description: pending.description,
+        amount: pending.amount,
+        dueDate: pending.dueDate,
+      });
+      if (result.invoice) {
+        clearPending();
+        clearGuestOnboarded();
+        await refetchInvoices();
+      }
+    })();
+  }, [user, refetchInvoices]);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -215,7 +238,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("notifications");
     localStorage.removeItem("schedule");
     localStorage.removeItem("onboarding_done_session");
+    clearPending();
+    clearGuestOnboarded();
     completedThisSessionRef.current = false;
+    flushedRef.current = null;
     setIsAuthenticated(false);
     setUser(null);
     setHasCompletedOnboarding(false);
