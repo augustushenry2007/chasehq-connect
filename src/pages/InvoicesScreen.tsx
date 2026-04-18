@@ -44,6 +44,7 @@ export default function InvoicesScreen() {
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
   const { state: flowState, send } = useFlow();
+  const { isAuthenticated } = useApp();
 
   const { invoices, loading, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
@@ -111,7 +112,19 @@ export default function InvoicesScreen() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
+    <div className="flex-1 flex flex-col overflow-hidden animate-page-enter">
+      {!isAuthenticated && (
+        <button
+          onClick={() => send("REQUEST_AUTH")}
+          className="w-full bg-accent/60 border-b border-border px-5 py-2.5 text-left flex items-center justify-between transition-colors active:bg-accent"
+        >
+          <span className="text-xs text-foreground">
+            <span className="font-semibold">You're exploring as a guest.</span>{" "}
+            <span className="text-muted-foreground">Create an account to save your work</span>
+          </span>
+          <ChevronRight className="w-3.5 h-3.5 text-primary shrink-0" />
+        </button>
+      )}
       <div className="px-5 pt-5 pb-3 flex items-start justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground">Invoices</h1>
