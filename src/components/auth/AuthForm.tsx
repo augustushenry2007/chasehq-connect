@@ -12,12 +12,14 @@ interface AuthFormProps {
   redirectTo?: string;
   initialMode?: Mode;
   submitLabel?: { signup: string; signin: string };
+  onSuccess?: () => void;
 }
 
 export default function AuthForm({
   redirectTo = window.location.origin,
   initialMode = "signup",
   submitLabel = { signup: "Create account", signin: "Sign in" },
+  onSuccess,
 }: AuthFormProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [name, setName] = useState("");
@@ -74,6 +76,7 @@ export default function AuthForm({
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) { toast.error(error.message); setSubmitLoading(false); return; }
       }
+      onSuccess?.();
       // onAuthStateChange will pick up the session globally.
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");

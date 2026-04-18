@@ -60,7 +60,7 @@ export default function InvoiceDetailScreen() {
   ];
 
   return (
-    <div className="h-screen overflow-y-auto bg-background pb-24">
+    <div className="h-screen overflow-y-auto bg-background pb-24 animate-page-enter">
       <div className="px-5 pt-5 pb-2 flex items-center justify-between">
         <button onClick={() => navigate(-1)} className="flex items-center gap-1.5 text-muted-foreground">
           <ArrowLeft className="w-4 h-4" />
