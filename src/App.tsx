@@ -2,10 +2,13 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProvider } from "@/context/AppContext";
+import { FlowProvider } from "@/flow/FlowMachine";
+import { FlowBootstrap } from "@/flow/FlowBootstrap";
 import RootRedirect from "./pages/RootRedirect";
 import AuthScreen from "./pages/AuthScreen";
 import WelcomeScreen from "./pages/WelcomeScreen";
 import OnboardingScreen from "./pages/OnboardingScreen";
+import PreDashboardDecisionScreen from "./pages/PreDashboardDecisionScreen";
 import TabLayout from "./components/TabLayout";
 import DashboardScreen from "./pages/DashboardScreen";
 import InvoicesScreen from "./pages/InvoicesScreen";
@@ -23,25 +26,29 @@ const App = () => (
     <TooltipProvider>
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<RootRedirect />} />
-          <Route path="/welcome" element={<WelcomeScreen />} />
-          <Route path="/auth" element={<AuthScreen />} />
-          <Route path="/onboarding" element={<OnboardingScreen />} />
-          <Route element={<RequireOnboarding />}>
-            <Route element={<TabLayout />}>
-              <Route path="/dashboard" element={<DashboardScreen />} />
-              <Route path="/invoices" element={<InvoicesScreen />} />
-              <Route path="/settings" element={<SettingsScreen />} />
+        <FlowProvider>
+          <FlowBootstrap />
+          <Routes>
+            <Route path="/" element={<RootRedirect />} />
+            <Route path="/welcome" element={<WelcomeScreen />} />
+            <Route path="/auth" element={<AuthScreen />} />
+            <Route path="/onboarding" element={<OnboardingScreen />} />
+            <Route element={<RequireOnboarding />}>
+              <Route path="/pre-dashboard" element={<PreDashboardDecisionScreen />} />
+              <Route element={<TabLayout />}>
+                <Route path="/dashboard" element={<DashboardScreen />} />
+                <Route path="/invoices" element={<InvoicesScreen />} />
+                <Route path="/settings" element={<SettingsScreen />} />
+              </Route>
+              <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
+              <Route path="/settings/billing" element={<BillingScreen />} />
             </Route>
-            <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
-            <Route path="/settings/billing" element={<BillingScreen />} />
-          </Route>
-          <Route path="/paywall" element={<PaywallScreen />} />
-          <Route path="/legal/privacy" element={<PrivacyPolicy />} />
-          <Route path="/legal/terms" element={<TermsOfUse />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+            <Route path="/paywall" element={<PaywallScreen />} />
+            <Route path="/legal/privacy" element={<PrivacyPolicy />} />
+            <Route path="/legal/terms" element={<TermsOfUse />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </FlowProvider>
       </BrowserRouter>
     </TooltipProvider>
   </AppProvider>
