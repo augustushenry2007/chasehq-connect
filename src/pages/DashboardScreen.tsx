@@ -81,12 +81,17 @@ export default function DashboardScreen() {
         </button>
       )}
       <div className="px-5 pt-5">
-        <h1 className="text-xl font-bold text-foreground">
-          {isEmpty ? `Welcome, ${firstName}` : `${greeting()}, ${firstName}`}
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          {isEmpty ? "Let's get you set up so ChaseHQ can chase invoices for you." : "Here's what needs your attention today."}
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-foreground">
+              {isEmpty ? `Welcome, ${firstName}` : `${greeting()}, ${firstName}`}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {isEmpty ? "Let's get you set up so ChaseHQ can chase invoices for you." : "Here's what needs your attention today."}
+            </p>
+          </div>
+          <NotificationBell />
+        </div>
 
         <div className="flex gap-3 mt-5">
           <StatCard

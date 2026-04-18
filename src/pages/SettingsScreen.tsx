@@ -374,7 +374,10 @@ export default function SettingsScreen() {
   return (
     <div className="flex-1 overflow-auto pb-24 animate-page-enter">
       <div className="px-5 pt-5">
-        <h1 className="text-xl font-bold text-foreground mb-4">Settings</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-xl font-bold text-foreground">Settings</h1>
+          <NotificationBell />
+        </div>
 
         {/* ACCOUNT */}
         <SectionLabel>Account</SectionLabel>
