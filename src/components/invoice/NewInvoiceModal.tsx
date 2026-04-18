@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
 import { createInvoice } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
-import { X, CalendarIcon } from "lucide-react";
+import { withAuthRetry } from "@/flow/withAuthRetry";
+import { X, CalendarIcon, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { format, parse, isValid } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
@@ -10,7 +11,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 
 function formatDateMask(input: string): string {
-  // Strip non-digits, then format MM/DD/YYYY
   const digits = input.replace(/\D/g, "").slice(0, 8);
   const parts: string[] = [];
   if (digits.length > 0) parts.push(digits.slice(0, 2));
@@ -25,6 +25,13 @@ function maskedToISO(masked: string): string {
   return format(parsed, "yyyy-MM-dd");
 }
 
+// Module-level draft cache so form survives unmount/remount during navigation hiccups.
+interface Draft {
+  client: string; email: string; description: string; amount: string; dueDateMasked: string;
+}
+const EMPTY_DRAFT: Draft = { client: "", email: "", description: "", amount: "", dueDateMasked: "" };
+let draftCache: Draft = { ...EMPTY_DRAFT };
+
 export default function NewInvoiceModal({
   visible,
   onClose,
@@ -35,14 +42,19 @@ export default function NewInvoiceModal({
   onCreated: () => void;
 }) {
   const { user } = useApp();
-  const [client, setClient] = useState("");
-  const [email, setEmail] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [dueDateMasked, setDueDateMasked] = useState(""); // MM/DD/YYYY
+  const [client, setClient] = useState(draftCache.client);
+  const [email, setEmail] = useState(draftCache.email);
+  const [description, setDescription] = useState(draftCache.description);
+  const [amount, setAmount] = useState(draftCache.amount);
+  const [dueDateMasked, setDueDateMasked] = useState(draftCache.dueDateMasked);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Mirror local state into the module-level cache so it persists across remounts.
+  useEffect(() => {
+    draftCache = { client, email, description, amount, dueDateMasked };
+  }, [client, email, description, amount, dueDateMasked]);
 
   if (!visible) return null;
 
@@ -58,35 +70,46 @@ export default function NewInvoiceModal({
     return refreshed.session?.user?.id ?? null;
   }
 
+  function resetDraft() {
+    draftCache = { ...EMPTY_DRAFT };
+    setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDateMasked("");
+  }
+
   async function handleCreate() {
+    if (creating) return; // double-submit guard
     setErrorMsg(null);
     if (!client || !amount || !dueDateISO) {
       setErrorMsg("Please fill in required fields with a valid date.");
       return;
     }
     setCreating(true);
-    const uid = await resolveUserId();
-    if (!uid) {
+    try {
+      const result = await withAuthRetry(async () => {
+        const uid = await resolveUserId();
+        if (!uid) throw new Error("auth/no-user-id");
+        return await createInvoice(uid, {
+          client,
+          clientEmail: email,
+          description,
+          amount: parseFloat(amount),
+          dueDate: dueDateISO,
+        });
+      });
+
+      if (result.invoice) {
+        resetDraft();
+        setErrorMsg(null);
+        onCreated();
+        onClose();
+      } else if (result.error) {
+        // Generic, friendly error — never surface auth internals to authed users.
+        setErrorMsg("Something went wrong. Please try again.");
+      }
+    } catch {
+      setErrorMsg("Something went wrong. Please try again.");
+      toast.error("Couldn't create invoice. Please try again.");
+    } finally {
       setCreating(false);
-      setErrorMsg("We couldn't verify your session. Please sign in again.");
-      toast.error("Your session expired. Please sign in again.");
-      return;
-    }
-    const { invoice, error } = await createInvoice(uid, {
-      client,
-      clientEmail: email,
-      description,
-      amount: parseFloat(amount),
-      dueDate: dueDateISO,
-    });
-    setCreating(false);
-    if (invoice) {
-      setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDateMasked("");
-      setErrorMsg(null);
-      onCreated();
-      onClose();
-    } else if (error) {
-      setErrorMsg(error);
     }
   }
 
@@ -98,8 +121,8 @@ export default function NewInvoiceModal({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 overflow-y-auto" onClick={onClose}>
-      <div className="bg-background w-full max-w-lg rounded-2xl p-5 my-auto max-h-[90vh] overflow-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 overflow-y-auto animate-fade-in" onClick={onClose}>
+      <div className="bg-background w-full max-w-lg rounded-2xl p-5 my-auto max-h-[90vh] overflow-auto shadow-xl animate-page-enter" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-bold text-foreground">New Invoice</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-muted-foreground" /></button>
@@ -118,7 +141,6 @@ export default function NewInvoiceModal({
             </div>
           ))}
 
-          {/* Due date — MM/DD/YYYY masked input + popover calendar */}
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Due date * (MM/DD/YYYY)</label>
             <div className="relative">
@@ -164,15 +186,24 @@ export default function NewInvoiceModal({
           </div>
 
           {errorMsg && (
-            <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-[12px] text-destructive">
-              {errorMsg}
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-destructive/10 border border-destructive/30">
+              <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-[12px] text-destructive">{errorMsg}</p>
+                <button
+                  onClick={handleCreate}
+                  className="mt-1 text-[12px] font-semibold text-destructive underline"
+                >
+                  Try again
+                </button>
+              </div>
             </div>
           )}
 
           <button
             onClick={handleCreate}
             disabled={!canSubmit}
-            className="mt-2 w-full bg-primary text-primary-foreground py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
+            className="mt-2 w-full bg-primary text-primary-foreground py-3 rounded-xl font-semibold text-sm disabled:opacity-50 transition-all duration-200 ease-out active:scale-[0.97]"
           >
             {creating ? "Creating…" : "Create Invoice"}
           </button>
