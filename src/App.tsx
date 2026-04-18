@@ -31,26 +31,28 @@ const App = () => (
         <FlowProvider>
           <FlowBootstrap />
           <FlowRouter />
-          <Routes>
-            <Route path="/" element={<RootRedirect />} />
-            <Route path="/welcome" element={<WelcomeScreen />} />
-            <Route path="/auth" element={<AuthScreen />} />
-            <Route path="/onboarding" element={<OnboardingScreen />} />
-            <Route element={<RequireOnboarding />}>
-              <Route path="/pre-dashboard" element={<PreDashboardDecisionScreen />} />
-              <Route element={<TabLayout />}>
-                <Route path="/dashboard" element={<DashboardScreen />} />
-                <Route path="/invoices" element={<InvoicesScreen />} />
-                <Route path="/settings" element={<SettingsScreen />} />
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<RootRedirect />} />
+              <Route path="/welcome" element={<WelcomeScreen />} />
+              <Route path="/auth" element={<AuthScreen />} />
+              <Route path="/onboarding" element={<OnboardingScreen />} />
+              <Route element={<RequireOnboarding />}>
+                <Route path="/pre-dashboard" element={<PreDashboardDecisionScreen />} />
+                <Route element={<TabLayout />}>
+                  <Route path="/dashboard" element={<DashboardScreen />} />
+                  <Route path="/invoices" element={<InvoicesScreen />} />
+                  <Route path="/settings" element={<SettingsScreen />} />
+                </Route>
+                <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
+                <Route path="/settings/billing" element={<BillingScreen />} />
               </Route>
-              <Route path="/invoice/:id" element={<InvoiceDetailScreen />} />
-              <Route path="/settings/billing" element={<BillingScreen />} />
-            </Route>
-            <Route path="/paywall" element={<PaywallScreen />} />
-            <Route path="/legal/privacy" element={<PrivacyPolicy />} />
-            <Route path="/legal/terms" element={<TermsOfUse />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+              <Route path="/paywall" element={<PaywallScreen />} />
+              <Route path="/legal/privacy" element={<PrivacyPolicy />} />
+              <Route path="/legal/terms" element={<TermsOfUse />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </ErrorBoundary>
         </FlowProvider>
       </BrowserRouter>
     </TooltipProvider>
