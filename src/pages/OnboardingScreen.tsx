@@ -207,7 +207,7 @@ export default function OnboardingScreen() {
     if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
     if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
     if (step === 3) return !personalizing; // gate while loading
-    if (step === 6 || step === 7) return false; // custom CTAs
+    if (step === 6) return false; // custom CTAs
     return step < TOTAL_STEPS - 1;
   }
 
