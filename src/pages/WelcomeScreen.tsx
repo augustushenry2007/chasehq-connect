@@ -1,8 +1,8 @@
-import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
+import { useFlow } from "@/flow/FlowMachine";
 
 export default function WelcomeScreen() {
-  const navigate = useNavigate();
+  const { send: sendFlow } = useFlow();
 
   return (
     <div className="h-screen bg-background flex flex-col items-center justify-center px-6 overflow-hidden">
@@ -29,7 +29,7 @@ export default function WelcomeScreen() {
         </p>
 
         <button
-          onClick={() => navigate("/onboarding")}
+          onClick={() => sendFlow("START")}
           className="mt-10 w-full max-w-xs flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] hover:bg-primary/90 animate-fade-in"
           style={{ animationDelay: "520ms", animationFillMode: "both" }}
         >
