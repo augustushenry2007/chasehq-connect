@@ -9,19 +9,11 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // Require a valid session — prevents anonymous credit-drain on LOVABLE_API_KEY.
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return json({ error: "Not authenticated" }, 401);
-    }
-    const supabaseUser = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: claims, error: claimsErr } = await supabaseUser.auth.getClaims(authHeader.replace("Bearer ", ""));
-    if (claimsErr || !claims?.claims?.sub) {
-      return json({ error: "Invalid session" }, 401);
+    // Onboarding runs before signup, so guests must be allowed.
+    // Lightweight per-IP soft rate limit to deter credit-drain abuse.
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    if (!checkRate(ip)) {
+      return json({ error: "Too many requests, please slow down." }, 429);
     }
 
     const { feelings = [], worries = [], goals = [], custom = {}, firstName = "" } = await req.json();
