@@ -182,7 +182,7 @@ export default function AIDraftComposer({ invoice }: { invoice: Invoice }) {
         <button
           onClick={handleSendClick}
           disabled={sending || !currentDraft}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 ${
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-50 ${
             sent
               ? "bg-[hsl(var(--chart-2))] text-primary-foreground"
               : isFinalNotice
