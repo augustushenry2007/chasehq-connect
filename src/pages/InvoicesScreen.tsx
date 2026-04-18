@@ -7,6 +7,7 @@ import { Search, Plus, X, ChevronRight, FileText } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 import { useFlow } from "@/flow/FlowMachine";
 import { FlowState } from "@/flow/states";
+import { useApp } from "@/context/AppContext";
 
 type FilterTab = "all" | "overdue" | "upcoming" | "paid";
 
