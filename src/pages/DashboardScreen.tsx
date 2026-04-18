@@ -6,6 +6,7 @@ import { useApp } from "@/context/AppContext";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
+import { useFlow } from "@/flow/FlowMachine";
 import {
   TrendingUp, AlertTriangle, CheckCircle, Mail, Check,
   Plus, FileText, Sparkles, ArrowRight, Loader2, Settings as SettingsIcon,
