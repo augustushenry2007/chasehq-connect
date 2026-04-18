@@ -2,15 +2,12 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { isTestingMode } from "@/lib/testingMode";
-import { GoogleIcon } from "@/components/GoogleIcon";
-import { validatePassword } from "@/lib/passwordValidation";
+import { markGuestOnboarded } from "@/lib/localInvoice";
 import { useFlow } from "@/flow/FlowMachine";
-import { toast } from "sonner";
 import {
   ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles,
-  AlertCircle, Loader2, Eye, EyeOff, Lock, User, Shield, X,
+  AlertCircle, Loader2, Shield,
 } from "lucide-react";
 
 // Note: the post-auth "You're in" decision lives at /pre-dashboard, driven by the FlowMachine.
@@ -51,8 +48,8 @@ const Q2 = {
   ],
 };
 
-// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth
-const TOTAL_STEPS = 7;
+// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial (final, no auth in onboarding)
+const TOTAL_STEPS = 6;
 const STORAGE_KEY = "onboarding_state";
 
 function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
@@ -119,7 +116,7 @@ function loadState(): Partial<PersistedState> {
 
 export default function OnboardingScreen() {
   const navigate = useNavigate();
-  const { completeOnboarding, user, isAuthenticated } = useApp();
+  const { completeOnboarding, user } = useApp();
   const { send: sendFlow } = useFlow();
 
   const initial = useMemo(() => loadState(), []);
@@ -139,22 +136,12 @@ export default function OnboardingScreen() {
   const [personalization, setPersonalization] = useState<Personalization | null>(null);
   const [personalizing, setPersonalizing] = useState(false);
   const [personalizationError, setPersonalizationError] = useState<string | null>(null);
-
-  // Auth step state
-  const [authMode, setAuthMode] = useState<"signup" | "signin">("signup");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [passwordTouched, setPasswordTouched] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [finishingTrial, setFinishingTrial] = useState(false);
+  const [finishing, setFinishing] = useState(false);
 
   const progress = ((step + 1) / TOTAL_STEPS) * 100;
-  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || name.split(" ")[0] || "";
+  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "";
 
-  // Persist progress so authentication round-trip doesn't lose context
+  // Persist progress so reloads don't lose context
   useEffect(() => {
     if (isTestingMode()) return;
     const data: PersistedState = {
@@ -167,56 +154,34 @@ export default function OnboardingScreen() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [step, selected0, selected1, selected2, custom0, custom1, custom2]);
 
-  // If a user comes back authenticated mid-onboarding, jump them to the auth-success path.
-  // But never rewind if they've already reached the final step.
-  useEffect(() => {
-    if (completedRef.current) return;
-    if (isAuthenticated && step < 6) {
-      setStep(6);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
-
-  // Auto-finalize trial when authenticated and on auth step, then advance via FlowMachine
-  useEffect(() => {
-    if (step !== 6 || !isAuthenticated || finishingTrial) return;
-    (async () => {
-      setFinishingTrial(true);
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData.session?.access_token;
-        if (token) {
-          await supabase.functions.invoke("start-trial", {
-            headers: { Authorization: `Bearer ${token}` },
-          }).catch(() => {});
-        }
-      } finally {
-        await completeOnboarding();
-        localStorage.removeItem(STORAGE_KEY);
-        if (!isTestingMode()) {
-          try { localStorage.setItem("onboarding_done_session", "1"); } catch {}
-        }
-        completedRef.current = true;
-        setFinishingTrial(false);
-        // Advance the FlowMachine: ONBOARDING -> AUTH -> PRE_DASHBOARD_DECISION
-        sendFlow("ONBOARDING_DONE");
-        sendFlow("AUTH_SUCCESS");
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, isAuthenticated]);
-
   function canAdvance() {
     if (step === 0) return selected0.size > 0 || custom0.trim().length > 0;
     if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
     if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
     if (step === 3) return !personalizing; // gate while loading
-    if (step === 6) return false; // custom CTAs
     return step < TOTAL_STEPS - 1;
   }
 
   function next() { setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1)); }
   function back() { if (step > 0) setStep((s) => s - 1); }
+
+  // Final CTA on the trial step → mark guest as onboarded and advance the flow.
+  async function handleFinish() {
+    if (finishing) return;
+    setFinishing(true);
+    try {
+      markGuestOnboarded();
+      await completeOnboarding();
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      if (!isTestingMode()) {
+        try { localStorage.setItem("onboarding_done_session", "1"); } catch {}
+      }
+      completedRef.current = true;
+      sendFlow("ONBOARDING_DONE");
+    } finally {
+      setFinishing(false);
+    }
+  }
 
   function makeToggle(setter: React.Dispatch<React.SetStateAction<Set<string>>>) {
     return (id: string) => {
@@ -261,74 +226,13 @@ export default function OnboardingScreen() {
     return () => { cancelled = true; };
   }, [step]);
 
-  // ===== Auth handlers (step 6) =====
-  const pwCheck = useMemo(() => validatePassword(password), [password]);
-  const isSignup = authMode === "signup";
-  const showPwRules = isSignup && (passwordTouched || password.length > 0);
-  const canSubmitAuth =
-    !!email && !!password && (!isSignup || (name.trim().length > 0 && pwCheck.isValid));
-
-  async function handleGoogle() {
-    setGoogleLoading(true);
-    // Safety: if the OAuth popup is blocked/closed without a redirect, unstick the button
-    const safety = window.setTimeout(() => setGoogleLoading(false), 30000);
-    try {
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin + "/onboarding",
-      });
-      if (result.error) {
-        toast.error("Google sign-in failed: " + result.error.message);
-        setGoogleLoading(false);
-        window.clearTimeout(safety);
-        return;
-      }
-      if (result.redirected) return; // browser is navigating to Google
-      // Popup flow returned without error and without redirect — session should be set; reset state
-      setGoogleLoading(false);
-      window.clearTimeout(safety);
-    } catch (e: any) {
-      console.error("[Onboarding] Google sign-in error:", e);
-      toast.error("Google sign-in failed" + (e?.message ? `: ${e.message}` : ""));
-      setGoogleLoading(false);
-      window.clearTimeout(safety);
-    }
-  }
-
-  async function handleAuthSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmitAuth) {
-      if (isSignup && !pwCheck.isValid) setPasswordTouched(true);
-      toast.error("Please fill in all fields");
-      return;
-    }
-    setSubmitLoading(true);
-    try {
-      if (isSignup) {
-        const { error } = await supabase.auth.signUp({
-          email, password,
-          options: {
-            data: { full_name: name.trim() },
-            emailRedirectTo: window.location.origin + "/onboarding",
-          },
-        });
-        if (error) { toast.error(error.message); setSubmitLoading(false); return; }
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) { toast.error(error.message); setSubmitLoading(false); return; }
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
-      setSubmitLoading(false);
-    }
-  }
-
   function renderCta() {
     if (step < 3) {
       return (
         <button
           onClick={next}
           disabled={!canAdvance()}
-          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 ease-out active:scale-[0.97]"
         >
           That's me <ArrowRight className="w-4 h-4" />
         </button>
@@ -340,7 +244,7 @@ export default function OnboardingScreen() {
         <button
           onClick={next}
           disabled={disabled}
-          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 ease-out active:scale-[0.97]"
         >
           {disabled ? (<><Loader2 className="w-4 h-4 animate-spin" /> Personalizing…</>) : (<>Show me how <ArrowRight className="w-4 h-4" /></>)}
         </button>
@@ -348,19 +252,22 @@ export default function OnboardingScreen() {
     }
     if (step === 4) {
       return (
-        <button onClick={next} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+        <button onClick={next} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97]">
           Continue
         </button>
       );
     }
     if (step === 5) {
       return (
-        <button onClick={next} className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-          Start free trial <ArrowRight className="w-4 h-4" />
+        <button
+          onClick={handleFinish}
+          disabled={finishing}
+          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-60 transition-all duration-200 ease-out active:scale-[0.97]"
+        >
+          {finishing ? <><Loader2 className="w-4 h-4 animate-spin" /> Starting…</> : <>Try it free <ArrowRight className="w-4 h-4" /></>}
         </button>
       );
     }
-    // step 6 — auth has its own form CTA
     return null;
   }
 
@@ -530,124 +437,12 @@ export default function OnboardingScreen() {
             </div>
           )}
 
-          {step === 6 && (
-            <div>
-              <span className="text-xs font-semibold text-primary uppercase tracking-wider">Last step</span>
-              <h2 className="text-xl font-bold text-foreground mt-2 mb-2">
-                {isSignup ? "Create your account" : "Welcome back"}
-              </h2>
-              <p className="text-sm text-muted-foreground mb-5">
-                {isSignup ? "Save your setup and start your free trial." : "Sign in to access your dashboard."}
-              </p>
-
-              {finishingTrial ? (
-                <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Setting up your trial…
-                </div>
-              ) : (
-                <>
-                  <button
-                    onClick={handleGoogle}
-                    disabled={googleLoading || submitLoading}
-                    className="w-full flex items-center justify-center gap-3 bg-card border border-border rounded-xl py-3 mb-4 disabled:opacity-60"
-                  >
-                    {googleLoading ? <Loader2 className="w-5 h-5 animate-spin text-foreground" /> : (
-                      <>
-                        <GoogleIcon className="w-5 h-5" />
-                        <span className="text-sm font-medium text-foreground">
-                          {isSignup ? "Sign up with Google" : "Sign in with Google"}
-                        </span>
-                      </>
-                    )}
-                  </button>
-
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex-1 h-px bg-border" />
-                    <span className="text-[11px] text-muted-foreground uppercase tracking-wider">Or</span>
-                    <div className="flex-1 h-px bg-border" />
-                  </div>
-
-                  <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
-                    {isSignup && (
-                      <FieldWrap icon={<User className="w-4 h-4" />}>
-                        <input
-                          type="text" value={name} onChange={(e) => setName(e.target.value)}
-                          placeholder="Full name" autoComplete="name"
-                          className="w-full bg-transparent pl-10 pr-3 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                        />
-                      </FieldWrap>
-                    )}
-                    <FieldWrap icon={<Mail className="w-4 h-4" />}>
-                      <input
-                        type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                        placeholder="Email" autoComplete="email"
-                        className="w-full bg-transparent pl-10 pr-3 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                      />
-                    </FieldWrap>
-                    <FieldWrap icon={<Lock className="w-4 h-4" />}>
-                      <input
-                        type={showPassword ? "text" : "password"} value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        onBlur={() => setPasswordTouched(true)}
-                        placeholder={isSignup ? "Create password" : "Password"}
-                        autoComplete={isSignup ? "new-password" : "current-password"}
-                        className="w-full bg-transparent pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                      />
-                      <button type="button" onClick={() => setShowPassword((s) => !s)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </FieldWrap>
-
-                    {showPwRules && (
-                      <ul className="flex flex-col gap-1 px-1" aria-live="polite">
-                        {pwCheck.results.map((r) => (
-                          <li key={r.id} className="flex items-center gap-1.5 text-[12px]">
-                            {r.passed ? <Check className="w-3.5 h-3.5 text-primary shrink-0" /> : <X className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-                            <span className={r.passed ? "text-foreground" : "text-muted-foreground"}>{r.label}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    <button
-                      type="submit"
-                      disabled={submitLoading || googleLoading || (isSignup && !canSubmitAuth)}
-                      className="mt-2 flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-50"
-                    >
-                      {submitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (isSignup ? "Start my free trial" : "Sign in")}
-                    </button>
-                  </form>
-
-                  <p className="text-center text-xs text-muted-foreground mt-4">
-                    {isSignup ? "Already have an account?" : "New to ChaseHQ?"}{" "}
-                    <button
-                      onClick={() => { setAuthMode(isSignup ? "signin" : "signup"); setPasswordTouched(false); }}
-                      className="font-semibold text-primary"
-                    >
-                      {isSignup ? "Sign in" : "Create one"}
-                    </button>
-                  </p>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Post-auth "You're in" decision is rendered at /pre-dashboard via FlowMachine. */}
+          {/* Account creation now happens AFTER the user creates their first invoice (POST_INVOICE_AUTH). */}
 
           {/* CTA sits directly below the user's responses */}
           {renderCta()}
         </div>
       </div>
-    </div>
-  );
-}
-
-function FieldWrap({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="relative border border-border bg-card rounded-xl focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary">
-      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground">{icon}</span>
-      {children}
     </div>
   );
 }
