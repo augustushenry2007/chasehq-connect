@@ -1,4 +1,15 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// Simple in-memory per-IP rate limiter (per warm instance).
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 10;
+const rateMap = new Map<string, number[]>();
+function checkRate(ip: string): boolean {
+  const now = Date.now();
+  const arr = (rateMap.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (arr.length >= RATE_MAX) return false;
+  arr.push(now);
+  rateMap.set(ip, arr);
+  return true;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
