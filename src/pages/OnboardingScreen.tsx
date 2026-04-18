@@ -194,6 +194,7 @@ export default function OnboardingScreen() {
     if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
     if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
     if (step === 3) return !personalizing; // gate while loading
+    if (step === 6 || step === 7) return false; // custom CTAs
     return step < TOTAL_STEPS - 1;
   }
 
@@ -357,7 +358,7 @@ export default function OnboardingScreen() {
       <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-3 shrink-0">
         <button
           onClick={back}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 && step !== 6 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 && step !== 6 && step !== 7 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <ChevronLeft className="w-4 h-4 text-muted-foreground" />
         </button>
@@ -366,8 +367,8 @@ export default function OnboardingScreen() {
         </div>
         <button
           onClick={() => canAdvance() && next()}
-          disabled={!canAdvance() || step === 3 && personalizing}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${canAdvance() && step !== 6 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          disabled={!canAdvance() || (step === 3 && personalizing)}
+          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${canAdvance() && step !== 6 && step !== 7 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <ChevronRight className="w-4 h-4 text-muted-foreground" />
         </button>
