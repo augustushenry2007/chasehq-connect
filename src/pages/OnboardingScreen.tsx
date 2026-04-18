@@ -639,6 +639,9 @@ export default function OnboardingScreen() {
               </div>
             </div>
           )}
+
+          {/* CTA sits directly below the user's responses */}
+          {renderCta()}
         </div>
       </div>
     </div>
