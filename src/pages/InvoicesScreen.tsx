@@ -5,6 +5,8 @@ import { formatUSD, type Invoice } from "@/lib/data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Search, Plus, X, ChevronRight, FileText } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
+import { useFlow } from "@/flow/FlowMachine";
+import { FlowState } from "@/flow/states";
 
 type FilterTab = "all" | "overdue" | "upcoming" | "paid";
 
@@ -41,12 +43,19 @@ export default function InvoicesScreen() {
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const { state: flowState, send } = useFlow();
 
   const { invoices, loading, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
   const isEmptyWorkspace = invoices.length === 0;
 
-  // Auto-open the New Invoice modal when arriving via ?new=1 (from onboarding/dashboard)
+  // Open the New Invoice modal whenever the flow says CREATE_INVOICE, OR via legacy ?new=1.
+  useEffect(() => {
+    if (flowState === FlowState.CREATE_INVOICE) {
+      setShowNew(true);
+    }
+  }, [flowState]);
+
   useEffect(() => {
     if (searchParams.get("new") === "1") {
       setShowNew(true);
@@ -56,6 +65,16 @@ export default function InvoicesScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleCreated() {
+    refetch();
+    if (flowState === FlowState.CREATE_INVOICE) send("INVOICE_CREATED");
+  }
+
+  function handleCloseModal() {
+    setShowNew(false);
+    if (flowState === FlowState.CREATE_INVOICE) send("BACK_TO_DASHBOARD");
+  }
 
   if (loading) {
     return (
@@ -192,7 +211,7 @@ export default function InvoicesScreen() {
         )}
       </div>
 
-      <NewInvoiceModal visible={showNew} onClose={() => setShowNew(false)} onCreated={refetch} />
+      <NewInvoiceModal visible={showNew} onClose={handleCloseModal} onCreated={handleCreated} />
     </div>
   );
 }

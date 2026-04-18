@@ -6,6 +6,7 @@ import { useApp } from "@/context/AppContext";
 import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
+import { useFlow } from "@/flow/FlowMachine";
 import {
   TrendingUp, AlertTriangle, CheckCircle, Mail, Check,
   Plus, FileText, Sparkles, ArrowRight, Loader2, Settings as SettingsIcon,
@@ -62,6 +63,7 @@ export default function DashboardScreen() {
   const { invoices, loading, refetch } = useInvoices();
   const { connectGmail, signedInWithGoogle, googleEmail } = useGmailConnection();
   const { canSend, hasGmail, hasSmtp } = useSendingMailbox();
+  const { send: flowSend } = useFlow();
   const [showNew, setShowNew] = useState(false);
   const [connectingGmail, setConnectingGmail] = useState(false);
 
@@ -153,10 +155,10 @@ export default function DashboardScreen() {
                 Tell us who owes you and how much. We'll handle the awkward part — drafting and sending the follow-ups for you.
               </p>
               <button
-                onClick={() => setShowNew(true)}
+                onClick={() => { flowSend("CREATE_INVOICE"); setShowNew(true); }}
                 className="mt-4 inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97]"
               >
-                <Plus className="w-4 h-4" /> Create invoice
+                <Plus className="w-4 h-4" /> Create your first invoice
               </button>
             </div>
           </div>

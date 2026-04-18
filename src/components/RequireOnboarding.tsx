@@ -1,8 +1,9 @@
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 
 export default function RequireOnboarding() {
   const { authReady, isAuthenticated, hasCompletedOnboarding } = useApp();
+  const location = useLocation();
 
   if (!authReady) {
     return (
@@ -14,5 +15,6 @@ export default function RequireOnboarding() {
 
   if (!isAuthenticated) return <Navigate to="/welcome" replace />;
   if (!hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
-  return <Outlet />;
+  // Allow /pre-dashboard for authed + onboarded users (machine routes them here on first run).
+  return <Outlet key={location.pathname} />;
 }
