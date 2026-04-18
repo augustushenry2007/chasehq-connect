@@ -42,6 +42,7 @@ export default function NewInvoiceModal({
   const [dueDateMasked, setDueDateMasked] = useState(""); // MM/DD/YYYY
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!visible) return null;
 
@@ -49,21 +50,29 @@ export default function NewInvoiceModal({
   const dueDateValid = dueDateMasked === "" || dueDateISO !== "";
   const canSubmit = client && amount && dueDateISO && !creating;
 
+  async function resolveUserId(): Promise<string | null> {
+    if (user?.id) return user.id;
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session?.user?.id) return sessionData.session.user.id;
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    return refreshed.session?.user?.id ?? null;
+  }
+
   async function handleCreate() {
-    if (!client || !amount || !dueDateISO) { toast.error("Fill in required fields with a valid date"); return; }
-    setCreating(true);
-    // Resolve user id from context, falling back to a fresh session lookup if context hasn't hydrated yet
-    let uid = user?.id;
-    if (!uid) {
-      const { data } = await supabase.auth.getSession();
-      uid = data.session?.user?.id;
+    setErrorMsg(null);
+    if (!client || !amount || !dueDateISO) {
+      setErrorMsg("Please fill in required fields with a valid date.");
+      return;
     }
+    setCreating(true);
+    const uid = await resolveUserId();
     if (!uid) {
       setCreating(false);
+      setErrorMsg("We couldn't verify your session. Please sign in again.");
       toast.error("Your session expired. Please sign in again.");
       return;
     }
-    const result = await createInvoice(uid, {
+    const { invoice, error } = await createInvoice(uid, {
       client,
       clientEmail: email,
       description,
@@ -71,10 +80,13 @@ export default function NewInvoiceModal({
       dueDate: dueDateISO,
     });
     setCreating(false);
-    if (result) {
+    if (invoice) {
       setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDateMasked("");
+      setErrorMsg(null);
       onCreated();
       onClose();
+    } else if (error) {
+      setErrorMsg(error);
     }
   }
 
