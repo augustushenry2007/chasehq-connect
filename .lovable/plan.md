@@ -1,51 +1,76 @@
 
 
-## Plan — Fix session bug, fix skip loop, harden onboarding flow
+## Plan — Centralized state machine + flow hardening
 
-### Root causes
+### Architecture
 
-1. **"Session expired" on Create Invoice** — `NewInvoiceModal.handleCreate` shows a generic "session expired" toast whenever `user.id` isn't in context yet, masking the real RLS/insert error. Even when `uid` is found via `getSession()`, the pre-flight `count(*)` query in `createInvoice()` runs without ensuring the supabase client has the latest token, and any insert error gets a vague message.
+Introduce a single `FlowMachine` (reducer-based, no new deps) that owns the canonical app state and is the **only** way to transition between major screens. React Router becomes a thin renderer driven by the machine — direct `navigate()` calls outside the machine are removed from flow-critical paths.
 
-2. **Onboarding skip loop** (visible in session replay) — When the user clicks "Skip for now" on step 7 and navigates to `/dashboard`:
-   - In testing mode, `AppContext` forces `hasCompletedOnboarding=false` on every `SIGNED_IN` event (including silent token refreshes).
-   - There's **no route guard** on `/dashboard`, but `OnboardingScreen` itself sets `step=6` whenever `isAuthenticated` flips, and `completeOnboarding()` only fires once at step 6→7. If the user lands back on `/onboarding` for any reason (e.g. a stray nav), they're forced through again.
-   - The skip path uses `navigate("/dashboard", { replace: true })` but the auth state subscriber's `clearTestingState()` wipes the state right after, and the testing-mode `SIGNED_IN` handler runs on every tab focus/token refresh — repeatedly resetting `hasCompletedOnboarding` to `false`.
+```text
+APP_LAUNCH → LANDING → ONBOARDING → PERSONALIZATION → AUTH
+   → PRE_DASHBOARD_DECISION → {CREATE_INVOICE | DASHBOARD_EMPTY}
+   → DASHBOARD_ACTIVE → INVOICE_DETAIL
+```
 
-3. **"Onboarding screens missing"** — The 8 steps (0–7) exist and render. The perceived "missing" screens are because testing mode + the loop above sometimes drops the user mid-flow. Fixing #2 restores the felt experience.
+### New files
 
-### Changes
+- **`src/flow/states.ts`** — `FlowState` enum + route map (`STATE → path`).
+- **`src/flow/transitions.ts`** — Allowed `(FROM, EVENT) → TO` table. Unknown transitions are rejected and logged.
+- **`src/flow/FlowMachine.tsx`** — Reducer + Provider + `useFlow()` hook. Exposes `send(event, payload?)`. Persists `{state, onboardingPayload}` to `localStorage` (`flow_state_v1`). Logs every transition `[FLOW] FROM → TO @ timestamp`.
+- **`src/flow/FlowRouter.tsx`** — Subscribes to machine; calls `navigate(routeFor(state), {replace:true})` declaratively. Mounted once inside `BrowserRouter`.
+- **`src/flow/guards.ts`** — Pure guard fns: `hasSession`, `onboardingComplete`, `personalizationComplete`, `hasInvoices`.
+- **`src/pages/PersonalizationScreen.tsx`** — Split out from current `OnboardingScreen` (the post-questions / pre-auth slice). Keeps existing UI, wires "Continue" → `send('PERSONALIZATION_DONE')`.
+- **`src/pages/PreDashboardDecisionScreen.tsx`** — The "Create your first invoice now?" prompt, extracted from onboarding step 7. Buttons send `DECIDE_YES` / `DECIDE_SKIP`.
 
-**`src/components/invoice/NewInvoiceModal.tsx`**
-- Replace the silent "session expired" path with: try `user?.id` → `supabase.auth.getSession()` → `supabase.auth.refreshSession()` as a third fallback before giving up.
-- Pass real insert errors through (already done in `createInvoice`, just stop swallowing them with the modal's pre-check).
-- Add a small inline error banner so users see what actually went wrong instead of a transient toast.
+### Edited files
 
-**`src/hooks/useSupabaseData.ts` — `createInvoice`**
-- Drop the `count(*)` pre-flight (it's the RLS-sensitive call that often fails silently and produces wrong invoice numbers under races). Generate the invoice number with `Date.now()`-based suffix or fetch with `.eq("user_id", userId)` so RLS is explicit.
-- Bubble the full Postgres error message to the toast.
+- **`src/App.tsx`** — Wrap routes in `<FlowProvider>` + `<FlowRouter/>`. Routes become pure renderers; remove `RequireOnboarding` (machine guards replace it). Add `/personalization` and `/pre-dashboard` routes.
+- **`src/pages/RootRedirect.tsx`** — Becomes a no-op that just shows a splash while machine boots, then machine drives navigation.
+- **`src/pages/OnboardingScreen.tsx`** — Strip auth + decision steps. On final question → `send('ONBOARDING_DONE', payload)`. Removes self-driving `useEffect`s that jump steps.
+- **`src/pages/AuthScreen.tsx`** — On successful sign-in/up → `send('AUTH_SUCCESS')`. Stop calling `navigate()` directly.
+- **`src/pages/DashboardScreen.tsx`** — Reads `invoices.length` from context; if zero, renders empty-state component with illustration + "Create your first invoice" CTA → `send('CREATE_INVOICE')`. Otherwise full dashboard. Skeleton cards during `invoicesLoading`.
+- **`src/pages/InvoicesScreen.tsx`** — Remove `?new=1` query handling; opens modal when `flow.state === CREATE_INVOICE`. On success → `send('INVOICE_CREATED')`.
+- **`src/components/invoice/NewInvoiceModal.tsx`** — Wrap insert in `withRetry()` helper that does one silent `refreshSession()` retry on auth errors. Never surface "session expired" / "not signed up" to authed users — show generic *"Something went wrong. Please try again."* Preserve form state on error; show inline retry banner. Disable submit button while in-flight (already partially done).
+- **`src/context/AppContext.tsx`** — Stop force-resetting onboarding state on token refresh (already fixed). Expose `sessionReady` for guards. Remove imperative onboarding navigation logic (machine owns it now).
+- **`src/components/ui/button.tsx`** — Confirm `active:scale-[0.97] transition-transform duration-150 ease-out` is in base classes (add if missing).
+- **`tailwind.config.ts`** — Add `slide-up-fade` keyframes (`opacity 0→1`, `translateY 8px→0`, 250ms ease-in-out) and `animate-page-enter` utility. Apply to top-level `<div>` of each routed page.
+- **`src/index.css`** — Add `.skeleton` shimmer utility used by Dashboard empty/loading.
 
-**`src/context/AppContext.tsx`**
-- In the testing-mode `SIGNED_IN` branch, only reset state on **fresh sign-ins**, not on token refreshes. Track a `lastUserId` ref and skip the wipe when `session.user.id === lastUserId`. This stops the loop where every silent refresh kicks the user back to onboarding.
-- Keep the testing-mode override of `hasCompletedOnboarding` on initial profile load only; once `completeOnboarding()` has been called this session, don't re-flip it to false.
+### Transition table (core)
 
-**`src/pages/OnboardingScreen.tsx`**
-- Remove the `useEffect` that force-jumps to `step=6` when `isAuthenticated` is true if the user has already passed step 6 (currently `step < 6` guard is correct but combined with re-mounts can replay). Add an in-session `completedRef` so once we hit step 7 we never auto-rewind.
-- After `completeOnboarding()` succeeds at step 6→7, also persist a `localStorage["onboarding_done_session"]` flag (skipped in testing mode) so a remount doesn't restart.
+| From | Event | To | Guard |
+|---|---|---|---|
+| APP_LAUNCH | BOOT | LANDING | !hasSession && !onboardingComplete |
+| APP_LAUNCH | BOOT | PRE_DASHBOARD_DECISION | hasSession && onboardingComplete && firstRunThisSession |
+| APP_LAUNCH | BOOT | DASHBOARD_ACTIVE/EMPTY | hasSession && onboardingComplete |
+| LANDING | START | ONBOARDING | — |
+| ONBOARDING | ONBOARDING_DONE(payload) | PERSONALIZATION | all answers present |
+| PERSONALIZATION | CONTINUE | AUTH | — |
+| AUTH | AUTH_SUCCESS | PRE_DASHBOARD_DECISION | hasSession |
+| PRE_DASHBOARD_DECISION | DECIDE_YES | CREATE_INVOICE | — |
+| PRE_DASHBOARD_DECISION | DECIDE_SKIP | DASHBOARD_EMPTY/ACTIVE | by invoice count |
+| CREATE_INVOICE | INVOICE_CREATED | DASHBOARD_ACTIVE | — |
+| DASHBOARD_EMPTY | CREATE_INVOICE | CREATE_INVOICE | — |
+| DASHBOARD_ACTIVE | OPEN_INVOICE(id) | INVOICE_DETAIL | — |
+| INVOICE_DETAIL | BACK | DASHBOARD_ACTIVE | — |
+| * | SIGN_OUT | LANDING | — |
 
-**`src/pages/RootRedirect.tsx` & route guards**
-- Add a lightweight guard component `<RequireOnboarding>` wrapping the `TabLayout` routes. If `authReady && isAuthenticated && !hasCompletedOnboarding`, redirect to `/onboarding`. If `!isAuthenticated`, redirect to `/welcome`. This makes `/dashboard` truly protected and prevents stray returns to `/onboarding` after skip.
+Any unlisted `(state, event)` → reject + `console.warn('[FLOW] rejected', …)`.
 
-**No DB / edge function / dependency changes.**
+### Edge-case handling
 
-### Files touched
-- `src/components/invoice/NewInvoiceModal.tsx`
-- `src/hooks/useSupabaseData.ts`
-- `src/context/AppContext.tsx`
-- `src/pages/OnboardingScreen.tsx`
-- `src/App.tsx` (wrap protected routes with new guard)
-- `src/pages/RootRedirect.tsx` (extract guard or add new file `src/components/RequireOnboarding.tsx`)
+- **Session expired mid-action**: shared `withAuthRetry(fn)` util: run → on `PGRST301`/auth error → `refreshSession()` → retry once → on second failure show generic message. Used by Create Invoice and Send.
+- **Bypass**: machine ignores route changes that don't match current state's allowed route; `FlowRouter` re-corrects via `navigate(replace:true)`.
+- **Rapid taps**: `useTransitionLock()` hook in machine returns `pending` boolean; CTAs read it.
+- **Form preservation**: NewInvoiceModal moves form state into a `useRef`-backed store keyed by session, restored on re-mount.
+- **Empty dashboard**: dedicated component with inline SVG illustration + CTA.
+
+### Logging
+
+`logTransition(from, to, event)` in machine — `console.info` in dev, no-op stub in prod (analytics hook left as TODO comment).
 
 ### Out of scope
-- React Query migration (the cached "lovable-stack-overflow" pattern) — would be a larger refactor; the targeted fixes above resolve the symptoms without it.
-- Visual redesign of any screen.
+- XState dependency (reducer is sufficient).
+- Framer Motion (CSS keyframes meet the 250ms ease-in-out spec).
+- Visual redesign beyond empty-state illustration.
 
