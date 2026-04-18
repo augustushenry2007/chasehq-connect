@@ -4,6 +4,8 @@ import type { User } from "@supabase/supabase-js";
 import type { Tables } from "@/integrations/supabase/types";
 import type { Invoice as FrontendInvoice } from "@/lib/data";
 import { isTestingMode, clearTestingState } from "@/lib/testingMode";
+import { readPending, clearPending, isGuestOnboarded, clearGuestOnboarded } from "@/lib/localInvoice";
+import { createInvoice } from "@/hooks/useSupabaseData";
 
 type DbInvoice = Tables<"invoices">;
 
@@ -108,17 +110,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       const metaName = (user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name || null;
       const testing = isTestingMode();
+      const guestOnboarded = isGuestOnboarded();
       if (data) {
         const testingForceFresh = testing && !completedThisSessionRef.current;
-        setHasCompletedOnboarding(testingForceFresh ? false : !!data.onboarding_completed);
+        const dbDone = !!data.onboarding_completed;
+        setHasCompletedOnboarding(testingForceFresh ? false : (dbDone || guestOnboarded));
+        // If the user completed onboarding as a guest, persist that to their profile now.
+        if (!dbDone && guestOnboarded) {
+          await supabase.from("profiles").update({ onboarding_completed: true }).eq("user_id", user.id);
+        }
         const resolved = (data as any).full_name || metaName || null;
         setFullName(resolved);
         if (!(data as any).full_name && metaName) {
           await supabase.from("profiles").update({ full_name: metaName }).eq("user_id", user.id);
         }
       } else {
-        await supabase.from("profiles").insert({ user_id: user.id, onboarding_completed: false, full_name: metaName });
-        setHasCompletedOnboarding(false);
+        await supabase.from("profiles").insert({ user_id: user.id, onboarding_completed: guestOnboarded, full_name: metaName });
+        setHasCompletedOnboarding(guestOnboarded);
         setFullName(metaName);
       }
     })();
