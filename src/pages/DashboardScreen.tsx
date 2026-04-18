@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 import TrialBanner from "@/components/TrialBanner";
+import NotificationBell from "@/components/NotificationBell";
 
 function StatCard({ label, value, sub, icon: Icon, iconColor, valueColor }: {
   label: string; value: string; sub: string; icon: React.ElementType; iconColor: string; valueColor?: string;
