@@ -6,11 +6,47 @@ import { lovable } from "@/integrations/lovable/index";
 import { isTestingMode } from "@/lib/testingMode";
 import { GoogleIcon } from "@/components/GoogleIcon";
 import { validatePassword } from "@/lib/passwordValidation";
+import { useFlow } from "@/flow/FlowMachine";
 import { toast } from "sonner";
 import {
   ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles,
   AlertCircle, Loader2, Eye, EyeOff, Lock, User, Shield, X,
 } from "lucide-react";
+
+function PostAuthDecision() {
+  const { send, pending, setPending } = useFlow();
+  function handle(decision: "yes" | "skip") {
+    if (pending) return;
+    setPending(true);
+    setTimeout(() => setPending(false), 400);
+    send(decision === "yes" ? "DECIDE_YES" : "DECIDE_SKIP");
+  }
+  return (
+    <div className="animate-page-enter">
+      <span className="text-xs font-semibold text-primary uppercase tracking-wider">You're in</span>
+      <h2 className="text-xl font-bold text-foreground mt-2 mb-2">Want to add your first invoice now?</h2>
+      <p className="text-sm text-muted-foreground mb-5">
+        Takes about a minute. Or skip — you can do it anytime from the dashboard.
+      </p>
+      <div className="flex flex-col gap-2.5">
+        <button
+          onClick={() => handle("yes")}
+          disabled={pending}
+          className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-60"
+        >
+          Yes, create invoice <ArrowRight className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => handle("skip")}
+          disabled={pending}
+          className="w-full py-3.5 rounded-xl font-semibold text-sm text-muted-foreground border border-border bg-card transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-60"
+        >
+          Skip for now
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const Q0 = {
   label: "Just checking in",
@@ -623,30 +659,7 @@ export default function OnboardingScreen() {
             </div>
           )}
 
-          {step === 7 && (
-            <div className="animate-fade-in">
-              <span className="text-xs font-semibold text-primary uppercase tracking-wider">You're in</span>
-              <h2 className="text-xl font-bold text-foreground mt-2 mb-2">Want to add your first invoice now?</h2>
-              <p className="text-sm text-muted-foreground mb-5">
-                Takes about a minute. Or skip — you can do it anytime from the dashboard.
-              </p>
-
-              <div className="flex flex-col gap-2.5">
-                <button
-                  onClick={() => navigate("/invoices?new=1", { replace: true })}
-                  className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97]"
-                >
-                  Yes, create invoice <ArrowRight className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => navigate("/dashboard", { replace: true })}
-                  className="w-full py-3.5 rounded-xl font-semibold text-sm text-muted-foreground border border-border bg-card transition-all duration-200 ease-out active:scale-[0.97]"
-                >
-                  Skip for now
-                </button>
-              </div>
-            </div>
-          )}
+          {step === 7 && <PostAuthDecision />}
 
           {/* CTA sits directly below the user's responses */}
           {renderCta()}
