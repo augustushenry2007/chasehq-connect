@@ -206,7 +206,7 @@ export default function OnboardingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // Auto-finalize trial when authenticated and on auth step, then advance to first-invoice prompt
+  // Auto-finalize trial when authenticated and on auth step, then advance via FlowMachine
   useEffect(() => {
     if (step !== 6 || !isAuthenticated || finishingTrial) return;
     (async () => {
@@ -227,7 +227,9 @@ export default function OnboardingScreen() {
         }
         completedRef.current = true;
         setFinishingTrial(false);
-        setStep(7);
+        // Advance the FlowMachine: ONBOARDING -> AUTH -> PRE_DASHBOARD_DECISION
+        sendFlow("ONBOARDING_DONE");
+        sendFlow("AUTH_SUCCESS");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
