@@ -226,74 +226,13 @@ export default function OnboardingScreen() {
     return () => { cancelled = true; };
   }, [step]);
 
-  // ===== Auth handlers (step 6) =====
-  const pwCheck = useMemo(() => validatePassword(password), [password]);
-  const isSignup = authMode === "signup";
-  const showPwRules = isSignup && (passwordTouched || password.length > 0);
-  const canSubmitAuth =
-    !!email && !!password && (!isSignup || (name.trim().length > 0 && pwCheck.isValid));
-
-  async function handleGoogle() {
-    setGoogleLoading(true);
-    // Safety: if the OAuth popup is blocked/closed without a redirect, unstick the button
-    const safety = window.setTimeout(() => setGoogleLoading(false), 30000);
-    try {
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin + "/onboarding",
-      });
-      if (result.error) {
-        toast.error("Google sign-in failed: " + result.error.message);
-        setGoogleLoading(false);
-        window.clearTimeout(safety);
-        return;
-      }
-      if (result.redirected) return; // browser is navigating to Google
-      // Popup flow returned without error and without redirect — session should be set; reset state
-      setGoogleLoading(false);
-      window.clearTimeout(safety);
-    } catch (e: any) {
-      console.error("[Onboarding] Google sign-in error:", e);
-      toast.error("Google sign-in failed" + (e?.message ? `: ${e.message}` : ""));
-      setGoogleLoading(false);
-      window.clearTimeout(safety);
-    }
-  }
-
-  async function handleAuthSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmitAuth) {
-      if (isSignup && !pwCheck.isValid) setPasswordTouched(true);
-      toast.error("Please fill in all fields");
-      return;
-    }
-    setSubmitLoading(true);
-    try {
-      if (isSignup) {
-        const { error } = await supabase.auth.signUp({
-          email, password,
-          options: {
-            data: { full_name: name.trim() },
-            emailRedirectTo: window.location.origin + "/onboarding",
-          },
-        });
-        if (error) { toast.error(error.message); setSubmitLoading(false); return; }
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) { toast.error(error.message); setSubmitLoading(false); return; }
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
-      setSubmitLoading(false);
-    }
-  }
-
   function renderCta() {
     if (step < 3) {
       return (
         <button
           onClick={next}
           disabled={!canAdvance()}
-          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 ease-out active:scale-[0.97]"
         >
           That's me <ArrowRight className="w-4 h-4" />
         </button>
@@ -305,7 +244,7 @@ export default function OnboardingScreen() {
         <button
           onClick={next}
           disabled={disabled}
-          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 ease-out active:scale-[0.97]"
         >
           {disabled ? (<><Loader2 className="w-4 h-4 animate-spin" /> Personalizing…</>) : (<>Show me how <ArrowRight className="w-4 h-4" /></>)}
         </button>
@@ -313,19 +252,22 @@ export default function OnboardingScreen() {
     }
     if (step === 4) {
       return (
-        <button onClick={next} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
+        <button onClick={next} className="mt-5 w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97]">
           Continue
         </button>
       );
     }
     if (step === 5) {
       return (
-        <button onClick={next} className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm">
-          Start free trial <ArrowRight className="w-4 h-4" />
+        <button
+          onClick={handleFinish}
+          disabled={finishing}
+          className="mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm disabled:opacity-60 transition-all duration-200 ease-out active:scale-[0.97]"
+        >
+          {finishing ? <><Loader2 className="w-4 h-4 animate-spin" /> Starting…</> : <>Try it free <ArrowRight className="w-4 h-4" /></>}
         </button>
       );
     }
-    // step 6 — auth has its own form CTA
     return null;
   }
 
