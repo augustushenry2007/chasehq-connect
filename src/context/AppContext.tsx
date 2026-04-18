@@ -89,6 +89,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return s ? JSON.parse(s) : DEFAULT_SCHEDULE;
   });
 
+  const lastUserIdRef = useRef<string | null>(null);
+  const completedThisSessionRef = useRef(false);
+
   useEffect(() => {
     if (!user) {
       setHasCompletedOnboarding(false);
