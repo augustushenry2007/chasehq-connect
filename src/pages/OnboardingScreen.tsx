@@ -160,7 +160,6 @@ export default function OnboardingScreen() {
   // If a user comes back authenticated mid-onboarding, jump them to the auth-success path
   useEffect(() => {
     if (isAuthenticated && step < 6) {
-      // Resume at auth step so finalize logic runs
       setStep(6);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
