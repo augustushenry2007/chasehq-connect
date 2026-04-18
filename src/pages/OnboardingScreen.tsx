@@ -48,8 +48,8 @@ const Q2 = {
   ],
 };
 
-// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth
-const TOTAL_STEPS = 7;
+// Steps: 0,1,2 questions · 3 made-for-you · 4 how it works · 5 pricing/trial · 6 auth · 7 first-invoice prompt
+const TOTAL_STEPS = 8;
 const STORAGE_KEY = "onboarding_state";
 
 function MultiSelectStep({ config, selected, onToggle, customText, setCustomText }: {
@@ -160,13 +160,12 @@ export default function OnboardingScreen() {
   // If a user comes back authenticated mid-onboarding, jump them to the auth-success path
   useEffect(() => {
     if (isAuthenticated && step < 6) {
-      // Resume at auth step so finalize logic runs
       setStep(6);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // Auto-finalize when authenticated and on auth step
+  // Auto-finalize trial when authenticated and on auth step, then advance to first-invoice prompt
   useEffect(() => {
     if (step !== 6 || !isAuthenticated || finishingTrial) return;
     (async () => {
@@ -182,7 +181,8 @@ export default function OnboardingScreen() {
       } finally {
         await completeOnboarding();
         localStorage.removeItem(STORAGE_KEY);
-        navigate("/dashboard", { replace: true });
+        setFinishingTrial(false);
+        setStep(7);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,6 +193,7 @@ export default function OnboardingScreen() {
     if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
     if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
     if (step === 3) return !personalizing; // gate while loading
+    if (step === 6 || step === 7) return false; // custom CTAs
     return step < TOTAL_STEPS - 1;
   }
 
@@ -356,7 +357,7 @@ export default function OnboardingScreen() {
       <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-3 shrink-0">
         <button
           onClick={back}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 && step !== 6 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${step > 0 && step !== 6 && step !== 7 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <ChevronLeft className="w-4 h-4 text-muted-foreground" />
         </button>
@@ -365,8 +366,8 @@ export default function OnboardingScreen() {
         </div>
         <button
           onClick={() => canAdvance() && next()}
-          disabled={!canAdvance() || step === 3 && personalizing}
-          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${canAdvance() && step !== 6 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          disabled={!canAdvance() || (step === 3 && personalizing)}
+          className={`w-9 h-9 rounded-lg border border-border flex items-center justify-center ${canAdvance() && step !== 6 && step !== 7 ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <ChevronRight className="w-4 h-4 text-muted-foreground" />
         </button>
@@ -611,6 +612,31 @@ export default function OnboardingScreen() {
                   </p>
                 </>
               )}
+            </div>
+          )}
+
+          {step === 7 && (
+            <div className="animate-fade-in">
+              <span className="text-xs font-semibold text-primary uppercase tracking-wider">You're in</span>
+              <h2 className="text-xl font-bold text-foreground mt-2 mb-2">Want to add your first invoice now?</h2>
+              <p className="text-sm text-muted-foreground mb-5">
+                Takes about a minute. Or skip — you can do it anytime from the dashboard.
+              </p>
+
+              <div className="flex flex-col gap-2.5">
+                <button
+                  onClick={() => navigate("/invoices?new=1", { replace: true })}
+                  className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97]"
+                >
+                  Yes, create invoice <ArrowRight className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => navigate("/dashboard", { replace: true })}
+                  className="w-full py-3.5 rounded-xl font-semibold text-sm text-muted-foreground border border-border bg-card transition-all duration-200 ease-out active:scale-[0.97]"
+                >
+                  Skip for now
+                </button>
+              </div>
             </div>
           )}
 

@@ -12,8 +12,8 @@ export default function RootRedirect() {
     );
   }
 
-  // Unauthenticated users go through onboarding first (auth happens at the end).
-  if (!isAuthenticated) return <Navigate to="/onboarding" replace />;
+  // Unauthenticated users see the welcome screen first.
+  if (!isAuthenticated) return <Navigate to="/welcome" replace />;
   if (!hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
   return <Navigate to="/dashboard" replace />;
 }

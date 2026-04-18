@@ -6,45 +6,46 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    /* Cool blue palette: Turquoise #447F98, Slate #628BB5, Platinum #DADEE1, Glacier #B9D8E1, Ice #D8EBF3 */
+    --background: 200 50% 98%;
+    --foreground: 210 30% 18%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 210 30% 18%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 210 30% 18%;
 
-    --primary: 199 89% 48%;
+    --primary: 199 38% 43%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 215 25% 27%;
+    --secondary: 210 30% 94%;
+    --secondary-foreground: 210 30% 25%;
 
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 210 25% 95%;
+    --muted-foreground: 210 15% 45%;
 
-    --accent: 199 76% 93%;
-    --accent-foreground: 201 79% 32%;
+    --accent: 196 47% 87%;
+    --accent-foreground: 199 38% 30%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 72% 29%;
-    --success-bg: 141 79% 85%;
+    --success: 168 60% 35%;
+    --success-bg: 168 50% 88%;
     --warning: 32 95% 44%;
     --warning-bg: 48 96% 89%;
     --error: 0 72% 51%;
     --error-bg: 0 93% 94%;
 
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 199 89% 48%;
+    --border: 210 16% 87%;
+    --input: 210 16% 87%;
+    --ring: 199 38% 43%;
 
     --radius: 0.75rem;
 
-    --dark: 222 47% 11%;
-    --dark-mid: 217 33% 17%;
+    --dark: 210 30% 18%;
+    --dark-mid: 210 25% 25%;
   }
 }
 
