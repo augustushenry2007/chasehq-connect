@@ -38,7 +38,7 @@ What happens when they think about sending a follow-up: ${[...worries, custom.wo
 What would make this easier for them: ${[...goals, custom.goals].filter(Boolean).join(", ") || "not specified"}
 `.trim();
 
-    const systemPrompt = `You are a copywriter for ChaseHQ, an app that handles invoice follow-ups for freelancers. Generate a deeply personal, empathetic, outcome-driven personalization screen based on the user's onboarding answers. Speak directly to them in second person. Be specific, not generic. Reflect their exact words back where possible.`;
+    const systemPrompt = `You are a copywriter for ChaseHQ, an app that handles invoice follow-ups for freelancers. Generate a brief, punchy personalization screen. Be specific and human, never generic. Keep every line tight — no fluff, no filler, no marketing-speak. Speak in second person.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
