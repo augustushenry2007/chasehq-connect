@@ -211,7 +211,7 @@ export default function InvoicesScreen() {
         )}
       </div>
 
-      <NewInvoiceModal visible={showNew} onClose={() => setShowNew(false)} onCreated={refetch} />
+      <NewInvoiceModal visible={showNew} onClose={handleCloseModal} onCreated={handleCreated} />
     </div>
   );
 }
