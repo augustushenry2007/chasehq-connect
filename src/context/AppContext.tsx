@@ -206,6 +206,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     localStorage.removeItem("notifications");
     localStorage.removeItem("schedule");
+    localStorage.removeItem("onboarding_done_session");
+    completedThisSessionRef.current = false;
     setIsAuthenticated(false);
     setUser(null);
     setHasCompletedOnboarding(false);
