@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProvider } from "@/context/AppContext";
 import { FlowProvider } from "@/flow/FlowMachine";
 import { FlowBootstrap } from "@/flow/FlowBootstrap";
+import { FlowRouter } from "@/flow/FlowRouter";
 import RootRedirect from "./pages/RootRedirect";
 import AuthScreen from "./pages/AuthScreen";
 import WelcomeScreen from "./pages/WelcomeScreen";
@@ -28,6 +29,7 @@ const App = () => (
       <BrowserRouter>
         <FlowProvider>
           <FlowBootstrap />
+          <FlowRouter />
           <Routes>
             <Route path="/" element={<RootRedirect />} />
             <Route path="/welcome" element={<WelcomeScreen />} />
