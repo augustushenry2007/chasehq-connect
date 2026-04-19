@@ -6,7 +6,7 @@ import { isTestingMode } from "@/lib/testingMode";
 import { markGuestOnboarded } from "@/lib/localInvoice";
 import { useFlow } from "@/flow/FlowMachine";
 import {
-  ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles,
+  ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Sparkles,
   AlertCircle, Loader2, Shield,
 } from "lucide-react";
 
@@ -370,13 +370,13 @@ export default function OnboardingScreen() {
 
           {step === 4 && (
             <div>
-              <span className="text-xs font-semibold text-primary uppercase tracking-wider">How it removes the mental load</span>
-              <h2 className="text-xl font-bold text-foreground mt-2 mb-5">Three things you'll never have to do alone again</h2>
+              <span className="text-xs font-semibold text-primary uppercase tracking-wider">How ChaseHQ helps</span>
+              <h2 className="text-xl font-bold text-foreground mt-2 mb-5">Done-for-you follow-ups, on your schedule</h2>
               <div className="flex flex-col gap-4">
                 {[
-                  { icon: Mail, title: "Write the message", desc: "We draft every follow-up in your tone — Polite, Friendly, Firm or Urgent — so you never stare at a blank screen." },
-                  { icon: Clock, title: "Decide when to send", desc: "Set the schedule once in Settings. ChaseHQ tracks each invoice and queues the next reminder for you." },
-                  { icon: Zap, title: "Stay in control", desc: "Drafts wait in the invoice. Tweak the tone, then send via your connected Gmail — you stay in control." },
+                  { icon: Mail, title: "What to say", desc: "We draft every follow-up in your tone — Polite, Friendly, Firm or Urgent — so you never face a blank screen." },
+                  { icon: Sparkles, title: "How to say it", desc: "Each draft is tailored to the invoice and the relationship. Tweak it in one tap before sending." },
+                  { icon: Clock, title: "When to send", desc: "You set the cadence in Settings. ChaseHQ queues the next reminder on your timeline — you stay in control of the send." },
                 ].map((f) => (
                   <div key={f.title} className="flex gap-3.5">
                     <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
@@ -408,8 +408,8 @@ export default function OnboardingScreen() {
                 <ul className="flex flex-col gap-2.5">
                   {[
                     "AI-drafted follow-ups in 4 tones",
-                    "Smart timing — we tell you when to send",
-                    "Send via your connected Gmail",
+                    "Your schedule — you decide when reminders go",
+                    "Send via your connected email",
                     "Final-notice escalation when needed",
                     "Cancel anytime, no questions asked",
                   ].map((f) => (

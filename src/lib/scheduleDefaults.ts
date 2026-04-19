@@ -28,8 +28,15 @@ export function getUserTimezone(): string {
  * on (dueDate + offset_days).
  */
 export function computeStepDate(dueDateISO: string, offsetDays: number): string {
-  // Parse the YYYY-MM-DD as local-naive, add the offset, then anchor 9am.
-  const base = new Date(`${dueDateISO}T09:00:00`);
+  // Accept either YYYY-MM-DD or a full ISO string. Fall back to today if unparseable
+  // so callers never throw a RangeError on .toISOString().
+  const ymd = (dueDateISO || "").slice(0, 10);
+  let base = new Date(`${ymd}T09:00:00`);
+  if (isNaN(base.getTime())) {
+    const fallback = new Date();
+    fallback.setHours(9, 0, 0, 0);
+    base = fallback;
+  }
   base.setDate(base.getDate() + offsetDays);
   return base.toISOString();
 }

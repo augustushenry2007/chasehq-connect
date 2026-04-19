@@ -88,7 +88,7 @@ export default function DashboardScreen() {
               {isEmpty ? `Welcome, ${firstName}` : `${greeting()}, ${firstName}`}
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {isEmpty ? "Let's get you set up so ChaseHQ can chase invoices for you." : "Here's what needs your attention today."}
+              {isEmpty ? "Add an invoice and we'll draft the follow-ups — you choose when they go." : "Here's what needs your attention today."}
             </p>
           </div>
           <NotificationBell />
@@ -165,16 +165,16 @@ export default function DashboardScreen() {
           </div>
 
           {/* What ChaseHQ does */}
-          <div className="mt-4 mx-5 bg-card border border-border rounded-2xl p-4 mb-4">
+          <div className="mx-5 mt-3 bg-card border border-border rounded-2xl p-4 mb-4">
             <div className="flex items-center gap-2 mb-3">
               <Sparkles className="w-4 h-4 text-primary" />
               <h3 className="text-sm font-semibold text-foreground">What happens next</h3>
             </div>
             <div className="flex flex-col gap-2.5">
               {[
-                "Drafts every follow-up in your tone — no blank screens.",
-                "Sends them on the schedule you set in Settings.",
-                "Pauses automatically when a client replies.",
+                "We draft every follow-up in your tone — no blank screens.",
+                "Reminders queue on the schedule you set in Settings.",
+                "You review and send each one — nothing goes out without you.",
               ].map((line) => (
                 <div key={line} className="flex items-start gap-2.5">
                   <div className="w-4 h-4 rounded-full bg-accent flex items-center justify-center shrink-0 mt-0.5">
