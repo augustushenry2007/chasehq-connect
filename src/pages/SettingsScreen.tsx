@@ -69,8 +69,8 @@ function NotificationsSection({ notifications, updateNotifications }: {
   return (
     <div className="flex flex-col gap-4">
       {[
-        { label: "Email notifications", sub: "Receive updates about invoice activity", key: "emailNotifications" as const },
-        { label: "Auto-chase", sub: "Automatically send follow-ups on schedule", key: "autoChase" as const },
+        { label: "Email notifications", sub: "Get an email when a follow-up is due to send", key: "emailNotifications" as const },
+        { label: "Push reminders", sub: "Notify me when it's time to send the next follow-up", key: "autoChase" as const },
       ].map((item) => (
         <div key={item.key} className="flex items-center justify-between">
           <div className="flex-1 pr-4">
