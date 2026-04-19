@@ -88,7 +88,7 @@ export default function DashboardScreen() {
               {isEmpty ? `Welcome, ${firstName}` : `${greeting()}, ${firstName}`}
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {isEmpty ? "Let's get you set up so ChaseHQ can chase invoices for you." : "Here's what needs your attention today."}
+              {isEmpty ? "Add an invoice and we'll draft the follow-ups — you choose when they go." : "Here's what needs your attention today."}
             </p>
           </div>
           <NotificationBell />

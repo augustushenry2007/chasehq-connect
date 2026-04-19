@@ -6,7 +6,7 @@ import { isTestingMode } from "@/lib/testingMode";
 import { markGuestOnboarded } from "@/lib/localInvoice";
 import { useFlow } from "@/flow/FlowMachine";
 import {
-  ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Zap, Sparkles,
+  ChevronLeft, ChevronRight, ArrowRight, Check, Mail, Clock, Sparkles,
   AlertCircle, Loader2, Shield,
 } from "lucide-react";
 
