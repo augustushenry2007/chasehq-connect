@@ -20,7 +20,17 @@ export function FlowBootstrap() {
   // BOOT — only once when auth is first ready.
   useEffect(() => {
     if (!authReady || bootedRef.current) return;
+
+    // Skip boot if we're in the middle of an OAuth callback
+    const inOAuth = sessionStorage.getItem("oauth_in_progress") === "1";
+    if (inOAuth) {
+      console.log("[FLOW BOOT] Skipping boot - OAuth callback in progress");
+      return;
+    }
+
     bootedRef.current = true;
+
+    console.log("[FLOW BOOT] authReady, state:", state, "isAuthenticated:", isAuthenticated, "hasCompletedOnboarding:", hasCompletedOnboarding);
 
     if (state !== FlowState.APP_LAUNCH) {
       // Already mid-flow from a persisted state. If user is signed out AND not a guest who
@@ -36,7 +46,9 @@ export function FlowBootstrap() {
         FlowState.DASHBOARD_EMPTY,
       ] as const;
       const allowed = (allowedUnauthStates as readonly string[]).includes(state);
+      console.log("[FLOW BOOT] Persisted state:", state, "guestOk:", guestOk, "allowed:", allowed);
       if (!isAuthenticated && !(guestOk && allowed)) {
+        console.log("[FLOW BOOT] Forcing SIGN_OUT");
         send("SIGN_OUT");
       }
       return;
@@ -44,13 +56,16 @@ export function FlowBootstrap() {
 
     if (!isAuthenticated) {
       if (isGuestOnboarded()) {
+        console.log("[FLOW BOOT] Guest onboarded → BOOT_GUEST_ONBOARDED");
         send("BOOT_GUEST_ONBOARDED");
       } else {
+        console.log("[FLOW BOOT] No session → BOOT_NO_SESSION");
         send("BOOT_NO_SESSION");
       }
       return;
     }
     if (!hasCompletedOnboarding) {
+      console.log("[FLOW BOOT] Authenticated but not onboarded → BOOT_NO_SESSION");
       send("BOOT_NO_SESSION"); // landing — guards route to onboarding
       return;
     }
@@ -62,6 +77,7 @@ export function FlowBootstrap() {
     } catch {
       /* ignore */
     }
+    console.log("[FLOW BOOT] Authenticated + onboarded →", firstRun ? "BOOT_AUTHED_FIRST_RUN" : "BOOT_AUTHED_RESUMING");
     send(firstRun ? "BOOT_AUTHED_FIRST_RUN" : "BOOT_AUTHED_RESUMING");
   }, [authReady, isAuthenticated, hasCompletedOnboarding, state, send]);
 

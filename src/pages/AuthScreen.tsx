@@ -1,15 +1,36 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { ArrowLeft } from "lucide-react";
 import AuthForm from "@/components/auth/AuthForm";
 
 export default function AuthScreen() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { isAuthenticated, hasCompletedOnboarding, authReady } = useApp();
 
   useEffect(() => {
-    if (!authReady || !isAuthenticated) return;
+    // Clear OAuth flag when we reach the auth screen (OAuth callback completed)
+    sessionStorage.removeItem("oauth_in_progress");
+
+    // Check for OAuth error
+    const error = searchParams.get("error");
+    const errorDesc = searchParams.get("error_description");
+
+    if (error) {
+      console.error("[AuthScreen] OAuth error:", error, errorDesc);
+    } else {
+      console.log("[AuthScreen] Mounted - isAuthenticated:", isAuthenticated, "authReady:", authReady);
+    }
+  }, [searchParams, isAuthenticated, authReady]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!isAuthenticated) {
+      console.log("[AuthScreen] Not authenticated - showing auth form");
+      return;
+    }
+    console.log("[AuthScreen] Authenticated - redirecting to", hasCompletedOnboarding ? "/dashboard" : "/onboarding");
     if (hasCompletedOnboarding) navigate("/dashboard", { replace: true });
     else navigate("/onboarding", { replace: true });
   }, [authReady, isAuthenticated, hasCompletedOnboarding, navigate]);
@@ -18,7 +39,7 @@ export default function AuthScreen() {
     <div className="min-h-screen bg-background flex flex-col animate-page-enter">
       <div className="flex-1 flex flex-col max-w-sm w-full mx-auto px-7 pt-10 pb-6">
         <button
-          onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/"))}
+          onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/welcome"))}
           className="w-9 h-9 -ml-1 flex items-center justify-center text-foreground active:scale-95 transition-transform"
           aria-label="Back"
         >
@@ -34,7 +55,6 @@ export default function AuthScreen() {
 
         <AuthForm
           initialMode="signin"
-          redirectTo={window.location.origin}
           submitLabel={{ signup: "Sign up", signin: "Sign in" }}
         />
       </div>

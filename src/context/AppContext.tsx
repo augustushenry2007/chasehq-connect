@@ -197,6 +197,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       const newUserId = session?.user?.id ?? null;
+      // Clear OAuth flag when auth state changes
+      if (event === "SIGNED_IN" && session?.user) {
+        console.log("[AUTH] OAuth callback completed - user signed in");
+        sessionStorage.removeItem("oauth_in_progress");
+      }
       // Testing mode: only wipe persisted state on a *fresh* sign-in (different user id),
       // not on silent token refreshes for the same user.
       if (

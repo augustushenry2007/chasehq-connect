@@ -24,7 +24,7 @@ type Table = Partial<Record<FlowStateType, Partial<Record<FlowEvent, FlowStateTy
 export const TRANSITIONS: Table = {
   [FlowState.APP_LAUNCH]: {
     BOOT_NO_SESSION: FlowState.LANDING,
-    BOOT_GUEST_ONBOARDED: FlowState.PRE_DASHBOARD_DECISION,
+    BOOT_GUEST_ONBOARDED: FlowState.LANDING,
     BOOT_AUTHED_FIRST_RUN: FlowState.PRE_DASHBOARD_DECISION,
     BOOT_AUTHED_RESUMING: FlowState.DASHBOARD_ACTIVE,
   },
