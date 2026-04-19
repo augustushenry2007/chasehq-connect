@@ -421,8 +421,8 @@ export default function SettingsScreen() {
         <SectionLabel>Preferences</SectionLabel>
         <div className="flex flex-col gap-3 mb-5">
           <CollapsibleSection
-            title="Notifications & Chasing"
-            subtitle="Email alerts and auto-follow-up settings"
+            title="Notifications"
+            subtitle="Email alerts and default tone"
             isOpen={openSection === "notifications"}
             onToggle={() => toggleSection("notifications")}
           >
@@ -430,8 +430,8 @@ export default function SettingsScreen() {
           </CollapsibleSection>
 
           <CollapsibleSection
-            title="Follow-Up Schedule"
-            subtitle="Customize when each follow-up fires"
+            title="Default follow-up schedule"
+            subtitle="Applies to new invoices. Edit per-invoice on its detail page."
             isOpen={openSection === "schedule"}
             onToggle={() => toggleSection("schedule")}
           >

@@ -111,10 +111,10 @@ export default function PaywallScreen() {
             <Sparkles className="w-6 h-6 text-primary" />
           </div>
           <h1 className="text-2xl font-bold text-foreground leading-tight">
-            Keep follow-ups flowing
+            Done-for-you follow-ups, on your schedule
           </h1>
           <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
-            ChaseHQ takes the awkward out of getting paid. Calm, on-brand reminders that go out for you — so you never have to chase again.
+            ChaseHQ drafts every reminder in your tone and queues it on the cadence you set — so getting paid stops feeling awkward.
           </p>
 
           <div className="mt-8 bg-card border border-border rounded-2xl p-5">
@@ -129,8 +129,8 @@ export default function PaywallScreen() {
             <ul className="mt-5 space-y-2.5">
               {[
                 "Unlimited AI follow-ups",
-                "Auto-chase on your schedule",
-                "Final-notice escalation",
+                "Your schedule — you decide when reminders go",
+                "Final-notice escalation when needed",
                 "Cancel anytime",
               ].map((f) => (
                 <li key={f} className="flex items-center gap-2.5">

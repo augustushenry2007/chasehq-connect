@@ -22,10 +22,10 @@ export default function PreDashboardDecisionScreen() {
           </span>
         </div>
         <h1 className="text-2xl font-bold text-foreground leading-tight">
-          Want to add your first invoice now?
+          Ready to set up your first follow-up?
         </h1>
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
-          Takes about a minute. Or skip — you can do it anytime from the dashboard.
+          Add the invoice you want chased — we'll draft the reminders, you choose when they go. Or skip and explore first.
         </p>
 
         <div className="mt-8 flex flex-col gap-2.5">
@@ -34,7 +34,7 @@ export default function PreDashboardDecisionScreen() {
             disabled={pending}
             className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-60"
           >
-            Yes, create invoice <ArrowRight className="w-4 h-4" />
+            Set up my first follow-up <ArrowRight className="w-4 h-4" />
           </button>
           <button
             onClick={() => handle("skip")}
