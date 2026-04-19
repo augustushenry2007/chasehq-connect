@@ -180,15 +180,15 @@ export default function InvoicesScreen() {
             <div className="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center mb-4">
               <FileText className="w-7 h-7 text-primary" />
             </div>
-            <p className="text-base font-semibold text-foreground">No invoices yet</p>
+            <p className="text-base font-semibold text-foreground">No invoices to follow up on yet</p>
             <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-              Add your first invoice and ChaseHQ will handle the follow-ups for you.
+              Add an invoice and ChaseHQ will draft the follow-ups for you — sent on your schedule.
             </p>
             <button
               onClick={() => setShowNew(true)}
               className="mt-5 flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold"
             >
-              <Plus className="w-4 h-4" /> Add your first invoice
+              <Plus className="w-4 h-4" /> Add an invoice to chase
             </button>
           </div>
         ) : filtered.length === 0 ? (
