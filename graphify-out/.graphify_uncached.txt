@@ -1,0 +1,6 @@
+index.html
+README.md
+public/robots.txt
+public/placeholder.svg
+src/assets/app-logo.png
+src/assets/google-signin-button.png

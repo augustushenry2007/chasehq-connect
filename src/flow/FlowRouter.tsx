@@ -15,6 +15,9 @@ export function FlowRouter() {
 
   useEffect(() => {
     if (state === FlowState.APP_LAUNCH) return;
+    // Don't redirect while OAuth callback is in progress
+    const inOAuth = sessionStorage.getItem("oauth_in_progress") === "1";
+    if (inOAuth) return;
     if (lastStateRef.current === state) return;
     lastStateRef.current = state;
 

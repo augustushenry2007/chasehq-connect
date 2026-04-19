@@ -38,20 +38,41 @@ export default function AuthForm({
 
   async function handleGoogle() {
     setGoogleLoading(true);
-    const safety = window.setTimeout(() => setGoogleLoading(false), 30000);
+    const safety = window.setTimeout(() => {
+      setGoogleLoading(false);
+      console.warn("[Google Auth] Request timed out after 30s");
+    }, 30000);
     try {
+      console.log("[Google Auth] Starting OAuth flow with redirectTo:", redirectTo);
+      // Set a flag to indicate we're in OAuth flow - prevents redirects during callback
+      sessionStorage.setItem("oauth_in_progress", "1");
+
       const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: redirectTo });
+
       if (result.error) {
+        console.error("[Google Auth] OAuth error:", result.error);
+        sessionStorage.removeItem("oauth_in_progress");
         toast.error("Google sign-in failed: " + result.error.message);
         setGoogleLoading(false);
         window.clearTimeout(safety);
         return;
       }
-      if (result.redirected) return;
+
+      if (result.redirected) {
+        console.log("[Google Auth] OAuth flow redirected to Google - waiting for callback");
+        // OAuth will redirect to Google, then back to redirectUri - don't clear the flag yet
+        return;
+      }
+
+      console.log("[Google Auth] OAuth flow completed without redirect");
+      sessionStorage.removeItem("oauth_in_progress");
       setGoogleLoading(false);
       window.clearTimeout(safety);
     } catch (e: any) {
-      toast.error("Google sign-in failed" + (e?.message ? `: ${e.message}` : ""));
+      console.error("[Google Auth] Exception caught:", e);
+      sessionStorage.removeItem("oauth_in_progress");
+      const errorMsg = e?.message || "Unknown error";
+      toast.error("Google sign-in failed: " + errorMsg);
       setGoogleLoading(false);
       window.clearTimeout(safety);
     }

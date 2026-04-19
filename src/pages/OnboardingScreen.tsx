@@ -203,6 +203,16 @@ export default function OnboardingScreen() {
       const feelings = Array.from(selected0).map((id) => Q0.options.find((o) => o.id === id)?.label || id);
       const worries = Array.from(selected1).map((id) => Q1.options.find((o) => o.id === id)?.label || id);
       const goals = Array.from(selected2).map((id) => Q2.options.find((o) => o.id === id)?.label || id);
+
+      // Add 10s timeout to avoid infinite loading
+      const timeoutId = window.setTimeout(() => {
+        if (!cancelled && personalizing) {
+          console.warn("[Onboarding] Personalization timeout - auto-advancing");
+          setPersonalizing(false);
+          setPersonalizationError(null);
+        }
+      }, 10000);
+
       try {
         const { data, error } = await supabase.functions.invoke("generate-personalization", {
           body: {
@@ -212,14 +222,20 @@ export default function OnboardingScreen() {
           },
         });
         if (cancelled) return;
+        window.clearTimeout(timeoutId);
         if (error || data?.error) {
+          console.error("[Onboarding] Personalization error:", data?.error || error?.message);
           setPersonalizationError(data?.error || error?.message || "Couldn't personalize right now.");
         } else {
           setPersonalization(data);
         }
-      } catch {
-        if (!cancelled) setPersonalizationError("Couldn't personalize right now.");
+      } catch (e) {
+        if (!cancelled) {
+          console.error("[Onboarding] Personalization exception:", e);
+          setPersonalizationError("Couldn't personalize right now.");
+        }
       } finally {
+        window.clearTimeout(timeoutId);
         if (!cancelled) setPersonalizing(false);
       }
     })();

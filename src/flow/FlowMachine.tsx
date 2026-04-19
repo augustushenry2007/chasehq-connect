@@ -48,10 +48,24 @@ function logTransition(from: FlowStateType, to: FlowStateType, event: FlowEvent)
 
 function loadPersisted(): FlowReducerState | null {
   try {
+    // Always clear onboarding state to prevent being stuck
+    localStorage.removeItem("onboarding_done_session");
+    localStorage.removeItem("onboarding_state");
+
     const raw = localStorage.getItem(FLOW_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as FlowReducerState;
-    if (parsed?.state) return parsed;
+    if (parsed?.state) {
+      // Reset flow if stuck in mid-flow states, force fresh boot
+      const staleStates = [FlowState.AUTH, FlowState.ONBOARDING, FlowState.PRE_DASHBOARD_DECISION];
+      if (staleStates.includes(parsed.state)) {
+        console.log("[FLOW] Clearing stale state:", parsed.state);
+        localStorage.removeItem(FLOW_STORAGE_KEY);
+        return null;
+      }
+      console.log("[FLOW] Loaded persisted state:", parsed.state);
+      return parsed;
+    }
   } catch {
     /* ignore */
   }
