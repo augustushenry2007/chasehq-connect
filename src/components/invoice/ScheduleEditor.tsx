@@ -51,7 +51,7 @@ export default function ScheduleEditor({ invoice }: { invoice: Invoice }) {
         type: step.type,
         title: buildNotificationTitle(step.type, invoice.client, invoice.amount),
         body: buildNotificationBody(step.type, invoice.client),
-        scheduled_for: computeStepDate(invoice.dueDate, step.offset_days),
+        scheduled_for: computeStepDate(invoice.dueDateISO, step.offset_days),
         status: "pending" as const,
       }));
       if (rows.length) await supabase.from("notifications").insert(rows);
@@ -90,7 +90,9 @@ export default function ScheduleEditor({ invoice }: { invoice: Invoice }) {
 
       <div className="flex flex-col gap-2">
         {steps.map((step, i) => {
-          const date = new Date(computeStepDate(invoice.dueDate, step.offset_days));
+          const iso = computeStepDate(invoice.dueDateISO, step.offset_days);
+          const parsed = new Date(iso);
+          const date = isNaN(parsed.getTime()) ? new Date() : parsed;
           return (
             <div key={i} className="flex items-center gap-2 p-2.5 bg-muted rounded-xl">
               <Calendar className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
