@@ -26,7 +26,7 @@ export default function WelcomeScreen() {
           className="mt-4 text-base text-muted-foreground leading-relaxed max-w-sm animate-fade-in"
           style={{ animationDelay: "320ms", animationFillMode: "both" }}
         >
-          We'll handle what to say, how to say it, and when to send.
+          Done-for-you follow-ups, on your schedule.
         </p>
 
         <button
