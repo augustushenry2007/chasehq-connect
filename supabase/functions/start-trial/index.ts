@@ -1,3 +1,5 @@
+// DEPRECATED: trial starts now go through Apple StoreKit via validate-apple-receipt.
+// This function is kept for emergency manual grants only; the client no longer calls it.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 

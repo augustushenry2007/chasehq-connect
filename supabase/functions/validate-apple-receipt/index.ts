@@ -78,36 +78,49 @@ serve(async (req) => {
     const { data: existing } = await admin
       .from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
 
-    let status: "active" = "active";
+    let status: "trialing" | "active";
     let currentPeriodEnd: string;
+    let trialEndsAt: string | null = null;
     let originalTransactionId: string;
     let latestReceipt = body.receipt;
-    const wasNew = !existing || existing.status !== "active";
+    const wasNew = !existing || existing.status === "none" || !existing.status;
 
     // === MOCK PATH (web preview / dev) ===
     const sharedSecret = Deno.env.get("APPLE_SHARED_SECRET");
     const useMock = body.mock === true || !sharedSecret;
 
     if (useMock) {
-      currentPeriodEnd = new Date(Date.now() + 30 * 86400_000).toISOString();
+      // First-time user gets a mock trial; returning users get active (they've used the intro offer).
+      const isFirstTime = !existing || existing.status === "none" || !existing.status;
+      if (isFirstTime) {
+        status = "trialing";
+        trialEndsAt = new Date(Date.now() + 14 * 86400_000).toISOString();
+        currentPeriodEnd = trialEndsAt;
+      } else {
+        status = "active";
+        currentPeriodEnd = new Date(Date.now() + 30 * 86400_000).toISOString();
+      }
       originalTransactionId = `mock_${userId}`;
     } else {
       // === REAL APPLE VALIDATION ===
       const verify = await verifyReceiptWithApple(body.receipt, sharedSecret!);
       if (!verify.ok) return json({ error: verify.error }, 400);
 
-      const latestInfo = verify.payload.latest_receipt_info?.[0]
+      // Use the most recent transaction (last element, sorted ascending by Apple).
+      const latestInfo = verify.payload.latest_receipt_info?.[verify.payload.latest_receipt_info.length - 1]
+        ?? verify.payload.latest_receipt_info?.[0]
         ?? verify.payload.receipt?.in_app?.[0];
       if (!latestInfo) return json({ error: "No subscription info in receipt" }, 400);
 
       const expiresMs = parseInt(latestInfo.expires_date_ms || "0", 10);
       if (!expiresMs) return json({ error: "Receipt missing expiration" }, 400);
 
+      const isTrialing = latestInfo.is_trial_period === "true" || latestInfo.is_in_intro_offer_period === "true";
+      status = isTrialing ? "trialing" : "active";
       currentPeriodEnd = new Date(expiresMs).toISOString();
+      trialEndsAt = isTrialing ? currentPeriodEnd : null;
       originalTransactionId = latestInfo.original_transaction_id;
       latestReceipt = verify.payload.latest_receipt || body.receipt;
-
-      if (expiresMs < Date.now()) status = "active";
     }
 
     const nowIso = new Date().toISOString();
@@ -115,6 +128,7 @@ serve(async (req) => {
       user_id: userId,
       status,
       plan: body.productId || "chasehq_pro_monthly",
+      trial_ends_at: trialEndsAt,
       current_period_end: currentPeriodEnd,
       apple_original_transaction_id: originalTransactionId,
       apple_latest_receipt: latestReceipt,
@@ -137,7 +151,7 @@ serve(async (req) => {
       },
     });
 
-    return json({ ok: true, status, current_period_end: currentPeriodEnd, mock: useMock });
+    return json({ ok: true, status, current_period_end: currentPeriodEnd, trial_ends_at: trialEndsAt, mock: useMock });
   } catch (e) {
     console.error("validate-apple-receipt error:", e);
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);

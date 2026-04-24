@@ -11,6 +11,7 @@ import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
 import { startGoogleOAuth } from "@/lib/oauth";
 import MockIAPSheet from "@/components/onboarding/MockIAPSheet";
+import { isNativePlatform } from "@/lib/iap";
 import { GoogleIcon } from "@/components/GoogleIcon";
 import {
   AlertDialog,
@@ -76,6 +77,7 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
   }, [invoice.dbId]);
   const [authPaywallOpen, setAuthPaywallOpen] = useState(false);
   const [paywallPhase, setPaywallPhase] = useState<"idle" | "confirming" | "success">("idle");
+  const [mockIapOpen, setMockIapOpen] = useState(false);
   const paywallIntentRef = useRef<"send" | "generate">("send");
   const draftRef = useRef<HTMLDivElement>(null);
   const userEditedRef = useRef(false);
@@ -218,8 +220,7 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
     }
   }
 
-  async function handlePaywall() {
-    if (paywallPhase !== "idle") return;
+  async function runIapFlow() {
     setPaywallPhase("confirming");
     try {
       const { purchaseSubscription } = await import("@/lib/iap");
@@ -253,6 +254,20 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
       setPaywallPhase("idle");
       toast.error("That didn't go through. Give it another try.");
     }
+  }
+
+  function handlePaywall() {
+    if (paywallPhase !== "idle") return;
+    if (!isNativePlatform()) {
+      setMockIapOpen(true);
+      return;
+    }
+    runIapFlow();
+  }
+
+  async function handleMockIapConfirm() {
+    setMockIapOpen(false);
+    await runIapFlow();
   }
 
   if (sent) {
@@ -541,6 +556,13 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
         onCancel={() => setIapSheetOpen(false)}
       />
 
+      {/* Web IAP sheet for authenticated users hitting the paywall */}
+      <MockIAPSheet
+        open={mockIapOpen}
+        onConfirm={handleMockIapConfirm}
+        onCancel={() => setMockIapOpen(false)}
+      />
+
       {authDialogOpen && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 animate-fade-in"
@@ -597,7 +619,7 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {trialEndsAt
                   ? "Subscribe to keep sending follow-ups and chasing your invoices."
-                  : "14 days free, then $5/month. Cancel anytime."}
+                  : "14 days free, then $19.99/month. Cancel anytime."}
               </p>
             </div>
             <div className="px-6 pb-5 space-y-3">
@@ -623,7 +645,7 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
                 disabled={paywallPhase !== "idle"}
                 className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-90"
               >
-                {paywallPhase === "idle" && (trialEndsAt ? "Subscribe — $5/month" : "Start 14-day free trial")}
+                {paywallPhase === "idle" && (trialEndsAt ? "Subscribe — $19.99/month" : "Start 14-day free trial")}
                 {paywallPhase === "confirming" && (<><Loader2 className="w-4 h-4 animate-spin" />{trialEndsAt ? " Subscribing…" : " Starting trial…"}</>)}
                 {paywallPhase === "success" && (<><Check className="w-4 h-4" />{trialEndsAt ? " Subscribed!" : " Trial started!"}</>)}
               </button>
