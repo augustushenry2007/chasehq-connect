@@ -26,7 +26,7 @@ export default function PaywallScreen() {
     const token = sessionData.session?.access_token;
     if (!token) {
       setBusy(null);
-      toast.error("Please sign in again");
+      toast.error("Let's sign you back in first.");
       navigate("/auth");
       return;
     }
@@ -35,7 +35,7 @@ export default function PaywallScreen() {
     });
     setBusy(null);
     if (error || (data as any)?.error) {
-      toast.error((data as any)?.error || error?.message || "Could not start trial");
+      toast.error((data as any)?.error || error?.message || "We couldn't start your trial yet. Try again in a moment.");
       return;
     }
     toast.success("Your 30-day free trial has started");
@@ -59,7 +59,7 @@ export default function PaywallScreen() {
     });
     setBusy(null);
     if (error || (data as any)?.error) {
-      toast.error((data as any)?.error || error?.message || "Could not verify purchase");
+      toast.error((data as any)?.error || error?.message || "We couldn't verify that purchase yet. Give it a moment and try restoring.");
       return;
     }
     toast.success("You're subscribed — thank you!");
@@ -83,10 +83,10 @@ export default function PaywallScreen() {
     });
     setBusy(null);
     if (error || (data as any)?.error) {
-      toast.error((data as any)?.error || error?.message || "Nothing to restore");
+      toast.error((data as any)?.error || error?.message || "No active subscription found on this account.");
       return;
     }
-    toast.success("Subscription restored");
+    toast.success("You're all set — welcome back.");
     await refetch();
   }
 
@@ -130,7 +130,7 @@ export default function PaywallScreen() {
               {[
                 "Unlimited AI follow-ups",
                 "Your schedule — you decide when reminders go",
-                "Final-notice escalation when needed",
+                "Escalation built in — so you don't have to be the bad guy",
                 "Cancel anytime",
               ].map((f) => (
                 <li key={f} className="flex items-center gap-2.5">

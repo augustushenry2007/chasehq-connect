@@ -4,8 +4,48 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-user-token, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+// Verifies a Supabase JWT locally — handles both legacy HS256 and new ES256 (ECC P-256) keys.
+// Falls back to the admin getUser API if local verification fails.
+async function verifySupabaseJWT(token: string, supabaseUrl: string): Promise<string | null> {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const decode = (s: string) =>
+      JSON.parse(new TextDecoder().decode(
+        Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0))
+      ));
+    const header = decode(parts[0]);
+    const payload = decode(parts[1]);
+    if (!payload.sub) return null;
+    if (payload.exp && Date.now() / 1000 > payload.exp) return null;
+
+    const signingInput = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = Uint8Array.from(atob(parts[2].replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+
+    if (header.alg === "HS256") {
+      const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+      if (!secret) return null;
+      const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+      if (!await crypto.subtle.verify("HMAC", key, sig, signingInput)) return null;
+    } else if (header.alg === "ES256") {
+      const jwksRes = await fetch(`${supabaseUrl}/auth/v1/.well-known/jwks.json`);
+      if (!jwksRes.ok) return null;
+      const { keys } = await jwksRes.json();
+      const jwk = keys.find((k: any) => !header.kid || k.kid === header.kid) ?? keys[0];
+      if (!jwk) return null;
+      const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+      if (!await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, sig, signingInput)) return null;
+    } else {
+      return null;
+    }
+    return payload.sub as string;
+  } catch {
+    return null;
+  }
+}
 
 // Per-user daily send cap.
 const DAILY_SEND_CAP = 50;
@@ -23,31 +63,38 @@ serve(async (req) => {
       return json({ error: "Invalid recipient email" }, 400);
     }
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Not authenticated" }, 401);
-
-    const supabaseUser = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
-    if (authError || !user) return json({ error: "Invalid session" }, 401);
+    // X-User-Token carries the real ES256 user JWT (the platform only checks Authorization,
+    // so we route around the broken ES256 platform validator by sending the anon key there
+    // and the user's token in this custom header).
+    const userToken = req.headers.get("X-User-Token") ??
+      req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+    if (!userToken) return json({ error: "Not authenticated" }, 401);
 
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    const token = userToken;
+    const userId = await verifySupabaseJWT(token, Deno.env.get("SUPABASE_URL")!);
+    if (!userId) return json({ error: "Invalid session" }, 401);
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (authError || !user) return json({ error: "Invalid session" }, 401);
+
+    const senderName: string =
+      user.user_metadata?.full_name ??
+      user.user_metadata?.name ??
+      "";
+
     // === Subscription gate ===
     const { data: hasEnt, error: entErr } = await supabaseAdmin
       .rpc("has_active_entitlement", { _user_id: user.id });
     if (entErr) {
       console.error("entitlement check error:", entErr);
-      return json({ error: "Could not verify subscription" }, 500);
+      return json({ error: "subscription_required", message: "Could not verify subscription. Please try again." });
     }
     if (!hasEnt) {
-      return json({ error: "subscription_required", message: "Your trial has ended. Subscribe to keep sending follow-ups." }, 402);
+      return json({ error: "subscription_required", message: "Your trial has ended. Subscribe to keep sending follow-ups." });
     }
 
     // === Per-user daily rate limit ===
@@ -63,7 +110,7 @@ serve(async (req) => {
       return json({
         error: "rate_limited",
         message: `You've hit today's limit of ${DAILY_SEND_CAP} sends. Try again tomorrow.`,
-      }, 429);
+      });
     }
 
     const { data: profile } = await supabaseAdmin
@@ -85,11 +132,11 @@ serve(async (req) => {
 
     let result: Response;
     if (senderType === "gmail") {
-      result = await sendViaGmail(supabaseAdmin, user.id, to, subject, message);
+      result = await sendViaGmail(supabaseAdmin, user.id, to, subject, message, senderName);
     } else if (senderType === "smtp") {
       result = await sendViaSmtp(supabaseAdmin, user.id, to, subject, message);
     } else {
-      return json({ error: "no_mailbox", message: "No sending mailbox connected." }, 400);
+      return json({ error: "no_mailbox", message: "No sending mailbox connected." });
     }
 
     // Log successful sends only (status 2xx).
@@ -107,7 +154,7 @@ serve(async (req) => {
   }
 });
 
-async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subject: string, message: string) {
+async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subject: string, message: string, senderName = "") {
   const { data: gmailConn, error: connError } = await supabaseAdmin
     .from("gmail_connections")
     .select("*")
@@ -115,7 +162,7 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
     .single();
 
   if (connError || !gmailConn) {
-    return json({ error: "no_mailbox", message: "Gmail not connected. Please connect Gmail in Settings." }, 401);
+    return json({ error: "no_mailbox", message: "Gmail not connected. Please connect Gmail in Settings." });
   }
 
   let accessToken = gmailConn.access_token;
@@ -136,7 +183,7 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
     const refreshData = await refreshRes.json();
     if (!refreshRes.ok || !refreshData.access_token) {
       console.error("Token refresh failed");
-      return json({ error: "no_mailbox", message: "Gmail token expired. Please reconnect Gmail in Settings." }, 401);
+      return json({ error: "no_mailbox", message: "Gmail token expired. Please reconnect Gmail in Settings." });
     }
     accessToken = refreshData.access_token;
     const newExpiry = new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString();
@@ -148,6 +195,7 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
 
   const emailLines = [
     `To: ${to}`,
+    `From: ${senderName ? `${senderName} <${gmailConn.email}>` : gmailConn.email}`,
     `Subject: ${subject}`,
     `Content-Type: text/plain; charset=utf-8`,
     "",
@@ -156,7 +204,14 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
   const rawEmail = emailLines.join("\r\n");
   const encoder = new TextEncoder();
   const data = encoder.encode(rawEmail);
-  const base64 = btoa(String.fromCharCode(...data))
+  // btoa(String.fromCharCode(...data)) overflows the call stack for large messages.
+  // Chunk the array to stay within argument limits.
+  let binary = "";
+  const CHUNK = 8192;
+  for (let i = 0; i < data.length; i += CHUNK) {
+    binary += String.fromCharCode(...data.subarray(i, i + CHUNK));
+  }
+  const base64 = btoa(binary)
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
   const gmailResponse = await fetch(
@@ -170,12 +225,12 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
 
   if (!gmailResponse.ok) {
     const status = gmailResponse.status;
-    // Don't log raw body to avoid leaking tokens / sensitive context.
-    console.error("Gmail API error status:", status);
+    const errBody = await gmailResponse.json().catch(() => null);
+    console.error("Gmail API error:", status, JSON.stringify(errBody));
     if (status === 401) {
-      return json({ error: "no_mailbox", message: "Gmail token expired. Please reconnect Gmail in Settings." }, 401);
+      return json({ error: "no_mailbox", message: "Gmail token expired. Please reconnect Gmail in Settings." });
     }
-    return json({ error: "Failed to send email via Gmail" }, 500);
+    return json({ error: "Failed to send email via Gmail", gmailStatus: status, gmailError: errBody }, 500);
   }
   const result = await gmailResponse.json();
   return json({ success: true, messageId: result.id, via: "gmail" });
@@ -185,7 +240,7 @@ async function sendViaSmtp(supabaseAdmin: any, userId: string, to: string, subje
   const { data: conn, error } = await supabaseAdmin
     .from("smtp_connections").select("*").eq("user_id", userId).maybeSingle();
   if (error || !conn) {
-    return json({ error: "no_mailbox", message: "SMTP not connected. Please connect your email in Settings." }, 401);
+    return json({ error: "no_mailbox", message: "SMTP not connected. Please connect your email in Settings." });
   }
   const client = new SMTPClient({
     connection: {

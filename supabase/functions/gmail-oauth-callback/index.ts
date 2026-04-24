@@ -9,24 +9,18 @@ serve(async (req) => {
     const error = url.searchParams.get("error");
 
     if (error) {
-      return new Response(buildRedirectHtml("", false, "Google authorization was denied"), {
-        status: 200, headers: { "Content-Type": "text/html" },
-      });
+      return redirect("", false, "Google authorization was denied");
     }
 
     if (!code || !stateParam) {
-      return new Response(buildRedirectHtml("", false, "Missing authorization code"), {
-        status: 400, headers: { "Content-Type": "text/html" },
-      });
+      return redirect("", false, "Missing authorization code");
     }
 
     let state: { userId: string; redirectUri: string };
     try {
       state = JSON.parse(atob(stateParam));
     } catch {
-      return new Response(buildRedirectHtml("", false, "Invalid state parameter"), {
-        status: 400, headers: { "Content-Type": "text/html" },
-      });
+      return redirect("", false, "Invalid state parameter");
     }
 
     const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")!;
@@ -50,9 +44,7 @@ serve(async (req) => {
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || !tokenData.access_token) {
       console.error("Token exchange failed:", tokenData);
-      return new Response(buildRedirectHtml(state.redirectUri, false, "Token exchange failed"), {
-        status: 200, headers: { "Content-Type": "text/html" },
-      });
+      return redirect(state.redirectUri, false, "Token exchange failed");
     }
 
     // Get user's Gmail email
@@ -83,9 +75,7 @@ serve(async (req) => {
 
     if (dbError) {
       console.error("DB error storing gmail connection:", dbError);
-      return new Response(buildRedirectHtml(state.redirectUri, false, "Failed to save connection"), {
-        status: 200, headers: { "Content-Type": "text/html" },
-      });
+      return redirect(state.redirectUri, false, "Failed to save connection");
     }
 
     // Mark profile sender_type as gmail (overwrite 'none', preserve explicit 'smtp' choice)
@@ -95,31 +85,16 @@ serve(async (req) => {
       .eq("user_id", state.userId)
       .in("sender_type", ["none", "gmail"]);
 
-    return new Response(buildRedirectHtml(state.redirectUri, true, "Gmail connected successfully!"), {
-      status: 200, headers: { "Content-Type": "text/html" },
-    });
+    return redirect(state.redirectUri, true);
   } catch (e) {
     console.error("gmail-oauth-callback error:", e);
-    return new Response(`<html><body><p>Error: ${e instanceof Error ? e.message : "Unknown"}</p></body></html>`, {
-      status: 500, headers: { "Content-Type": "text/html" },
-    });
+    return new Response(`Error: ${e instanceof Error ? e.message : "Unknown"}`, { status: 500 });
   }
 });
 
-function buildRedirectHtml(redirectUri: string, success: boolean, message: string): string {
-  const targetUrl = redirectUri || "/";
-  const param = success ? "gmail_connected=true" : "gmail_error=" + encodeURIComponent(message);
-  const finalUrl = targetUrl.includes("?") ? `${targetUrl}&${param}` : `${targetUrl}?${param}`;
-
-  return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Gmail Connection</title></head>
-<body>
-<p>${message}</p>
-<p>Redirecting...</p>
-<script>
-  window.location.href = "${finalUrl}";
-</script>
-</body>
-</html>`;
+function redirect(redirectUri: string, success: boolean, errorMsg?: string): Response {
+  const base = redirectUri || "/";
+  const param = success ? "gmail_connected=true" : "gmail_error=" + encodeURIComponent(errorMsg || "Unknown error");
+  const finalUrl = base.includes("?") ? `${base}&${param}` : `${base}?${param}`;
+  return new Response(null, { status: 302, headers: { Location: finalUrl } });
 }

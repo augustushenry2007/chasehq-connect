@@ -28,8 +28,8 @@ Deno.serve(async (req) => {
     }
 
     const { feelings = [], worries = [], goals = [], custom = {}, firstName = "" } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
 
     const userContext = `
 User's first name: ${firstName || "unknown"}
@@ -40,14 +40,14 @@ What would make this easier for them: ${[...goals, custom.goals].filter(Boolean)
 
     const systemPrompt = `You are a copywriter for ChaseHQ, an app that handles invoice follow-ups for freelancers. Generate a brief, punchy personalization screen. Be specific and human, never generic. Keep every line tight — no fluff, no filler, no marketing-speak. Speak in second person.`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${GEMINI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gemini-2.5-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userContext },

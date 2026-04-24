@@ -3,37 +3,70 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-user-token, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const TRIAL_DAYS = 30;
+const TRIAL_DAYS = 14;
+
+// Verifies a Supabase JWT locally — handles both legacy HS256 and new ES256 (ECC P-256) keys.
+async function verifySupabaseJWT(token: string, supabaseUrl: string): Promise<string | null> {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const decode = (s: string) =>
+      JSON.parse(new TextDecoder().decode(
+        Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0))
+      ));
+    const header = decode(parts[0]);
+    const payload = decode(parts[1]);
+    if (!payload.sub) return null;
+    if (payload.exp && Date.now() / 1000 > payload.exp) return null;
+
+    const signingInput = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = Uint8Array.from(atob(parts[2].replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+
+    if (header.alg === "HS256") {
+      const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+      if (!secret) return null;
+      const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+      if (!await crypto.subtle.verify("HMAC", key, sig, signingInput)) return null;
+    } else if (header.alg === "ES256") {
+      const jwksRes = await fetch(`${supabaseUrl}/auth/v1/.well-known/jwks.json`);
+      if (!jwksRes.ok) return null;
+      const { keys } = await jwksRes.json();
+      const jwk = keys.find((k: any) => !header.kid || k.kid === header.kid) ?? keys[0];
+      if (!jwk) return null;
+      const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+      if (!await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, sig, signingInput)) return null;
+    } else {
+      return null;
+    }
+    return payload.sub as string;
+  } catch {
+    return null;
+  }
+}
 
 serve(async (req) => {
-  console.log("start-trial: invoked", req.method);
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    console.log("auth header present:", !!authHeader);
-    if (!authHeader) return json({ error: "Not authenticated" }, 401);
+    // X-User-Token carries the real ES256 user JWT (same bypass as send-email).
+    const userToken = req.headers.get("X-User-Token") ??
+      req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+    if (!userToken) return json({ error: "Not authenticated" }, 401);
 
-    const supabaseUser = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
-    console.log("getUser:", { userId: user?.id, authError: authError?.message });
-    if (authError || !user) return json({ error: "Invalid session" }, 401);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const userId = await verifySupabaseJWT(userToken, supabaseUrl);
+    if (!userId) return json({ error: "Invalid session" }, 401);
 
-    const admin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const admin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    const { data: existing, error: selError } = await admin
-      .from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
-    console.log("select existing:", { existing, selError: selError?.message });
+    const { data: authUser, error: authErr } = await admin.auth.admin.getUserById(userId);
+    if (authErr || !authUser.user) return json({ error: "Invalid session" }, 401);
+
+    const { data: existing } = await admin
+      .from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
 
     if (existing && existing.status !== "none") {
       return json({
@@ -48,25 +81,23 @@ serve(async (req) => {
     const nowIso = new Date().toISOString();
 
     const upsert = await admin.from("subscriptions").upsert({
-      user_id: user.id,
+      user_id: userId,
       status: "trialing",
       plan: "chasehq_pro_monthly",
       trial_ends_at: trialEndsAt,
       last_event_at: nowIso,
     }, { onConflict: "user_id" }).select().maybeSingle();
-    console.log("upsert result:", { data: upsert.data, error: upsert.error?.message });
 
     if (upsert.error) {
       console.error("start-trial upsert error:", upsert.error);
       return json({ error: upsert.error.message || "Could not start trial" }, 500);
     }
 
-    const evt = await admin.from("subscription_events").insert({
-      user_id: user.id,
+    await admin.from("subscription_events").insert({
+      user_id: userId,
       event_type: "trial_started",
       payload: { trial_ends_at: trialEndsAt, plan: "chasehq_pro_monthly" },
     });
-    console.log("event insert:", { error: evt.error?.message });
 
     return json({ ok: true, status: "trialing", trial_ends_at: trialEndsAt });
   } catch (e) {

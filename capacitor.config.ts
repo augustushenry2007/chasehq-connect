@@ -1,12 +1,11 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'app.lovable.ded4d25121ff41a498f3e10fd0fa9c51',
+  appId: 'com.chasehq.app',
   appName: 'ChaseHQ',
   webDir: 'dist',
   server: {
-    url: 'https://ded4d251-21ff-41a4-98f3-e10fd0fa9c51.lovableproject.com?forceHideBadge=true',
-    cleartext: true
+    androidScheme: 'https'
   },
   plugins: {
     LocalNotifications: {

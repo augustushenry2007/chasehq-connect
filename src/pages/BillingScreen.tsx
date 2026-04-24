@@ -44,10 +44,10 @@ export default function BillingScreen() {
     });
     setRestoring(false);
     if (error || (data as any)?.error) {
-      toast.error((data as any)?.error || "Nothing to restore");
+      toast.error((data as any)?.error || "No active subscription found on this account.");
       return;
     }
-    toast.success("Subscription restored");
+    toast.success("You're all set — welcome back.");
     await ent.refetch();
   }
 
@@ -81,7 +81,7 @@ export default function BillingScreen() {
             </div>
           </div>
 
-          <div className="mt-4 pt-4 border-t border-border grid grid-cols-2 gap-3 text-xs">
+          <div className="mt-4 pt-4 border-t border-border flex gap-6 text-xs">
             {ent.isTrialing ? (
               <>
                 <div>
@@ -98,10 +98,6 @@ export default function BillingScreen() {
                 <div>
                   <p className="text-muted-foreground">Next billing date</p>
                   <p className="text-foreground font-medium mt-0.5">{formatDate(ent.nextBillingDate)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Plan</p>
-                  <p className="text-foreground font-medium mt-0.5">Monthly</p>
                 </div>
               </>
             )}

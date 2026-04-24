@@ -48,6 +48,22 @@ export function useGmailConnection() {
     fetchConnection();
   }, [fetchConnection]);
 
+  // Refetch when gmail_connections row is inserted/updated (e.g. tokens captured
+  // from provider_token during Google signup) so the "Connect Gmail" dialog
+  // disappears without requiring a page reload.
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`gmail-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "gmail_connections", filter: `user_id=eq.${user.id}` },
+        () => fetchConnection()
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user, fetchConnection]);
+
   // Check URL params for gmail_connected / gmail_error callback
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -59,7 +75,7 @@ export function useGmailConnection() {
     }
     const err = params.get("gmail_error");
     if (err) {
-      toast.error("Gmail connection failed", {
+      toast.error("We couldn't reach Gmail. Sign in once more and we'll pick it up from there.", {
         description: err === "redirect_uri_mismatch"
           ? "The OAuth redirect URI isn't whitelisted. Add the callback URL in Google Cloud Console."
           : decodeURIComponent(err),
@@ -77,17 +93,24 @@ export function useGmailConnection() {
     if (!token) {
       return { error: "Please sign in first to connect Gmail." };
     }
-    const { data, error } = await supabase.functions.invoke("gmail-oauth-start", {
-      body: { redirectUri: window.location.origin + path },
-      headers: { Authorization: `Bearer ${token}` },
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const res = await fetch(`${supabaseUrl}/functions/v1/gmail-oauth-start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: JSON.stringify({ redirectUri: window.location.origin + path }),
     });
-    if (error || (data as any)?.error) {
-      const msg = error?.message || (data as any)?.error || "Failed to start Gmail OAuth";
-      console.error("connectGmail error:", msg, error, data);
+    const data = await res.json();
+    if (!res.ok || data?.error) {
+      const msg = data?.error || `Gmail OAuth failed (${res.status})`;
+      console.error("connectGmail error:", msg, data);
       return { error: msg };
     }
-    if ((data as any)?.url) {
-      window.location.href = (data as any).url;
+    if (data?.url) {
+      window.location.href = data.url;
     }
     return {};
   }

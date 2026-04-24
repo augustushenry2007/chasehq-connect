@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useFlow } from "./FlowMachine";
 import { FlowState, ROUTE_FOR } from "./states";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
 
 /**
  * Subscribes to FlowMachine and synchronizes the URL declaratively.
@@ -16,7 +17,7 @@ export function FlowRouter() {
   useEffect(() => {
     if (state === FlowState.APP_LAUNCH) return;
     // Don't redirect while OAuth callback is in progress
-    const inOAuth = sessionStorage.getItem("oauth_in_progress") === "1";
+    const inOAuth = sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1";
     if (inOAuth) return;
     if (lastStateRef.current === state) return;
     lastStateRef.current = state;

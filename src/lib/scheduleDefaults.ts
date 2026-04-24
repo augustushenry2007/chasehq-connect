@@ -1,19 +1,44 @@
 // Default follow-up cadence: due date + 3, 7, 14 days.
 // Each step generates one notification scheduled at 9:00 local time.
 
+import { STORAGE_KEYS } from "@/lib/storageKeys";
+
 export type ScheduleStep = {
   offset_days: number;
-  tone: "Friendly" | "Firm" | "Final Notice";
+  tone: "Polite" | "Friendly" | "Firm" | "Urgent" | "Final Notice";
   type: "due" | "followup" | "escalation";
   status: "pending" | "sent" | "skipped";
 };
 
-export const DEFAULT_STEPS: ScheduleStep[] = [
-  { offset_days: 0, tone: "Friendly", type: "due", status: "pending" },
-  { offset_days: 3, tone: "Friendly", type: "followup", status: "pending" },
-  { offset_days: 7, tone: "Firm", type: "followup", status: "pending" },
-  { offset_days: 14, tone: "Final Notice", type: "escalation", status: "pending" },
-];
+export type SchedulePreset = "patient" | "light" | "active";
+
+export const PRESET_STEPS: Record<SchedulePreset, ScheduleStep[]> = {
+  active: [
+    { offset_days: 3,  tone: "Friendly",     type: "followup",   status: "pending" },
+    { offset_days: 7,  tone: "Firm",         type: "followup",   status: "pending" },
+    { offset_days: 14, tone: "Urgent",       type: "escalation", status: "pending" },
+    { offset_days: 21, tone: "Final Notice", type: "escalation", status: "pending" },
+  ],
+  patient: [
+    { offset_days: 3,  tone: "Friendly",     type: "followup",   status: "pending" },
+    { offset_days: 10, tone: "Friendly",     type: "followup",   status: "pending" },
+    { offset_days: 21, tone: "Firm",         type: "followup",   status: "pending" },
+    { offset_days: 42, tone: "Firm",         type: "followup",   status: "pending" },
+  ],
+  light: [
+    { offset_days: 3,  tone: "Friendly",     type: "followup",   status: "pending" },
+    { offset_days: 14, tone: "Friendly",     type: "followup",   status: "pending" },
+    { offset_days: 28, tone: "Friendly",     type: "followup",   status: "pending" },
+    { offset_days: 42, tone: "Firm",         type: "followup",   status: "pending" },
+  ],
+};
+
+export const DEFAULT_STEPS = PRESET_STEPS.active;
+
+export function getDefaultSteps(): ScheduleStep[] {
+  const preset = (localStorage.getItem(STORAGE_KEYS.SCHEDULE_PRESET) ?? "active") as SchedulePreset;
+  return PRESET_STEPS[preset] ?? PRESET_STEPS.active;
+}
 
 export function getUserTimezone(): string {
   try {

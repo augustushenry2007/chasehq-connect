@@ -13,9 +13,9 @@ export default function TrialBanner() {
       <div className="mx-5 mt-3 flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50">
         <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-amber-900 dark:text-amber-100">Payment issue</p>
+          <p className="text-xs font-semibold text-amber-900 dark:text-amber-100">Payment needs attention</p>
           <p className="text-[11px] text-amber-800 dark:text-amber-200 leading-relaxed mt-0.5">
-            Update your billing in App Store settings to keep ChaseHQ active.
+            Update billing in App Store settings — your access continues once it's resolved.
           </p>
         </div>
         <button

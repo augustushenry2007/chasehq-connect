@@ -3,15 +3,17 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { ArrowLeft } from "lucide-react";
 import AuthForm from "@/components/auth/AuthForm";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
 
 export default function AuthScreen() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { isAuthenticated, hasCompletedOnboarding, authReady } = useApp();
+  const mode: "signup" | "signin" = searchParams.get("mode") === "signup" ? "signup" : "signin";
 
   useEffect(() => {
     // Clear OAuth flag when we reach the auth screen (OAuth callback completed)
-    sessionStorage.removeItem("oauth_in_progress");
+    sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
 
     // Check for OAuth error
     const error = searchParams.get("error");
@@ -20,17 +22,17 @@ export default function AuthScreen() {
     if (error) {
       console.error("[AuthScreen] OAuth error:", error, errorDesc);
     } else {
-      console.log("[AuthScreen] Mounted - isAuthenticated:", isAuthenticated, "authReady:", authReady);
+      if (import.meta.env.DEV) console.log("[AuthScreen] Mounted - isAuthenticated:", isAuthenticated, "authReady:", authReady);
     }
   }, [searchParams, isAuthenticated, authReady]);
 
   useEffect(() => {
     if (!authReady) return;
     if (!isAuthenticated) {
-      console.log("[AuthScreen] Not authenticated - showing auth form");
+      if (import.meta.env.DEV) console.log("[AuthScreen] Not authenticated - showing auth form");
       return;
     }
-    console.log("[AuthScreen] Authenticated - redirecting to", hasCompletedOnboarding ? "/dashboard" : "/onboarding");
+    if (import.meta.env.DEV) console.log("[AuthScreen] Authenticated - redirecting to", hasCompletedOnboarding ? "/dashboard" : "/onboarding");
     if (hasCompletedOnboarding) navigate("/dashboard", { replace: true });
     else navigate("/onboarding", { replace: true });
   }, [authReady, isAuthenticated, hasCompletedOnboarding, navigate]);
@@ -47,16 +49,15 @@ export default function AuthScreen() {
         </button>
 
         <h1 className="mt-10 text-[34px] font-bold text-foreground leading-[1.1] tracking-tight">
-          Welcome<br />Back
+          {mode === "signup" ? <>Create<br />your account</> : <>Welcome<br />Back</>}
         </h1>
         <p className="mt-3 text-[14px] text-muted-foreground leading-relaxed mb-8">
-          Your follow-ups are waiting — let's get those invoices paid.
+          {mode === "signup"
+            ? "Start recovering invoices in minutes."
+            : "Your follow-ups are waiting — let's get those invoices paid."}
         </p>
 
-        <AuthForm
-          initialMode="signin"
-          submitLabel={{ signup: "Sign up", signin: "Sign in" }}
-        />
+        <AuthForm initialMode={mode} />
       </div>
 
       <p className="text-xs text-muted-foreground text-center pb-8 px-7">

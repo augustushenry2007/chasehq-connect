@@ -14,7 +14,7 @@ export default function TermsOfUse() {
         </button>
 
         <h1 className="text-2xl font-bold text-foreground mb-2">Terms of Use</h1>
-        <p className="text-xs text-muted-foreground mb-8">Last updated: April 17, 2026</p>
+        <p className="text-xs text-muted-foreground mb-8">Last updated: April 22, 2026</p>
 
         <div className="space-y-6">
           <section>
@@ -29,14 +29,14 @@ export default function TermsOfUse() {
           <section>
             <h2 className="text-lg font-semibold mb-2">2. Eligibility</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              You must be at least 18 years old and able to form a binding contract under U.S.
-              law to use ChaseHQ. By using the Service you represent that you meet these
-              requirements.
+              You must be at least 18 years old and legally capable of entering into a binding
+              contract in your jurisdiction to use ChaseHQ. By using the Service you represent
+              that you meet these requirements.
             </p>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">3. Your account</h2>
+            <h2 className="text-lg font-semibold mb-2">3. Your Account</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               You are responsible for safeguarding your account credentials and for all activity
               that occurs under your account. Notify us immediately of any unauthorized use.
@@ -44,7 +44,7 @@ export default function TermsOfUse() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">4. Permitted use</h2>
+            <h2 className="text-lg font-semibold mb-2">4. Permitted Use</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               You may use ChaseHQ only to send invoice follow-ups to clients with whom you have
               an existing business relationship. You agree not to:
@@ -59,17 +59,24 @@ export default function TermsOfUse() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">5. Gmail integration</h2>
+            <h2 className="text-lg font-semibold mb-2">5. Gmail Integration</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              When you connect Gmail, ChaseHQ sends emails on your behalf using credentials you
-              authorize. You remain solely responsible for the content of every follow-up sent
-              from your account, including compliance with applicable email and consumer
-              protection laws. You may revoke access at any time.
+              When you create a ChaseHQ account using Google Sign-In, you authorize ChaseHQ to
+              send follow-up emails on your behalf. This authorization is granted during the
+              sign-up OAuth flow via the{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">gmail.send</code> permission —
+              no separate connection step is required. We do not read your inbox.
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-2">
+              You remain solely responsible for the content of every follow-up sent from your
+              account, including compliance with applicable email and consumer protection laws.
+              You may revoke this access at any time from your Google Account permissions page,
+              after which ChaseHQ will no longer be able to send emails on your behalf.
             </p>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">6. AI-generated content</h2>
+            <h2 className="text-lg font-semibold mb-2">6. AI-Generated Content</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               ChaseHQ uses AI to draft follow-up messages. Drafts are suggestions — you must
               review and approve every message before it is sent. We make no warranty regarding
@@ -78,7 +85,7 @@ export default function TermsOfUse() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">7. Your content</h2>
+            <h2 className="text-lg font-semibold mb-2">7. Your Content</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               You retain all rights to the invoices, client information, and follow-up text you
               create or send through ChaseHQ. You grant us a limited license to host, process,
@@ -87,10 +94,10 @@ export default function TermsOfUse() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">8. Subscriptions, billing &amp; auto-renewal</h2>
+            <h2 className="text-lg font-semibold mb-2">8. Subscriptions, Billing &amp; Auto-Renewal</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               ChaseHQ Pro is offered as a monthly auto-renewing subscription at
-              $5.00 USD per month, with a 30-day free trial for new accounts.
+              $5.00 USD per month, with a 14-day free trial for new accounts.
               Pricing may be displayed in your local currency on the App Store.
             </p>
             <ul className="text-sm text-muted-foreground leading-relaxed list-disc pl-5 space-y-1 mt-2">
@@ -129,14 +136,14 @@ export default function TermsOfUse() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">11. Limitation of liability</h2>
+            <h2 className="text-lg font-semibold mb-2">11. Limitation of Liability</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              To the maximum extent permitted by U.S. law, ChaseHQ and its affiliates shall not
-              be liable for any indirect, incidental, special, consequential, or punitive
-              damages, or any loss of profits, revenue, or data, arising out of or related to
-              your use of the Service. Our total aggregate liability for any claim relating to
-              the Service shall not exceed the greater of (a) the amount you paid us in the 12
-              months preceding the claim, or (b) USD $100.
+              To the maximum extent permitted by applicable law, ChaseHQ and its affiliates
+              shall not be liable for any indirect, incidental, special, consequential, or
+              punitive damages, or any loss of profits, revenue, or data, arising out of or
+              related to your use of the Service. Our total aggregate liability for any claim
+              relating to the Service shall not exceed the greater of (a) the amount you paid us
+              in the 12 months preceding the claim, or (b) USD $100.
             </p>
           </section>
 
@@ -150,12 +157,11 @@ export default function TermsOfUse() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2">13. Governing law &amp; venue</h2>
+            <h2 className="text-lg font-semibold mb-2">13. Governing Law &amp; Venue</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              These Terms are governed by the laws of the State of Delaware, United States,
-              without regard to its conflict-of-law principles. Any dispute arising out of or
-              related to the Service shall be brought exclusively in the state or federal
-              courts located in Delaware, and you consent to personal jurisdiction there.
+              These Terms are governed by the laws of the Republic of India. Any dispute arising
+              out of or related to the Service shall be subject to the exclusive jurisdiction of
+              the competent courts of Bhopal, Madhya Pradesh, India.
             </p>
           </section>
 
@@ -163,8 +169,8 @@ export default function TermsOfUse() {
             <h2 className="text-lg font-semibold mb-2">14. Changes</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               We may update these Terms from time to time. Material changes will be communicated
-              in-app or by email. Your continued use of the Service after changes take effect
-              constitutes acceptance.
+              in-app or by email at least 7 days before they take effect. Your continued use of
+              the Service after changes take effect constitutes acceptance.
             </p>
           </section>
 

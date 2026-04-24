@@ -1,4 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
+import { FLOW_STORAGE_KEY } from "@/flow/states";
 
 interface Props {
   children: ReactNode;
@@ -24,8 +26,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   handleReload = () => {
     try {
-      localStorage.removeItem("onboarding_state");
-      localStorage.removeItem("flow_state_v1");
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_STATE);
+      localStorage.removeItem(FLOW_STORAGE_KEY);
     } catch {
       /* ignore */
     }
@@ -37,9 +39,9 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-6">
         <div className="max-w-sm w-full bg-card border border-border rounded-2xl p-6 text-center">
-          <h1 className="text-lg font-bold text-foreground">Something went wrong</h1>
+          <h1 className="text-lg font-bold text-foreground">Something's off on our end.</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            An unexpected error occurred. Please try again.
+            We ran into a snag. Reload and we'll pick up where you left off — your data is safe.
           </p>
           <button
             onClick={this.handleReload}

@@ -51,6 +51,22 @@ export function useSendingMailbox() {
     refetch();
   }, [refetch]);
 
+  // Refetch when the user's gmail_connections row is inserted/updated
+  // (e.g. tokens captured from provider_token during merged-OAuth signup)
+  // so the dashboard "Connect Gmail" dialog disappears without a reload.
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`sending-mailbox-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "gmail_connections", filter: `user_id=eq.${user.id}` },
+        () => refetch()
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user, refetch]);
+
   const setActiveSender = useCallback(async (next: SenderType) => {
     if (!user) return;
     setActiveSenderState(next);

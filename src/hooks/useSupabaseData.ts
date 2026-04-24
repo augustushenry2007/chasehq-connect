@@ -44,13 +44,22 @@ export async function createInvoice(userId: string, data: {
   }).select().single();
 
   if (error) {
-    const msg = `Failed to create invoice: ${error.message}${error.code ? ` (${error.code})` : ""}`;
-    toast.error(msg);
-    return { invoice: null, error: msg };
+    toast.error("We couldn't save that invoice. Try once more.");
+    return { invoice: null, error: error.message };
   }
 
-  toast.success(`Invoice ${invoiceNumber} created!`);
+  toast.success(`Invoice ${invoiceNumber} is in — we'll handle the follow-ups.`);
   return { invoice, error: null };
+}
+
+export async function markInvoicePaid(
+  invoiceNumber: string,
+  paid: boolean,
+  restoreStatus: string = "Upcoming"
+): Promise<boolean> {
+  const newStatus = paid ? "Paid" : restoreStatus;
+  const { error } = await supabase.from("invoices").update({ status: newStatus }).eq("invoice_number", invoiceNumber);
+  return !error;
 }
 
 export async function deleteInvoice(invoiceId: string): Promise<boolean> {
@@ -58,10 +67,10 @@ export async function deleteInvoice(invoiceId: string): Promise<boolean> {
   await supabase.from("followups").delete().eq("invoice_id", invoiceId);
   const { error } = await supabase.from("invoices").delete().eq("id", invoiceId);
   if (error) {
-    toast.error("Failed to delete invoice: " + error.message);
+    toast.error("We couldn't remove that invoice. Give it another try.");
     return false;
   }
-  toast.success("Invoice deleted");
+  toast.success("Removed.");
   return true;
 }
 
@@ -82,17 +91,17 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-export async function generateFollowup(invoice: FrontendInvoice, tone: string, previousMessage?: string): Promise<{ subject: string; message: string } | null> {
+export async function generateFollowup(invoice: FrontendInvoice, tone: string, previousMessage?: string, senderDisplayName?: string): Promise<{ subject: string; message: string } | null> {
   try {
     const { data, error } = await withTimeout(
       supabase.functions.invoke("generate-followup", {
-        body: { invoice, tone, previousMessage },
+        body: { invoice, tone, previousMessage, senderDisplayName },
       }),
       15_000,
     );
 
     if (error) {
-      toast.error("AI generation failed: " + error.message);
+      toast.error("Your draft didn't come through. Try once more.");
       return null;
     }
 
@@ -104,9 +113,9 @@ export async function generateFollowup(invoice: FrontendInvoice, tone: string, p
     return data;
   } catch (e) {
     if (e instanceof Error && e.message === "timeout") {
-      toast.error("AI took too long. Please try again.");
+      toast.error("That draft is taking longer than usual. Try again and we'll have one ready.");
     } else {
-      toast.error("Failed to generate follow-up");
+      toast.error("We couldn't put together a draft this time. Try again.");
     }
     return null;
   }
@@ -123,15 +132,30 @@ export async function sendFollowupEmail(
   invoiceId?: string,
 ): Promise<SendResult> {
   try {
-    const { data, error } = await withTimeout(
-      supabase.functions.invoke("send-email", {
-        body: { to, subject, message, invoiceId },
+    // Supabase's platform gateway rejects ES256 JWTs before the function runs.
+    // Bypass: send the anon key (HS256) in Authorization so the gateway is satisfied,
+    // and carry the real user JWT in X-User-Token for our function's JWKS verifier.
+    const { data: { session } } = await supabase.auth.getSession();
+    const userToken = session?.access_token ?? "";
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+
+    const res = await withTimeout(
+      fetch(`${supabaseUrl}/functions/v1/send-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${anonKey}`,
+          "X-User-Token": userToken,
+        },
+        body: JSON.stringify({ to, subject, message, invoiceId }),
       }),
       15_000,
     );
 
-    if (error) {
-      return { ok: false, reason: "error", message: error.message };
+    const data = await res.json().catch(() => null);
+    if (!res.ok && !data) {
+      return { ok: false, reason: "error", message: "Send failed" };
     }
 
     if (data?.error) {
@@ -150,10 +174,61 @@ export async function sendFollowupEmail(
     return { ok: true };
   } catch (e) {
     if (e instanceof Error && e.message === "timeout") {
-      return { ok: false, reason: "error", message: "Send timed out. Please try again." };
+      return { ok: false, reason: "error", message: "That took too long to send. Your draft is safe — give it another try." };
     }
-    return { ok: false, reason: "error", message: "Failed to send email" };
+    return { ok: false, reason: "error", message: "We couldn't send this one. Your draft is safe — give it another try." };
   }
+}
+
+export async function validateAppleReceipt(
+  receipt: string,
+  productId: string,
+  mock: boolean,
+  restore = false,
+): Promise<{ ok: boolean; error?: string }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const userToken = session?.access_token ?? "";
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/validate-apple-receipt`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${anonKey}`,
+      "X-User-Token": userToken,
+    },
+    body: JSON.stringify({ receipt, productId, mock, restore }),
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) {
+    return { ok: false, error: data?.error ?? "Could not activate subscription" };
+  }
+  return { ok: true };
+}
+
+export async function startTrial(): Promise<{ ok: boolean; already?: boolean; error?: string }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const userToken = session?.access_token ?? "";
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/start-trial`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${anonKey}`,
+      "X-User-Token": userToken,
+    },
+    body: JSON.stringify({}),
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) {
+    return { ok: false, error: data?.error ?? "Could not start trial" };
+  }
+  return { ok: true, already: data.already };
 }
 
 // Persist a follow-up in the timeline after a successful send.

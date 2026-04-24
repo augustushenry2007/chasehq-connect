@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useApp, type ScheduleRow } from "@/context/AppContext";
+import { useApp } from "@/context/AppContext";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
+import { type SchedulePreset } from "@/lib/scheduleDefaults";
 import {
-  ChevronDown, ChevronUp, RefreshCw, LogOut, Plus, Trash2, Mail, Loader2,
+  ChevronDown, RefreshCw, LogOut, Mail, Loader2, Sparkles,
   User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, Server, CreditCard, ChevronRight,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
@@ -11,12 +13,15 @@ import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { supabase } from "@/integrations/supabase/client";
+import { FLOW_STORAGE_KEY } from "@/flow/states";
 import { toast } from "sonner";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import NotificationBell from "@/components/NotificationBell";
+import { startGoogleOAuth } from "@/lib/oauth";
+import { GoogleIcon } from "@/components/GoogleIcon";
 
 type SmtpPreset = {
   id: string;
@@ -46,7 +51,7 @@ function CollapsibleSection({ title, subtitle, isOpen, onToggle, children }: {
           <p className="text-sm font-semibold text-foreground">{title}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
-        {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
       </button>
       {isOpen && <div className="border-t border-border p-4">{children}</div>}
     </div>
@@ -61,21 +66,22 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+const DEFAULT_TONES = ["Polite", "Friendly", "Firm"] as const;
+
 function NotificationsSection({ notifications, updateNotifications }: {
   notifications: { emailNotifications: boolean; autoChase: boolean; defaultTone: string };
   updateNotifications: (n: any) => void;
 }) {
-  const tones = ["Polite", "Friendly", "Firm", "Urgent"];
   return (
     <div className="flex flex-col gap-4">
       {[
-        { label: "Email notifications", sub: "Get an email when a follow-up is due to send", key: "emailNotifications" as const },
-        { label: "Push reminders", sub: "Notify me when it's time to send the next follow-up", key: "autoChase" as const },
+        { label: "Email Notifications", sub: "Get an email when a follow-up is due to send", key: "emailNotifications" as const },
+        { label: "Push Reminders", sub: "Notify me when it's time to send the next follow-up", key: "autoChase" as const },
       ].map((item) => (
         <div key={item.key} className="flex items-center justify-between">
           <div className="flex-1 pr-4">
-            <p className="text-sm font-medium text-foreground">{item.label}</p>
-            <p className="text-xs text-muted-foreground">{item.sub}</p>
+            <p className="text-sm font-semibold text-foreground">{item.label}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{item.sub}</p>
           </div>
           <Switch
             checked={notifications[item.key]}
@@ -84,19 +90,20 @@ function NotificationsSection({ notifications, updateNotifications }: {
         </div>
       ))}
       <div>
-        <p className="text-xs font-medium text-muted-foreground mb-2">Default tone</p>
+        <p className="text-sm font-semibold text-foreground mb-1">Default tone</p>
+        <p className="text-xs text-muted-foreground mb-2.5">Applied when drafting follow-ups</p>
         <div className="flex flex-wrap gap-2">
-          {tones.map((t) => (
+          {DEFAULT_TONES.map((tone) => (
             <button
-              key={t}
-              onClick={() => updateNotifications({ ...notifications, defaultTone: t })}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-                notifications.defaultTone === t
-                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                  : "bg-background text-muted-foreground border-border hover:border-primary/40 hover:text-foreground"
+              key={tone}
+              onClick={() => updateNotifications({ ...notifications, defaultTone: tone })}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                notifications.defaultTone === tone
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground"
               }`}
             >
-              {t}
+              {tone}
             </button>
           ))}
         </div>
@@ -105,43 +112,32 @@ function NotificationsSection({ notifications, updateNotifications }: {
   );
 }
 
-function ScheduleSection({ schedule, updateSchedule }: { schedule: ScheduleRow[]; updateSchedule: (s: ScheduleRow[]) => void }) {
-  function updateRow(idx: number, patch: Partial<ScheduleRow>) {
-    updateSchedule(schedule.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+function ScheduleSection() {
+  const [preset, setPreset] = useState<SchedulePreset>(() =>
+    (localStorage.getItem(STORAGE_KEYS.SCHEDULE_PRESET) ?? "active") as SchedulePreset
+  );
+  function pickPreset(p: SchedulePreset) {
+    setPreset(p);
+    try { localStorage.setItem(STORAGE_KEYS.SCHEDULE_PRESET, p); } catch {}
   }
-  function removeRow(idx: number) { updateSchedule(schedule.filter((_, i) => i !== idx)); }
-  function addRow() {
-    const lastDay = schedule.length > 0 ? Math.max(...schedule.map((r) => r.day)) : 0;
-    updateSchedule([...schedule, { id: Date.now(), day: lastDay + 7, action: "New reminder", status: "reminder-2" }]);
-  }
+  const descriptions: Record<SchedulePreset, string> = {
+    active:  "Day 3, 7, 14, 21 · Friendly → Firm → Urgent → Final Notice",
+    patient: "Day 3, 10, 21, 42 · Friendly → Friendly → Firm → Firm",
+    light:   "Day 3, 14, 28, 42 · Friendly → Friendly → Friendly → Firm",
+  };
   return (
-    <div className="flex flex-col gap-2">
-      {schedule.map((row, i) => (
-        <div key={row.id} className="flex items-center gap-2 p-2.5 bg-muted rounded-xl">
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="text-xs font-semibold text-muted-foreground">Day</span>
-            <input
-              type="number" min={0} value={row.day}
-              onChange={(e) => updateRow(i, { day: parseInt(e.target.value) || 0 })}
-              className="w-14 px-2 py-1 text-xs font-bold text-primary bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-          <input
-            type="text" value={row.action}
-            onChange={(e) => updateRow(i, { action: e.target.value })}
-            className="flex-1 px-2.5 py-1.5 text-sm text-foreground bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <button onClick={() => removeRow(i)} className="p-1.5 text-muted-foreground hover:text-destructive transition-colors" aria-label="Remove step">
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+    <div className="flex flex-col gap-3">
+      {(["active", "patient", "light"] as SchedulePreset[]).map((p) => (
+        <button
+          key={p}
+          onClick={() => pickPreset(p)}
+          className={`text-left px-3.5 py-3 rounded-xl border-[1.5px] transition-colors ${preset === p ? "border-primary bg-accent" : "border-border bg-card"}`}
+        >
+          <p className="text-sm font-semibold text-foreground capitalize">{p}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{descriptions[p]}</p>
+        </button>
       ))}
-      <button
-        onClick={addRow}
-        className="mt-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-border text-xs font-medium text-muted-foreground hover:border-primary hover:text-primary transition-colors"
-      >
-        <Plus className="w-3.5 h-3.5" /> Add follow-up step
-      </button>
+      <p className="text-[11px] text-muted-foreground px-1">Applies to new invoices. Edit per-invoice in the invoice detail.</p>
     </div>
   );
 }
@@ -174,7 +170,7 @@ function SmtpCard({
 
   async function handleSave() {
     if (!fromEmail || !host || !port || !username || !password) {
-      toast.error("Please fill in all fields");
+      toast.error("Fill in host, port, username, and password to connect.");
       return;
     }
     setBusy(true);
@@ -186,14 +182,14 @@ function SmtpCard({
     });
     setBusy(false);
     if (error || (data as any)?.error) {
-      toast.error((data as any)?.error || error?.message || "Could not connect");
+      toast.error((data as any)?.error || error?.message || "We couldn't reach your email provider. Double-check the details and try once more.");
       return;
     }
     if ((data as any)?.verified === false) {
-      toast.error((data as any)?.error || "SMTP credentials rejected");
+      toast.error((data as any)?.error || "Those credentials didn't work. Check the password — many providers need an app-specific one.");
       return;
     }
-    toast.success("Email connected");
+    toast.success("Connected");
     setPassword("");
     setOpen(false);
     await mailbox.refetch();
@@ -207,7 +203,7 @@ function SmtpCard({
       await mailbox.setActiveSender(mailbox.hasGmail ? "gmail" : "none");
     }
     setBusy(false);
-    toast.success("Email disconnected");
+    toast.success("Disconnected");
     await mailbox.refetch();
   }
 
@@ -320,7 +316,21 @@ function SmtpField({ label, value, onChange, placeholder, type = "text" }: {
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
-  const { user, fullName, notifications, schedule, updateNotifications, updateSchedule, signOut, restartOnboarding } = useApp();
+  const { user, isAuthenticated, fullName, notifications, updateNotifications, updateDisplayName, signOut, restartOnboarding } = useApp();
+  const [editName, setEditName] = useState(fullName || "");
+  const [nameSaved, setNameSaved] = useState(false);
+  const nameSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => { setEditName(fullName || ""); }, [fullName]);
+
+  async function handleSaveName() {
+    const trimmed = editName.trim();
+    if (trimmed === (fullName || "")) return;
+    await updateDisplayName(trimmed || null);
+    if (nameSavedTimerRef.current) clearTimeout(nameSavedTimerRef.current);
+    setNameSaved(true);
+    nameSavedTimerRef.current = setTimeout(() => setNameSaved(false), 1500);
+  }
   const { invoices } = useInvoices();
   const ent = useEntitlement();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
@@ -328,22 +338,117 @@ export default function SettingsScreen() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  if (!isAuthenticated) {
+    return (
+      <div className="flex-1 overflow-auto pb-24 animate-page-enter">
+        <div className="px-5 pt-5">
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-xl font-bold text-foreground">Settings</h1>
+          </div>
+
+          <div className="bg-card border border-border rounded-2xl p-6 mb-6 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-accent flex items-center justify-center mx-auto mb-4">
+              <Sparkles className="w-6 h-6 text-primary" />
+            </div>
+            <h2 className="text-lg font-bold text-foreground mb-2">
+              You've done the hard part.
+            </h2>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-5">
+              Let ChaseHQ handle the follow-ups — so you never have to think about chasing payments again.
+            </p>
+            <button
+              onClick={() => startGoogleOAuth(window.location.origin + "/auth-after-invoice")}
+              className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] hover:bg-primary/90 mb-3"
+            >
+              <GoogleIcon className="w-4 h-4" />
+              Continue where you left off
+            </button>
+            <p className="text-xs text-muted-foreground">Free for 14 days. No card required.</p>
+            <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
+              By continuing, you grant ChaseHQ permission to send emails from your Gmail address on your behalf. We never read your inbox.
+            </p>
+          </div>
+
+          <div className="pointer-events-none select-none opacity-30 blur-[1.5px]">
+            <SectionLabel>Account</SectionLabel>
+            <div className="bg-card border border-border rounded-2xl p-4 mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
+                  <UserIcon className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Your name</p>
+                  <p className="text-xs text-muted-foreground">your@email.com</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Signed in with Google</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-card border border-border rounded-2xl p-4 mb-5 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
+                <CreditCard className="w-5 h-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-foreground">Billing</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Free trial · 14 days left</p>
+              </div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </div>
+
+            <SectionLabel>Preferences</SectionLabel>
+            <div className="flex flex-col gap-3 mb-5">
+              <div className="bg-card border border-border rounded-2xl p-4">
+                <p className="text-sm font-semibold text-foreground">Notifications</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Email alerts and reminders</p>
+              </div>
+              <div className="bg-card border border-border rounded-2xl p-4">
+                <p className="text-sm font-semibold text-foreground">Default follow-up schedule</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Applies to new invoices</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function toggleSection(key: SectionKey) { setOpenSection((prev) => (prev === key ? null : key)); }
 
   async function handleSignOut() { await signOut(); navigate("/onboarding", { replace: true }); }
   async function handleRestartOnboarding() { await restartOnboarding(); await signOut(); navigate("/onboarding", { replace: true }); }
 
-  function handleExport() {
+  async function handleExport() {
+    if (!user) return;
+    const [followupsRes, profileRes, prefsRes, sendLogRes, gmailRes] = await Promise.all([
+      supabase.from("followups").select("invoice_id, subject, tone, is_ai_generated, sent_at").eq("user_id", user.id),
+      supabase.from("profiles").select("full_name, onboarding_completed, sender_type").eq("user_id", user.id).maybeSingle(),
+      supabase.from("notification_preferences").select("enabled, email_enabled, quiet_hours_start, quiet_hours_end, timezone").eq("user_id", user.id).maybeSingle(),
+      supabase.from("email_send_log").select("recipient, invoice_id, sent_at").eq("user_id", user.id),
+      supabase.from("gmail_connections").select("email, token_expires_at").eq("user_id", user.id).maybeSingle(),
+    ]);
     const payload = {
       exportedAt: new Date().toISOString(),
-      account: { email: user?.email, authMethod: signedInWithGoogle ? "Google" : "Email" },
+      dataController: "ChaseHQ",
+      requestedBy: user.email,
+      account: {
+        email: user.email,
+        authMethod: signedInWithGoogle ? "Google" : "Email",
+        fullName: profileRes.data?.full_name ?? null,
+        accountCreated: (user as any).created_at ?? null,
+      },
       invoices,
+      followupsSent: followupsRes.data ?? [],
+      emailSendLog: sendLogRes.data ?? [],
+      connectedAccounts: {
+        gmail: gmailRes.data ? { email: gmailRes.data.email, tokenExpiresAt: gmailRes.data.token_expires_at } : null,
+      },
+      notificationPreferences: prefsRes.data ?? null,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `chasehq-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `chasehq-data-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Data exported");
@@ -353,22 +458,18 @@ export default function SettingsScreen() {
     if (!user) return;
     setDeleting(true);
     try {
-      // Delete user-owned rows (RLS scopes them to current user automatically)
-      await supabase.from("followups").delete().eq("user_id", user.id);
-      await supabase.from("invoices").delete().eq("user_id", user.id);
-      await supabase.from("gmail_connections").delete().eq("user_id", user.id);
-      await supabase.from("profiles").delete().eq("user_id", user.id);
-      toast.success("Your data has been deleted");
-      await signOut();
-      navigate("/onboarding", { replace: true });
+      const { error } = await supabase.functions.invoke("delete-account");
+      if (error) throw error;
+      localStorage.removeItem(FLOW_STORAGE_KEY);
+      navigate("/", { replace: true });
     } catch (e) {
-      toast.error("Failed to delete data");
+      toast.error("We couldn't finish that just now. Try again in a moment.");
       setDeleting(false);
       setConfirmDelete(false);
     }
   }
 
-  const authMethod = signedInWithGoogle ? "Google" : "Email";
+  const authMethod = "Google";
 
 
 
@@ -388,8 +489,18 @@ export default function SettingsScreen() {
               <UserIcon className="w-5 h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              {fullName && <p className="text-sm font-semibold text-foreground truncate">{fullName}</p>}
-              <p className={`text-xs truncate ${fullName ? "text-muted-foreground" : "text-foreground font-semibold"}`}>{user?.email || "—"}</p>
+              <div className="flex items-center gap-2 -mb-0.5">
+                <input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onBlur={handleSaveName}
+                  onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                  placeholder="Add your name"
+                  className="text-sm font-semibold text-foreground bg-transparent focus:outline-none w-full truncate placeholder:text-muted-foreground/50 border-b border-transparent focus:border-primary/40 transition-colors pb-0.5"
+                />
+                {nameSaved && <span className="text-[11px] text-green-600 shrink-0 font-medium">✓ Saved</span>}
+              </div>
+              <p className="text-xs text-muted-foreground truncate mt-1">{user?.email || "—"}</p>
               <p className="text-xs text-muted-foreground mt-0.5">Signed in with {authMethod}</p>
             </div>
           </div>
@@ -411,7 +522,7 @@ export default function SettingsScreen() {
                 : ent.isPastDue ? "Payment past due"
                 : ent.status === "canceled" ? "Canceled"
                 : ent.status === "expired" ? "Expired — start free trial"
-                : "Start your 30-day free trial"}
+                : "Start your 14-day free trial"}
             </p>
           </div>
           <ChevronRight className="w-4 h-4 text-muted-foreground" />
@@ -422,7 +533,7 @@ export default function SettingsScreen() {
         <div className="flex flex-col gap-3 mb-5">
           <CollapsibleSection
             title="Notifications"
-            subtitle="Email alerts and default tone"
+            subtitle="Email alerts and reminders"
             isOpen={openSection === "notifications"}
             onToggle={() => toggleSection("notifications")}
           >
@@ -435,7 +546,7 @@ export default function SettingsScreen() {
             isOpen={openSection === "schedule"}
             onToggle={() => toggleSection("schedule")}
           >
-            <ScheduleSection schedule={schedule} updateSchedule={updateSchedule} />
+            <ScheduleSection />
           </CollapsibleSection>
         </div>
 
@@ -443,8 +554,8 @@ export default function SettingsScreen() {
         <SectionLabel>Data controls</SectionLabel>
         <div className="mb-5">
           <CollapsibleSection
-            title="Data control panel"
-            subtitle="Export or permanently delete your data"
+            title="Your data"
+            subtitle="Export or delete your account data"
             isOpen={openSection === "data"}
             onToggle={() => toggleSection("data")}
           >
@@ -452,14 +563,14 @@ export default function SettingsScreen() {
               <button onClick={handleExport} className="flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
                 <Download className="w-4 h-4 text-muted-foreground" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-foreground">Export my data</p>
+                  <p className="text-sm font-semibold text-foreground">Export my data</p>
                   <p className="text-xs text-muted-foreground">Download a JSON copy of your invoices and account info</p>
                 </div>
               </button>
               <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
                 <AlertTriangle className="w-4 h-4 text-destructive" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-destructive">Delete my data</p>
+                  <p className="text-sm font-semibold text-destructive">Delete my data</p>
                   <p className="text-xs text-muted-foreground">Permanently remove your invoices, follow-ups, and connections</p>
                 </div>
               </button>
@@ -472,13 +583,13 @@ export default function SettingsScreen() {
         <div className="bg-card border border-border rounded-2xl divide-y divide-border mb-5">
           <button onClick={() => navigate("/legal/privacy")} className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
             <Shield className="w-4 h-4 text-muted-foreground" />
-            <p className="flex-1 text-sm font-medium text-foreground">Privacy Policy</p>
-            <ChevronDown className="w-4 h-4 text-muted-foreground -rotate-90" />
+            <p className="flex-1 text-sm font-semibold text-foreground">Privacy Policy</p>
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </button>
           <button onClick={() => navigate("/legal/terms")} className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
             <ScrollText className="w-4 h-4 text-muted-foreground" />
-            <p className="flex-1 text-sm font-medium text-foreground">Terms of Use</p>
-            <ChevronDown className="w-4 h-4 text-muted-foreground -rotate-90" />
+            <p className="flex-1 text-sm font-semibold text-foreground">Terms of Use</p>
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </button>
         </div>
 
@@ -497,10 +608,10 @@ export default function SettingsScreen() {
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete all your data?</AlertDialogTitle>
+            <AlertDialogTitle>Delete your account?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes your invoices, follow-ups, profile, and Gmail
-              connection. You will be signed out. This cannot be undone.
+              This permanently deletes your account, invoices, follow-ups, and Gmail
+              connection. You will not be able to sign back in. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

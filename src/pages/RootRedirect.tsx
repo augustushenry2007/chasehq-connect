@@ -1,42 +1,56 @@
+import { Navigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
+import { FLOW_STORAGE_KEY } from "@/flow/states";
 
-/**
- * "/" — splash while AppContext + FlowMachine settle.
- * Actual navigation is driven declaratively by FlowBootstrap → React Router via state.
- * We render a loader here; FlowBootstrap will dispatch BOOT_* and the user will be navigated.
- */
 export default function RootRedirect() {
-  const { authReady } = useApp();
+  const { authReady, isAuthenticated } = useApp();
+
+  // Authenticated users should never be at root — FlowRouter can deadlock here
+  // if oauth_in_progress clears but state has no AUTH_SUCCESS transition (so deps never change).
+  // Navigate directly to /dashboard as a safety net; RequireOnboarding handles the rest.
+  if (authReady && isAuthenticated) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  const [elapsed, setElapsed] = useState(0);
   const [showDebug, setShowDebug] = useState(false);
 
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const isStuck = elapsed >= 8;
+
   const handleReset = () => {
-    console.log("[DEBUG] Clearing all storage and reloading...");
     localStorage.clear();
     sessionStorage.clear();
-    window.location.reload();
+    window.location.href = "/";
   };
 
-  const flowState = localStorage.getItem("flow_state_v1");
-  const onboardingState = localStorage.getItem("onboarding_state");
-  const onboardingDone = localStorage.getItem("onboarding_done_session");
+  const flowState = localStorage.getItem(FLOW_STORAGE_KEY);
+
+  if (!isStuck) return null;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background flex-col gap-4">
-      <div className="text-sm text-muted-foreground">{authReady ? "Loading…" : "Loading…"}</div>
       <button
         onClick={() => setShowDebug(!showDebug)}
         className="text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground transition-colors"
       >
-        {showDebug ? "Hide Debug" : "Show Debug"}
+        {showDebug ? "Hide Debug" : "Taking too long?"}
       </button>
 
       {showDebug && (
         <div className="text-xs text-muted-foreground bg-card border border-border rounded p-3 max-w-md">
           <div className="space-y-2 font-mono">
-            <div>flow_state_v1: {flowState ? JSON.parse(flowState).state : "null"}</div>
-            <div>onboarding_done_session: {onboardingDone || "null"}</div>
-            <div>onboarding_state step: {onboardingState ? JSON.parse(onboardingState).step : "null"}</div>
+            <div>authReady: {String(authReady)}</div>
+            <div>isAuthenticated: {String(isAuthenticated)}</div>
+            <div>elapsed: {elapsed}s</div>
+            <div>flow_state: {flowState ? JSON.parse(flowState).state : "null"}</div>
+            <div>oauth_in_progress: {sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) || "null"}</div>
+            <div>oauth_completed: {sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) || "null"}</div>
           </div>
           <button
             onClick={handleReset}

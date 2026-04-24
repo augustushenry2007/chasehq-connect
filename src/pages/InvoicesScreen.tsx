@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { formatUSD, type Invoice } from "@/lib/data";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -9,6 +10,7 @@ import NotificationBell from "@/components/NotificationBell";
 import { useFlow } from "@/flow/FlowMachine";
 import { FlowState } from "@/flow/states";
 import { useApp } from "@/context/AppContext";
+import { startGoogleOAuth } from "@/lib/oauth";
 
 type FilterTab = "all" | "overdue" | "upcoming" | "paid";
 
@@ -45,6 +47,8 @@ export default function InvoicesScreen() {
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [guestDraftCreated, setGuestDraftCreated] = useState(false);
+  const invoiceCreatedRef = useRef(false);
   const { state: flowState, send } = useFlow();
   const { isAuthenticated } = useApp();
 
@@ -60,23 +64,37 @@ export default function InvoicesScreen() {
   }, [flowState]);
 
   useEffect(() => {
+    const filterParam = searchParams.get("filter");
+    if (filterParam && ["overdue", "upcoming", "paid", "all"].includes(filterParam)) {
+      setActiveTab(filterParam as FilterTab);
+    }
     if (searchParams.get("new") === "1") {
       setShowNew(true);
-      const next = new URLSearchParams(searchParams);
-      next.delete("new");
-      setSearchParams(next, { replace: true });
     }
+    const next = new URLSearchParams(searchParams);
+    next.delete("new");
+    next.delete("filter");
+    setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleCreated() {
+    invoiceCreatedRef.current = true;
     refetch();
-    if (flowState === FlowState.CREATE_INVOICE) send("INVOICE_CREATED");
+    if (!isAuthenticated) {
+      setGuestDraftCreated(true);
+      send("INVOICE_CREATED");
+    } else if (flowState === FlowState.CREATE_INVOICE) {
+      send("INVOICE_CREATED");
+    }
   }
 
   function handleCloseModal() {
     setShowNew(false);
-    if (flowState === FlowState.CREATE_INVOICE) send("BACK_TO_DASHBOARD");
+    if (!invoiceCreatedRef.current && flowState === FlowState.CREATE_INVOICE) {
+      send("BACK_TO_DASHBOARD");
+    }
+    invoiceCreatedRef.current = false;
   }
 
   if (loading) {
@@ -116,21 +134,31 @@ export default function InvoicesScreen() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden animate-page-enter">
       {!isAuthenticated && (
-        <button
-          onClick={() => send("REQUEST_AUTH")}
-          className="w-full bg-accent/60 border-b border-border px-5 py-2.5 text-left flex items-center justify-between transition-colors active:bg-accent"
-        >
-          <span className="text-xs text-foreground">
-            <span className="font-semibold">You're exploring as a guest.</span>{" "}
-            <span className="text-muted-foreground">Create an account to save your work</span>
-          </span>
-          <ChevronRight className="w-3.5 h-3.5 text-primary shrink-0" />
-        </button>
+        <div className="mx-5 mt-4 rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 border border-primary/20 p-4">
+          <p className="text-sm font-bold text-foreground">
+            {guestDraftCreated ? "Your draft is saved on this device" : "Finish setting up your account"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5 mb-3">
+            {guestDraftCreated
+              ? "Sign up to save it to your account and send this follow-up."
+              : "Sign up to keep your invoices and start sending follow-ups."}
+          </p>
+          <button
+            onClick={async () => {
+              send("REQUEST_POST_INVOICE_AUTH");
+              const { error } = await startGoogleOAuth(window.location.origin + "/auth-after-invoice");
+              if (error) toast.error("Sign-in didn't go through. Give it another try.");
+            }}
+            className="w-full bg-primary text-primary-foreground py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.97]"
+          >
+            Create free account
+          </button>
+        </div>
       )}
       <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-foreground">Invoices</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Manage and track all your client invoices</p>
+          <h1 className="text-xl font-bold text-foreground">Follow-Ups</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Every follow-up, every client — in one place.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {isAuthenticated && <NotificationBell />}
@@ -180,7 +208,7 @@ export default function InvoicesScreen() {
             <div className="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center mb-4">
               <FileText className="w-7 h-7 text-primary" />
             </div>
-            <p className="text-base font-semibold text-foreground">No invoices to follow up on yet</p>
+            <p className="text-base font-semibold text-foreground">Nothing on your plate yet.</p>
             <p className="text-sm text-muted-foreground mt-1 max-w-xs">
               Add an invoice and ChaseHQ will draft the follow-ups for you — sent on your schedule.
             </p>
@@ -188,7 +216,7 @@ export default function InvoicesScreen() {
               onClick={() => setShowNew(true)}
               className="mt-5 flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold"
             >
-              <Plus className="w-4 h-4" /> Add an invoice to chase
+              <Plus className="w-4 h-4" /> Add your first invoice
             </button>
           </div>
         ) : filtered.length === 0 ? (
@@ -196,8 +224,8 @@ export default function InvoicesScreen() {
             <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-3">
               <Search className="w-6 h-6 text-muted-foreground" />
             </div>
-            <p className="text-base font-semibold text-foreground">No invoices found</p>
-            <p className="text-sm text-muted-foreground mt-1">{query ? `No results for "${query}"` : "No invoices in this category"}</p>
+            <p className="text-base font-semibold text-foreground">Nothing matches that.</p>
+            <p className="text-sm text-muted-foreground mt-1">{query ? `Nothing matches "${query}".` : "Nothing here yet."}</p>
           </div>
         ) : (
           filtered.map((item) => (
