@@ -1,23 +1,32 @@
 import { useEffect } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Loader2 } from "lucide-react";
 import AuthForm from "@/components/auth/AuthForm";
 import { useApp } from "@/context/AppContext";
 import { useFlow } from "@/flow/FlowMachine";
-import { supabase } from "@/integrations/supabase/client";
 
 export default function PostInvoiceAuthScreen() {
-  const { isAuthenticated } = useApp();
+  const { isAuthenticated, authReady, profileReady, flushedInvoiceId } = useApp();
   const { send } = useFlow();
 
-  // When auth flips to true (Google redirect or email submit), kick off start-trial
-  // and advance the flow. AppContext will flush the pending invoice draft.
+  // Wait for auth, profile, AND the invoice flush to resolve before navigating.
+  // flushedInvoiceId is undefined until the flush useEffect in AppContext completes.
   useEffect(() => {
-    if (!isAuthenticated) return;
-    (async () => {
-      try { await supabase.functions.invoke("start-trial"); } catch { /* non-fatal */ }
+    if (!isAuthenticated || !profileReady || flushedInvoiceId === undefined) return;
+    if (flushedInvoiceId) {
+      send("INVOICE_CREATED", { invoiceId: flushedInvoiceId });
+    } else {
       send("AUTH_SUCCESS");
-    })();
-  }, [isAuthenticated, send]);
+    }
+  }, [isAuthenticated, profileReady, flushedInvoiceId, send]);
+
+  if (!authReady || isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Setting up your account…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col px-6 py-8 animate-page-enter">
@@ -29,16 +38,15 @@ export default function PostInvoiceAuthScreen() {
           </span>
         </div>
         <h1 className="text-2xl font-bold text-foreground leading-tight">
-          Your first invoice is ready.
+          Your follow-up is ready.
         </h1>
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed mb-6">
-          Create an account to save it and let ChaseHQ chase it for you. Your draft is waiting — nothing is lost.
+          Sign up with Google to save your draft — Gmail send permission is included so ChaseHQ can send follow-ups from your address. We never read your inbox.
         </p>
 
         <AuthForm
-          redirectTo={window.location.origin + "/dashboard"}
+          redirectTo={window.location.origin + "/auth-after-invoice"}
           initialMode="signup"
-          submitLabel={{ signup: "Save my invoice & start trial", signin: "Sign in & save my invoice" }}
         />
       </div>
     </div>

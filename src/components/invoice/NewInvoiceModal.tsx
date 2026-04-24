@@ -91,7 +91,7 @@ export default function NewInvoiceModal({
       dueDate: dueDateISO,
     });
     if (!parsed.success) {
-      const first = parsed.error.errors[0]?.message || "Please check the form and try again.";
+      const first = parsed.error.errors[0]?.message || "A few details need another look before we save this.";
       setErrorMsg(first);
       return;
     }
@@ -110,7 +110,6 @@ export default function NewInvoiceModal({
         });
         resetDraft();
         setErrorMsg(null);
-        toast.success("Draft saved. Create an account to send it.");
         onCreated();
         onClose();
         return;
@@ -142,11 +141,11 @@ export default function NewInvoiceModal({
         onClose();
       } else if (result.error) {
         // Generic, friendly error — never surface auth internals to authed users.
-        setErrorMsg("Something went wrong. Please try again.");
+        setErrorMsg("We couldn't save that invoice. Try once more.");
       }
     } catch {
-      setErrorMsg("Something went wrong. Please try again.");
-      toast.error("Couldn't create invoice. Please try again.");
+      setErrorMsg("We couldn't save that invoice. Try once more.");
+      toast.error("We couldn't save that invoice. Try once more.");
     } finally {
       setCreating(false);
     }
@@ -220,7 +219,7 @@ export default function NewInvoiceModal({
               </Popover>
             </div>
             {!dueDateValid && (
-              <p className="text-[11px] text-destructive mt-1">Please enter a valid date in MM/DD/YYYY format.</p>
+              <p className="text-[11px] text-destructive mt-1">Use MM/DD/YYYY so we know when this was due.</p>
             )}
           </div>
 

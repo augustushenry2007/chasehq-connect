@@ -1,5 +1,6 @@
 import { ArrowRight } from "lucide-react";
 import { useFlow } from "@/flow/FlowMachine";
+import { startGoogleOAuth } from "@/lib/oauth";
 import appLogo from "@/assets/app-logo.png";
 
 export default function WelcomeScreen() {
@@ -26,7 +27,7 @@ export default function WelcomeScreen() {
           className="mt-4 text-base text-muted-foreground leading-relaxed max-w-sm animate-fade-in"
           style={{ animationDelay: "320ms", animationFillMode: "both" }}
         >
-          Done-for-you follow-ups, on your schedule.
+          It does for most freelancers. You're not alone — and you're not wrong to dread it.
         </p>
 
         <button
@@ -34,15 +35,17 @@ export default function WelcomeScreen() {
           className="mt-10 w-full max-w-xs flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] hover:bg-primary/90 animate-fade-in"
           style={{ animationDelay: "520ms", animationFillMode: "both" }}
         >
-          Start <ArrowRight className="w-4 h-4" />
+          Stop chasing. Start getting paid. <ArrowRight className="w-4 h-4" />
         </button>
 
-        <p
-          className="mt-6 text-xs text-muted-foreground animate-fade-in"
-          style={{ animationDelay: "720ms", animationFillMode: "both" }}
+        <button
+          onClick={() => startGoogleOAuth(window.location.origin)}
+          className="mt-4 text-sm text-muted-foreground hover:text-foreground transition-colors animate-fade-in"
+          style={{ animationDelay: "620ms", animationFillMode: "both" }}
         >
-          Takes less than 2 minutes
-        </p>
+          Already have an account? <span className="underline underline-offset-2">Sign in</span>
+        </button>
+
       </div>
     </div>
   );

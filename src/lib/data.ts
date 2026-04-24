@@ -10,6 +10,7 @@ export interface ClientReply {
 
 export interface Invoice {
   id: string;
+  dbId: string;
   client: string;
   clientEmail: string;
   description: string;
@@ -36,6 +37,7 @@ export function getStats(invoices: Invoice[]) {
   const outstanding = invoices.filter((i) => i.status !== "Paid");
   const overdue = invoices.filter((i) => i.status === "Escalated" || i.status === "Overdue");
   const paid = invoices.filter((i) => i.status === "Paid");
+  const upcoming = invoices.filter((i) => i.status === "Upcoming");
   return {
     outstandingTotal: outstanding.reduce((s, i) => s + i.amount, 0),
     outstandingCount: outstanding.length,
@@ -43,6 +45,8 @@ export function getStats(invoices: Invoice[]) {
     overdueCount: overdue.length,
     paidTotal: paid.reduce((s, i) => s + i.amount, 0),
     paidCount: paid.length,
+    upcomingTotal: upcoming.reduce((s, i) => s + i.amount, 0),
+    upcomingCount: upcoming.length,
   };
 }
 

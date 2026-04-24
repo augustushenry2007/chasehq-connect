@@ -3,13 +3,13 @@ import { useApp } from "@/context/AppContext";
 import { isGuestOnboarded } from "@/lib/localInvoice";
 
 export default function RequireOnboarding() {
-  const { authReady, isAuthenticated, hasCompletedOnboarding } = useApp();
+  const { authReady, profileReady, isAuthenticated, hasCompletedOnboarding } = useApp();
   const location = useLocation();
 
   if (!authReady) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-sm text-muted-foreground">Loading…</div>
+        <div className="text-sm text-muted-foreground">Getting things ready…</div>
       </div>
     );
   }
@@ -18,6 +18,17 @@ export default function RequireOnboarding() {
   const guestOk = !isAuthenticated && isGuestOnboarded();
 
   if (!isAuthenticated && !guestOk) return <Navigate to="/welcome" replace />;
+
+  // Wait for profile to load before making onboarding decisions — avoids redirecting
+  // to /onboarding while hasCompletedOnboarding is still false from the async profile fetch.
+  if (isAuthenticated && !profileReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-sm text-muted-foreground">Getting things ready…</div>
+      </div>
+    );
+  }
+
   if (isAuthenticated && !hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
   return <Outlet key={location.pathname} />;
 }

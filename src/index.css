@@ -82,3 +82,19 @@ html, body, #root {
 .animate-step-in {
   animation: step-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+@keyframes slide-in-left {
+  from { transform: translateX(32px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.animate-slide-in-left {
+  animation: slide-in-left 300ms ease-in-out both;
+}
+
+@keyframes slide-in-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.animate-slide-in-up {
+  animation: slide-in-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}

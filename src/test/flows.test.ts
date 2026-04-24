@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
 
 describe("Authentication Flow", () => {
   it("should validate email format", () => {
@@ -74,7 +75,7 @@ describe("Onboarding Flow", () => {
   });
 
   it("should track onboarding step", () => {
-    const steps = ["questions", "made-for-you", "how-it-works", "pricing"];
+    const steps = ["questions", "how-it-works", "pricing"];
     const currentStep = 0;
     expect(currentStep).toBeLessThan(steps.length);
   });
@@ -90,13 +91,15 @@ describe("Flow Machine Transitions", () => {
     expect(transitions.LANDING.START).toBe("ONBOARDING");
   });
 
-  it("should transition from ONBOARDING to DASHBOARD", () => {
+  it("should transition from ONBOARDING to GUEST_DRAFT or DASHBOARD_EMPTY", () => {
     const transitions = {
       ONBOARDING: {
-        ONBOARDING_DONE: "AUTH",
+        DECIDE_YES:  "GUEST_DRAFT",
+        DECIDE_SKIP: "DASHBOARD_EMPTY",
       },
     };
-    expect(transitions.ONBOARDING.ONBOARDING_DONE).toBe("AUTH");
+    expect(transitions.ONBOARDING.DECIDE_YES).toBe("GUEST_DRAFT");
+    expect(transitions.ONBOARDING.DECIDE_SKIP).toBe("DASHBOARD_EMPTY");
   });
 
   it("should handle sign out from any state", () => {
@@ -107,14 +110,14 @@ describe("Flow Machine Transitions", () => {
 
 describe("OAuth Flow", () => {
   it("should set oauth_in_progress flag", () => {
-    sessionStorage.setItem("oauth_in_progress", "1");
-    expect(sessionStorage.getItem("oauth_in_progress")).toBe("1");
+    sessionStorage.setItem(STORAGE_KEYS.OAUTH_IN_PROGRESS, "1");
+    expect(sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS)).toBe("1");
   });
 
   it("should clear oauth_in_progress on sign in", () => {
-    sessionStorage.setItem("oauth_in_progress", "1");
-    sessionStorage.removeItem("oauth_in_progress");
-    expect(sessionStorage.getItem("oauth_in_progress")).toBeNull();
+    sessionStorage.setItem(STORAGE_KEYS.OAUTH_IN_PROGRESS, "1");
+    sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
+    expect(sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS)).toBeNull();
   });
 
   it("should have correct redirect URI", () => {

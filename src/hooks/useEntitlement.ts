@@ -5,6 +5,10 @@ import type { Tables } from "@/integrations/supabase/types";
 
 type SubRow = Tables<"subscriptions">;
 
+// Module-level counter so every call to useEntitlement() — regardless of which
+// component instance — gets a unique channel name and never hits an already-subscribed channel.
+let _subSeq = 0;
+
 export interface Entitlement {
   loading: boolean;
   status: SubRow["status"];
@@ -36,9 +40,9 @@ const DEFAULT: Entitlement = {
 };
 
 function deriveCanSend(row: SubRow | null): boolean {
-  if (!row) return false;
+  if (!row) return true; // no row = free trial, allow send
   const now = Date.now();
-  if (row.status === "trialing" && row.trial_ends_at && new Date(row.trial_ends_at).getTime() > now) return true;
+  if (row.status === "trialing") return !row.trial_ends_at || new Date(row.trial_ends_at).getTime() > now;
   if (row.status === "active") return !row.current_period_end || new Date(row.current_period_end).getTime() > now;
   if (row.status === "past_due" && row.current_period_end && new Date(row.current_period_end).getTime() > now) return true;
   return false;
@@ -70,7 +74,7 @@ export function useEntitlement(): Entitlement {
     fetchRow();
     if (!user) return;
     const channel = supabase
-      .channel(`sub-${user.id}`)
+      .channel(`sub-${user.id}-${_subSeq++}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "subscriptions", filter: `user_id=eq.${user.id}` },
@@ -80,8 +84,12 @@ export function useEntitlement(): Entitlement {
     return () => { supabase.removeChannel(channel); };
   }, [user, authReady, fetchRow]);
 
-  if (!user || !row) {
+  if (!user) {
     return { ...DEFAULT, loading: loading || !authReady, refetch: fetchRow };
+  }
+  if (!row) {
+    // No subscription row = new user still within free trial
+    return { ...DEFAULT, loading, canSend: true, refetch: fetchRow };
   }
 
   const trialEndsAt = row.trial_ends_at ? new Date(row.trial_ends_at) : null;

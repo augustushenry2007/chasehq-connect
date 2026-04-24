@@ -23,15 +23,13 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
     const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: authError } = await supabase.auth.getClaims(token);
-    const userId = claimsData?.claims?.sub;
-    if (authError || !userId) {
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
       console.error("Auth failed:", authError);
       return new Response(JSON.stringify({ error: "Invalid session" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const user = { id: userId };
 
     const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID");
     if (!clientId) {

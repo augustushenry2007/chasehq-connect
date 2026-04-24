@@ -25,25 +25,43 @@ export type NotificationRow = {
   created_at: string;
 };
 
+function showBrowserNotification(title: string, body: string) {
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    new Notification(title, { body });
+  }
+}
+
 export function useNotifications() {
   const { user, isAuthenticated } = useApp();
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [upcoming, setUpcoming] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
     if (!user?.id) {
       setNotifications([]);
+      setUpcoming([]);
       setLoading(false);
       return;
     }
-    const { data } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("user_id", user.id)
-      .in("status", ["delivered", "read"])
-      .order("scheduled_for", { ascending: false })
-      .limit(50);
-    setNotifications((data as NotificationRow[]) || []);
+    const [recentRes, upcomingRes] = await Promise.all([
+      supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", user.id)
+        .in("status", ["delivered", "read"])
+        .order("scheduled_for", { ascending: false })
+        .limit(50),
+      supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("status", "pending")
+        .order("scheduled_for", { ascending: true })
+        .limit(10),
+    ]);
+    setNotifications((recentRes.data as NotificationRow[]) || []);
+    setUpcoming((upcomingRes.data as NotificationRow[]) || []);
     setLoading(false);
   }, [user?.id]);
 
@@ -60,7 +78,12 @@ export function useNotifications() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-        () => refetch()
+        (payload) => {
+          if (payload.eventType === "UPDATE" && (payload.new as any)?.status === "delivered") {
+            showBrowserNotification((payload.new as any).title, (payload.new as any).body);
+          }
+          refetch();
+        }
       )
       .subscribe();
     return () => {
@@ -83,7 +106,7 @@ export function useNotifications() {
       .eq("status", "delivered");
   }
 
-  return { notifications, loading, unreadCount, markRead, markAllRead, refetch };
+  return { notifications, upcoming, loading, unreadCount, markRead, markAllRead, refetch };
 }
 
 /**
@@ -132,7 +155,7 @@ export async function advanceScheduleAfterSend(invoiceId: string): Promise<void>
       .order("scheduled_for", { ascending: true })
       .limit(1);
     if (pending && pending.length > 0) {
-      await supabase.from("notifications").update({ status: "canceled" }).eq("id", pending[0].id);
+      await supabase.from("notifications").update({ status: "delivered", delivered_at: new Date().toISOString() }).eq("id", pending[0].id);
     }
   } catch (e) {
     console.warn("advanceScheduleAfterSend failed:", e);

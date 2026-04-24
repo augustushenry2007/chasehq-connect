@@ -22,7 +22,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { invoice, tone, previousMessage } = await req.json();
+    const { invoice, tone, previousMessage, senderDisplayName } = await req.json();
 
     if (!invoice || !tone) {
       return new Response(JSON.stringify({ error: "Missing invoice or tone" }), {
@@ -31,16 +31,28 @@ serve(async (req) => {
       });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
     const toneInstruction = TONE_INSTRUCTIONS[tone] || `Use a ${tone.toLowerCase()} tone.`;
+
+    // Prefer the explicit display name; fall back to deriving from email
+    const rawSender = invoice.sent_from || invoice.sentFrom || "";
+    const derivedName = rawSender
+      ? rawSender.split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())
+      : "the sender";
+    const senderName = senderDisplayName?.trim()
+      ? senderDisplayName.trim().replace(/\b\w/g, (c: string) => c.toUpperCase())
+      : derivedName;
 
     const systemPrompt = `You are a professional follow-up email writer for freelancers and agencies chasing unpaid invoices.
 Write a follow-up email for the given invoice using the specified tone.
 Return ONLY a JSON object with "subject" and "message" fields.
 The message should be the full email body text (no HTML, no markdown).
-Sign off as the sender name from the invoice.
+Use blank lines (\\n\\n) to separate every paragraph — never run paragraphs together on a single line.
+The sign-off MUST be on its own line at the end, separated from the body by a blank line. Format it exactly as:
+<closing phrase>,\\n${senderName}
+For example: "Best regards,\\nAugustus Henry" or "Many thanks,\\nAugustus Henry". Never put the name on the same line as the body text.
 Each generation should produce a meaningfully different variation in wording, structure, and opening — never reuse the same sentences.
 
 TONE GUIDELINES for "${tone}":
@@ -57,62 +69,84 @@ ${toneInstruction}`;
 - Amount: $${invoice.amount}
 - Due date: ${invoice.due_date || invoice.dueDate}
 - Days overdue: ${invoice.days_past_due || invoice.daysPastDue || 0}
-- Sender: ${invoice.sent_from || invoice.sentFrom || "Jamie Doe"}
+- Sender: ${senderName}
 - Description: ${invoice.description}
 
 Variation seed: ${variationSeed}${previousBlock}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        temperature: 0.95,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "generate_followup",
-              description: "Return a follow-up email with subject and message",
-              parameters: {
-                type: "object",
-                properties: {
-                  subject: { type: "string", description: "Email subject line" },
-                  message: { type: "string", description: "Full email body text" },
-                },
-                required: ["subject", "message"],
-                additionalProperties: false,
+    const buildBody = (model: string) => JSON.stringify({
+      model,
+      temperature: 0.95,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "generate_followup",
+            description: "Return a follow-up email with subject and message",
+            parameters: {
+              type: "object",
+              properties: {
+                subject: { type: "string", description: "Email subject line" },
+                message: { type: "string", description: "Full email body text" },
               },
+              required: ["subject", "message"],
+              additionalProperties: false,
             },
           },
-        ],
-        tool_choice: { type: "function", function: { name: "generate_followup" } },
-      }),
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "generate_followup" } },
     });
 
-    if (!response.ok) {
-      if (response.status === 429) {
+    // Gemini 2.5 Flash hits capacity often; retry once, then fall back to 2.0 Flash.
+    const attempts: Array<{ model: string; delayMs: number }> = [
+      { model: "gemini-2.5-flash", delayMs: 0 },
+      { model: "gemini-2.5-flash", delayMs: 800 },
+      { model: "gemini-2.0-flash", delayMs: 400 },
+    ];
+
+    let response: Response | null = null;
+    let lastErrorText = "";
+    let lastStatus = 0;
+    for (const attempt of attempts) {
+      if (attempt.delayMs) await new Promise((r) => setTimeout(r, attempt.delayMs));
+      response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${GEMINI_API_KEY}`,
+        },
+        body: buildBody(attempt.model),
+      });
+      if (response.ok) break;
+      lastStatus = response.status;
+      lastErrorText = await response.text();
+      console.error(`AI gateway error (model=${attempt.model}):`, response.status, lastErrorText);
+      // Only retry on transient upstream failures.
+      if (response.status !== 503 && response.status !== 502 && response.status !== 504 && response.status !== 500) break;
+    }
+
+    if (!response || !response.ok) {
+      if (lastStatus === 429) {
         return new Response(JSON.stringify({ error: "Rate limited, please try again later." }), {
           status: 429,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (response.status === 402) {
+      if (lastStatus === 402) {
         return new Response(JSON.stringify({ error: "Credits exhausted. Please add funds." }), {
           status: 402,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
-      return new Response(JSON.stringify({ error: "AI generation failed" }), {
+      const friendly = lastStatus === 503
+        ? "AI is busy right now. Please try again in a moment."
+        : `AI gateway ${lastStatus}: ${lastErrorText.slice(0, 300)}`;
+      return new Response(JSON.stringify({ error: friendly }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -121,14 +155,36 @@ Variation seed: ${variationSeed}${previousBlock}`;
     const data = await response.json();
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
 
-    if (!toolCall?.function?.arguments) {
-      return new Response(JSON.stringify({ error: "No response from AI" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    let result: { subject: string; message: string };
+    try {
+      if (toolCall?.function?.arguments) {
+        result = JSON.parse(toolCall.function.arguments);
+      } else {
+        const content: string | undefined = data.choices?.[0]?.message?.content;
+        if (!content) {
+          console.error("No tool_calls or content:", JSON.stringify(data).slice(0, 1000));
+          return new Response(JSON.stringify({ error: "AI returned empty response" }), {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        result = JSON.parse(jsonMatch ? jsonMatch[1] : content);
+      }
+    } catch (parseErr) {
+      console.error("Parse error:", parseErr, "data:", JSON.stringify(data).slice(0, 1000));
+      return new Response(
+        JSON.stringify({ error: `AI response parse failed: ${parseErr instanceof Error ? parseErr.message : "unknown"}` }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
-    const result = JSON.parse(toolCall.function.arguments);
+    if (!result?.subject || !result?.message) {
+      return new Response(
+        JSON.stringify({ error: "AI response missing subject/message" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -10,6 +10,7 @@ import {
 } from "react";
 import { FlowState, FLOW_STORAGE_KEY, type FlowStateType } from "./states";
 import { resolveTransition, type FlowEvent } from "./transitions";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
 
 interface FlowContextValue {
   state: FlowStateType;
@@ -49,21 +50,21 @@ function logTransition(from: FlowStateType, to: FlowStateType, event: FlowEvent)
 function loadPersisted(): FlowReducerState | null {
   try {
     // Always clear onboarding state to prevent being stuck
-    localStorage.removeItem("onboarding_done_session");
-    localStorage.removeItem("onboarding_state");
+    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_DONE_SESSION);
+    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_STATE);
 
     const raw = localStorage.getItem(FLOW_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as FlowReducerState;
     if (parsed?.state) {
       // Reset flow if stuck in mid-flow states, force fresh boot
-      const staleStates = [FlowState.AUTH, FlowState.ONBOARDING, FlowState.PRE_DASHBOARD_DECISION];
+      const staleStates = [FlowState.AUTH, FlowState.ONBOARDING];
       if (staleStates.includes(parsed.state)) {
-        console.log("[FLOW] Clearing stale state:", parsed.state);
+        if (import.meta.env.DEV) console.log("[FLOW] Clearing stale state:", parsed.state);
         localStorage.removeItem(FLOW_STORAGE_KEY);
         return null;
       }
-      console.log("[FLOW] Loaded persisted state:", parsed.state);
+      if (import.meta.env.DEV) console.log("[FLOW] Loaded persisted state:", parsed.state);
       return parsed;
     }
   } catch {

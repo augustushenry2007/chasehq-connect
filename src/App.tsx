@@ -9,7 +9,6 @@ import RootRedirect from "./pages/RootRedirect";
 import AuthScreen from "./pages/AuthScreen";
 import WelcomeScreen from "./pages/WelcomeScreen";
 import OnboardingScreen from "./pages/OnboardingScreen";
-import PreDashboardDecisionScreen from "./pages/PreDashboardDecisionScreen";
 import TabLayout from "./components/TabLayout";
 import DashboardScreen from "./pages/DashboardScreen";
 import InvoicesScreen from "./pages/InvoicesScreen";
@@ -21,6 +20,7 @@ import NotFound from "./pages/NotFound";
 import PaywallScreen from "./pages/PaywallScreen";
 import BillingScreen from "./pages/BillingScreen";
 import PostInvoiceAuthScreen from "./pages/PostInvoiceAuthScreen";
+import GuestDraftScreen from "./pages/GuestDraftScreen";
 import RequireOnboarding from "./components/RequireOnboarding";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -39,8 +39,8 @@ const App = () => (
               <Route path="/auth" element={<AuthScreen />} />
               <Route path="/onboarding" element={<OnboardingScreen />} />
               <Route path="/auth-after-invoice" element={<PostInvoiceAuthScreen />} />
+              <Route path="/guest-draft" element={<GuestDraftScreen />} />
               <Route element={<RequireOnboarding />}>
-                <Route path="/pre-dashboard" element={<PreDashboardDecisionScreen />} />
                 <Route element={<TabLayout />}>
                   <Route path="/dashboard" element={<DashboardScreen />} />
                   <Route path="/invoices" element={<InvoicesScreen />} />

@@ -1,6 +1,11 @@
-import { Capacitor } from "@capacitor/core";
-
 export const PRODUCT_ID = "chasehq_pro_monthly";
+
+// Use the global injected by Capacitor native shell instead of importing the
+// package at build time. This prevents the Capacitor bridge from initialising
+// in a plain browser context, which floods the console with toUrl errors.
+function isNative(): boolean {
+  return !!(window as any).Capacitor?.isNativePlatform?.();
+}
 
 export interface PurchaseResult {
   ok: boolean;
@@ -11,21 +16,12 @@ export interface PurchaseResult {
   canceled?: boolean;
 }
 
-/**
- * Abstraction over Apple StoreKit. On iOS native this calls the
- * @capgo/capacitor-purchases plugin (added later via `npm i` + `npx cap sync ios`).
- * On the web/Lovable preview this returns a mock receipt so the trial→purchase
- * flow stays testable end-to-end.
- */
 export async function purchaseSubscription(): Promise<PurchaseResult> {
-  const isNative = Capacitor.isNativePlatform();
-  if (!isNative) {
-    // Mock purchase for web preview — backend treats this as a dev receipt.
+  if (!isNative()) {
     await new Promise((r) => setTimeout(r, 600));
     return { ok: true, receipt: `MOCK_RECEIPT_${Date.now()}`, productId: PRODUCT_ID, mock: true };
   }
   try {
-    // Lazy-load via runtime specifier so Vite doesn't try to resolve the plugin at build time.
     const pkg = "@capgo/capacitor-purchases";
     // @ts-ignore — plugin installed in iOS native build only
     const mod = await import(/* @vite-ignore */ pkg);
@@ -43,8 +39,7 @@ export async function purchaseSubscription(): Promise<PurchaseResult> {
 }
 
 export async function restorePurchases(): Promise<PurchaseResult> {
-  const isNative = Capacitor.isNativePlatform();
-  if (!isNative) {
+  if (!isNative()) {
     await new Promise((r) => setTimeout(r, 400));
     return { ok: true, receipt: `MOCK_RESTORE_${Date.now()}`, productId: PRODUCT_ID, mock: true };
   }
@@ -63,8 +58,7 @@ export async function restorePurchases(): Promise<PurchaseResult> {
 }
 
 export function openManageSubscriptions() {
-  // Apple's deep link to the user's subscription management screen.
-  if (Capacitor.isNativePlatform()) {
+  if (isNative()) {
     window.location.href = "itms-apps://apps.apple.com/account/subscriptions";
   } else {
     window.open("https://apps.apple.com/account/subscriptions", "_blank");

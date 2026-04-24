@@ -3,7 +3,7 @@ import { Home, FileText, Settings } from "lucide-react";
 
 const TABS = [
   { path: "/dashboard", label: "Dashboard", icon: Home },
-  { path: "/invoices", label: "Invoices", icon: FileText },
+  { path: "/invoices", label: "Follow-Ups", icon: FileText },
   { path: "/settings", label: "Settings", icon: Settings },
 ];
 

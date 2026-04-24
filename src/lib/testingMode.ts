@@ -10,6 +10,8 @@
 //
 // Disable with: localStorage.setItem("testing_mode", "false")  (or remove the key)
 
+import { STORAGE_KEYS } from "@/lib/storageKeys";
+
 const KEY = "testing_mode";
 
 function readUrlFlag(): boolean | null {
@@ -38,7 +40,7 @@ export function isTestingMode(): boolean {
 }
 
 // Keys we wipe to guarantee a fresh-user experience.
-const VOLATILE_KEYS = ["onboarding_state", "notifications", "schedule"];
+const VOLATILE_KEYS = [STORAGE_KEYS.ONBOARDING_STATE, "notifications", "schedule"];
 
 export function clearTestingState() {
   try {
