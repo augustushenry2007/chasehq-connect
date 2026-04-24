@@ -3,7 +3,7 @@ export const PRODUCT_ID = "chasehq_pro_monthly";
 // Use the global injected by Capacitor native shell instead of importing the
 // package at build time. This prevents the Capacitor bridge from initialising
 // in a plain browser context, which floods the console with toUrl errors.
-function isNative(): boolean {
+export function isNativePlatform(): boolean {
   return !!(window as any).Capacitor?.isNativePlatform?.();
 }
 
@@ -17,7 +17,7 @@ export interface PurchaseResult {
 }
 
 export async function purchaseSubscription(): Promise<PurchaseResult> {
-  if (!isNative()) {
+  if (!isNativePlatform()) {
     await new Promise((r) => setTimeout(r, 600));
     return { ok: true, receipt: `MOCK_RECEIPT_${Date.now()}`, productId: PRODUCT_ID, mock: true };
   }
@@ -39,7 +39,7 @@ export async function purchaseSubscription(): Promise<PurchaseResult> {
 }
 
 export async function restorePurchases(): Promise<PurchaseResult> {
-  if (!isNative()) {
+  if (!isNativePlatform()) {
     await new Promise((r) => setTimeout(r, 400));
     return { ok: true, receipt: `MOCK_RESTORE_${Date.now()}`, productId: PRODUCT_ID, mock: true };
   }
@@ -58,7 +58,7 @@ export async function restorePurchases(): Promise<PurchaseResult> {
 }
 
 export function openManageSubscriptions() {
-  if (isNative()) {
+  if (isNativePlatform()) {
     window.location.href = "itms-apps://apps.apple.com/account/subscriptions";
   } else {
     window.open("https://apps.apple.com/account/subscriptions", "_blank");

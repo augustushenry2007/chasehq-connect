@@ -4,46 +4,25 @@ import { ArrowLeft, Check, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useEntitlement } from "@/hooks/useEntitlement";
-import { purchaseSubscription, restorePurchases } from "@/lib/iap";
+import MockIAPSheet from "@/components/onboarding/MockIAPSheet";
+import { purchaseSubscription, restorePurchases, isNativePlatform } from "@/lib/iap";
 
 export default function PaywallScreen() {
   const navigate = useNavigate();
   const { status, isTrialing, isActive, refetch } = useEntitlement();
-  const [busy, setBusy] = useState<"trial" | "purchase" | "restore" | null>(null);
+  const [busy, setBusy] = useState<"purchase" | "restore" | null>(null);
+  const [mockIapOpen, setMockIapOpen] = useState(false);
 
   const hasStartedTrial = status !== "none";
   const ctaLabel = isActive
     ? "You're subscribed"
     : isTrialing
-    ? "Subscribe — $5/month"
+    ? "Subscribe — $19.99/month"
     : hasStartedTrial
-    ? "Subscribe — $5/month"
+    ? "Subscribe — $19.99/month"
     : "Start Free Trial";
 
-  async function handleStartTrial() {
-    setBusy("trial");
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    if (!token) {
-      setBusy(null);
-      toast.error("Let's sign you back in first.");
-      navigate("/auth");
-      return;
-    }
-    const { data, error } = await supabase.functions.invoke("start-trial", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setBusy(null);
-    if (error || (data as any)?.error) {
-      toast.error((data as any)?.error || error?.message || "We couldn't start your trial yet. Try again in a moment.");
-      return;
-    }
-    toast.success("Your 30-day free trial has started");
-    await refetch();
-    navigate(-1);
-  }
-
-  async function handlePurchase() {
+  async function runPurchaseFlow() {
     setBusy("purchase");
     const result = await purchaseSubscription();
     if (!result.ok) {
@@ -65,6 +44,19 @@ export default function PaywallScreen() {
     toast.success("You're subscribed — thank you!");
     await refetch();
     navigate(-1);
+  }
+
+  function handlePurchase() {
+    if (!isNativePlatform()) {
+      setMockIapOpen(true);
+      return;
+    }
+    runPurchaseFlow();
+  }
+
+  async function handleMockIapConfirm() {
+    setMockIapOpen(false);
+    await runPurchaseFlow();
   }
 
   async function handleRestore() {
@@ -92,8 +84,7 @@ export default function PaywallScreen() {
 
   function primaryAction() {
     if (isActive) { navigate("/settings/billing"); return; }
-    if (hasStartedTrial) handlePurchase();
-    else handleStartTrial();
+    handlePurchase();
   }
 
   return (
@@ -119,11 +110,11 @@ export default function PaywallScreen() {
 
           <div className="mt-8 bg-card border border-border rounded-2xl p-5">
             <div className="flex items-baseline gap-1.5">
-              <span className="text-3xl font-bold text-foreground">$5</span>
+              <span className="text-3xl font-bold text-foreground">$19.99</span>
               <span className="text-sm text-muted-foreground">/month</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {hasStartedTrial ? "After your free trial." : "After your 30-day free trial."}
+              {hasStartedTrial ? "After your free trial." : "After your 14-day free trial."}
             </p>
 
             <ul className="mt-5 space-y-2.5">
@@ -150,7 +141,7 @@ export default function PaywallScreen() {
             disabled={busy !== null || isActive}
             className="w-full bg-primary text-primary-foreground rounded-xl py-3.5 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {busy === "trial" || busy === "purchase" ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            {busy === "purchase" ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             {ctaLabel}
           </button>
 
@@ -171,6 +162,12 @@ export default function PaywallScreen() {
           </p>
         </div>
       </div>
+
+      <MockIAPSheet
+        open={mockIapOpen}
+        onConfirm={handleMockIapConfirm}
+        onCancel={() => setMockIapOpen(false)}
+      />
     </div>
   );
 }
