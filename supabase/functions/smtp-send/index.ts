@@ -43,7 +43,7 @@ serve(async (req) => {
     if (!rl.allowed) return rateLimitedResponse(cors);
     const { data: conn, error: connError } = await supabaseAdmin
       .from("smtp_connections")
-      .select("*")
+      .select("smtp_host, smtp_port, smtp_username, from_email, from_name, smtp_password_secret_id")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -51,12 +51,19 @@ serve(async (req) => {
       return json({ error: "SMTP not connected. Please connect your email in Settings." }, 401);
     }
 
+    const { data: smtpPassword, error: vaultErr } = await supabaseAdmin
+      .rpc("vault_read_secret", { p_id: conn.smtp_password_secret_id });
+    if (vaultErr || !smtpPassword) {
+      console.error("smtp-send vault read error:", vaultErr);
+      return json({ error: "Failed to retrieve SMTP credentials" }, 500);
+    }
+
     const client = new SMTPClient({
       connection: {
         hostname: conn.smtp_host,
         port: conn.smtp_port,
         tls: conn.smtp_port === 465,
-        auth: { username: conn.smtp_username, password: conn.smtp_password },
+        auth: { username: conn.smtp_username, password: smtpPassword },
       },
     });
 

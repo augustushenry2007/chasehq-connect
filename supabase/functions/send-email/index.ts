@@ -179,7 +179,7 @@ serve(async (req) => {
 async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subject: string, message: string, senderName: string, json: Json) {
   const { data: gmailConn, error: connError } = await supabaseAdmin
     .from("gmail_connections")
-    .select("*")
+    .select("user_id, email, token_expires_at, access_token_secret_id, refresh_token_secret_id")
     .eq("user_id", userId)
     .single();
 
@@ -187,7 +187,12 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
     return json({ error: "no_mailbox", message: "Gmail not connected. Please connect Gmail in Settings." });
   }
 
-  let accessToken = gmailConn.access_token;
+  const { data: accessTokenRaw } = await supabaseAdmin
+    .rpc("vault_read_secret", { p_id: gmailConn.access_token_secret_id });
+  const { data: refreshTokenRaw } = await supabaseAdmin
+    .rpc("vault_read_secret", { p_id: gmailConn.refresh_token_secret_id });
+
+  let accessToken: string = accessTokenRaw ?? "";
   const expiresAt = new Date(gmailConn.token_expires_at).getTime();
   if (Date.now() > expiresAt - 5 * 60 * 1000) {
     const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")!;
@@ -198,7 +203,7 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
       body: new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
-        refresh_token: gmailConn.refresh_token,
+        refresh_token: refreshTokenRaw ?? "",
         grant_type: "refresh_token",
       }),
     });
@@ -209,10 +214,14 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
     }
     accessToken = refreshData.access_token;
     const newExpiry = new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString();
-    await supabaseAdmin.from("gmail_connections").update({
-      access_token: accessToken,
-      token_expires_at: newExpiry,
-    }).eq("user_id", userId);
+    await supabaseAdmin.rpc("vault_update_secret", {
+      p_id: gmailConn.access_token_secret_id,
+      p_value: accessToken,
+    });
+    await supabaseAdmin
+      .from("gmail_connections")
+      .update({ token_expires_at: newExpiry })
+      .eq("user_id", userId);
   }
 
   const emailLines = [
@@ -260,16 +269,21 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
 
 async function sendViaSmtp(supabaseAdmin: any, userId: string, to: string, subject: string, message: string, json: Json) {
   const { data: conn, error } = await supabaseAdmin
-    .from("smtp_connections").select("*").eq("user_id", userId).maybeSingle();
+    .from("smtp_connections")
+    .select("from_email, from_name, smtp_host, smtp_port, smtp_username, smtp_password_secret_id")
+    .eq("user_id", userId)
+    .maybeSingle();
   if (error || !conn) {
     return json({ error: "no_mailbox", message: "SMTP not connected. Please connect your email in Settings." });
   }
+  const { data: smtpPassword } = await supabaseAdmin
+    .rpc("vault_read_secret", { p_id: conn.smtp_password_secret_id });
   const client = new SMTPClient({
     connection: {
       hostname: conn.smtp_host,
       port: conn.smtp_port,
       tls: conn.smtp_port === 465,
-      auth: { username: conn.smtp_username, password: conn.smtp_password },
+      auth: { username: conn.smtp_username, password: smtpPassword ?? "" },
     },
   });
   try {
