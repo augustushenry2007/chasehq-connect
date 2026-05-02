@@ -1,17 +1,10 @@
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ScreenHeader } from "@/components/ScreenHeader";
 
 export default function TermsOfUse() {
-  const navigate = useNavigate();
   return (
     <div className="h-screen bg-background overflow-y-auto overscroll-contain">
-      <div className="max-w-2xl mx-auto px-5 py-6 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground mb-6 hover:text-foreground"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
+      <ScreenHeader fallbackPath="/welcome" />
+      <div className="max-w-2xl mx-auto px-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
 
         <h1 className="text-2xl font-bold text-foreground mb-2">Terms of Use</h1>
         <p className="text-xs text-muted-foreground mb-8">Last updated: April 22, 2026</p>
@@ -97,7 +90,7 @@ export default function TermsOfUse() {
             <h2 className="text-lg font-semibold mb-2">8. Subscriptions, Billing &amp; Auto-Renewal</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               ChaseHQ Pro is offered as a monthly auto-renewing subscription at
-              $5.00 USD per month, with a 14-day free trial for new accounts.
+              $19.99 USD per month, with a 14-day free trial for new accounts.
               Pricing may be displayed in your local currency on the App Store.
             </p>
             <ul className="text-sm text-muted-foreground leading-relaxed list-disc pl-5 space-y-1 mt-2">

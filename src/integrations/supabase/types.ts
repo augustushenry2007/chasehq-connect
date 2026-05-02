@@ -298,31 +298,40 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          dismissed_hints: Record<string, boolean>
           email_provider: string | null
           full_name: string | null
           id: string
           onboarding_completed: boolean
+          onboarding_step: number | null
           sender_type: string | null
+          tour_completed: boolean
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          dismissed_hints?: Record<string, boolean>
           email_provider?: string | null
           full_name?: string | null
           id?: string
           onboarding_completed?: boolean
+          onboarding_step?: number | null
           sender_type?: string | null
+          tour_completed?: boolean
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          dismissed_hints?: Record<string, boolean>
           email_provider?: string | null
           full_name?: string | null
           id?: string
           onboarding_completed?: boolean
+          onboarding_step?: number | null
           sender_type?: string | null
+          tour_completed?: boolean
           updated_at?: string
           user_id?: string
         }

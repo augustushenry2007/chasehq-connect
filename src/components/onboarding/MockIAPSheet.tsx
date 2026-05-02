@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Loader2, Check } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import appLogo from "@/assets/app-logo.png";
 
-type Phase = "idle" | "confirming" | "success";
+type Phase = "idle" | "confirming";
 
 interface MockIAPSheetProps {
   open: boolean;
@@ -22,9 +22,7 @@ export default function MockIAPSheet({ open, onConfirm, onCancel }: MockIAPSheet
   async function handleSubscribe() {
     if (phase !== "idle") return;
     setPhase("confirming");
-    await new Promise((r) => setTimeout(r, 1200));
-    setPhase("success");
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 700));
     onConfirm();
   }
 
@@ -53,7 +51,7 @@ export default function MockIAPSheet({ open, onConfirm, onCancel }: MockIAPSheet
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-foreground">14-day free trial</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Then $20/month</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Then $19.99/month</p>
             </div>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary/10 px-2 py-1 rounded-full">
               Free
@@ -62,7 +60,7 @@ export default function MockIAPSheet({ open, onConfirm, onCancel }: MockIAPSheet
         </div>
 
         <p className="text-[11px] text-muted-foreground leading-relaxed text-center mb-5">
-          Cancel anytime before your trial ends. You'll be reminded 3 days before your first charge.
+          Cancel anytime before your trial ends.
         </p>
 
         <button
@@ -72,7 +70,6 @@ export default function MockIAPSheet({ open, onConfirm, onCancel }: MockIAPSheet
         >
           {phase === "idle" && "Subscribe"}
           {phase === "confirming" && (<><Loader2 className="w-4 h-4 animate-spin" /> Confirming…</>)}
-          {phase === "success"    && (<><Check className="w-4 h-4" /> Trial started</>)}
         </button>
 
         <button

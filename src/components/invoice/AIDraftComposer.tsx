@@ -1,18 +1,22 @@
 import { useState, useRef, useEffect } from "react";
-import { RefreshCw, Send, Loader2, AlertTriangle, Lock, Check, CheckCircle, Shuffle } from "lucide-react";
+import { createPortal } from "react-dom";
+import { RefreshCw, Send, Loader2, AlertCircle, Info, Check, CheckCircle, Shuffle, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
-import { generateFollowup, sendFollowupEmail, recordFollowup, validateAppleReceipt } from "@/hooks/useSupabaseData";
+import { generateFollowup, sendFollowupEmail, recordFollowup } from "@/hooks/useSupabaseData";
 import { advanceScheduleAfterSend } from "@/hooks/useNotifications";
 import { getDefaultDraft, getTemplateDraft, TEMPLATE_COUNT, type Tone } from "./DraftTemplates";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { useActionGate } from "@/hooks/useActionGate";
 import { useApp } from "@/context/AppContext";
+import { useFlow } from "@/flow/FlowMachine";
 import { supabase } from "@/integrations/supabase/client";
-import { startGoogleOAuth } from "@/lib/oauth";
-import MockIAPSheet from "@/components/onboarding/MockIAPSheet";
-import { isNativePlatform } from "@/lib/iap";
+import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/lib/oauth";
+import { isNativePlatform, restorePurchases, syncSubscriptionToSupabase } from "@/lib/iap";
+import { readPending } from "@/lib/localInvoice";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
 import { GoogleIcon } from "@/components/GoogleIcon";
+import { CoachHint } from "@/components/onboarding/CoachHint";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,14 +28,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const TONES: Tone[] = ["Polite", "Friendly", "Firm", "Urgent", "Final Notice"];
-
-const SEND_CONFIRM_BODY: Record<string, string> = {
-  "Polite":   "A courteous nudge on its way to {client}. Polite, clear, and easy to act on.",
-  "Friendly": "A warm reminder headed to {client}. Friendly enough to keep the relationship, clear enough to get paid.",
-  "Firm":     "A direct message on its way to {client}. No ambiguity — they'll know payment is expected now.",
-  "Urgent":   "{client} will receive this shortly. It's firm, but fair — and it's time they knew.",
-};
+const TONES: Tone[] = ["Friendly", "Firm", "Urgent", "Final Notice"];
+const PREVIEW_CHARS = 220;
 
 function formatAgo(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
@@ -41,29 +39,50 @@ function formatAgo(ms: number): string {
   return `${hours} hour${hours === 1 ? "" : "s"} ago`;
 }
 
-export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice; onSent?: () => void }) {
-  const { user, notifications, isAuthenticated, fullName } = useApp();
-  const { canSend, loading: entLoading, trialEndsAt, refetch: refetchEntitlement, isTrialing, isActive, isPastDue } = useEntitlement();
+type SendSheetState = "closed" | "signed_out" | "needs_trial" | "ready";
+
+export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invoice: Invoice; onSent?: () => void; defaultTone?: Tone }) {
+  const { user, notifications, fullName } = useApp();
+  const { send: flowSend } = useFlow();
+  const entitlement = useEntitlement();
+  const { canSend, trialEndsAt, refetch: refetchEntitlement, isTrialing, isActive, isPastDue, hasFreeSend, followupsSent } = entitlement;
   const gate = useActionGate();
-  const [tone, setTone] = useState<Tone>(notifications.defaultTone as Tone);
+
+  const [tone, setTone] = useState<Tone>((defaultTone ?? notifications.defaultTone) as Tone);
   const [currentSubject, setCurrentSubject] = useState("");
   const [currentDraft, setCurrentDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState(false);
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [sendStage, setSendStage] = useState<"idle" | "showing" | "exiting">("idle");
   const [isAiGenerated, setIsAiGenerated] = useState(false);
   const [templateIndex, setTemplateIndex] = useState(0);
-  const [confirmSendOpen, setConfirmSendOpen] = useState(false);
-  const [confirmFinalOpen, setConfirmFinalOpen] = useState(false);
-  const [confirmRecentSendOpen, setConfirmRecentSendOpen] = useState(false);
   const [pendingTone, setPendingTone] = useState<Tone | null>(null);
-  const [iapSheetOpen, setIapSheetOpen] = useState(false);
-  const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [lastSentAt, setLastSentAt] = useState<Date | null>(null);
 
+  // Send Sheet — single state machine that replaces all auth/paywall/confirm modals
+  const [sendSheet, setSendSheet] = useState<SendSheetState>("closed");
+  const [sendSheetIntent, setSendSheetIntent] = useState<"send" | "generate">("send");
+  const [iapLoading, setIapLoading] = useState(false);
+  const [iapError, setIapError] = useState<string | null>(null);
+  const [bodyExpanded, setBodyExpanded] = useState(false);
+
+  const draftRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const userEditedRef = useRef(false);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isFinalNotice = tone === "Final Notice";
+  const msSinceLastSend = lastSentAt ? Date.now() - lastSentAt.getTime() : null;
+  const recentlySent = msSinceLastSend !== null && msSinceLastSend < 24 * 3_600_000;
+  const bodyPreview = currentDraft.length > PREVIEW_CHARS
+    ? currentDraft.slice(0, PREVIEW_CHARS).trimEnd() + "…"
+    : currentDraft;
+
   useEffect(() => {
+    if (invoice.dbId === "guest") return;
     supabase
       .from("followups")
       .select("sent_at")
@@ -75,17 +94,14 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
         if (data?.sent_at) setLastSentAt(new Date(data.sent_at));
       });
   }, [invoice.dbId]);
-  const [authPaywallOpen, setAuthPaywallOpen] = useState(false);
-  const [paywallPhase, setPaywallPhase] = useState<"idle" | "confirming" | "success">("idle");
-  const [mockIapOpen, setMockIapOpen] = useState(false);
-  const paywallIntentRef = useRef<"send" | "generate">("send");
-  const draftRef = useRef<HTMLDivElement>(null);
-  const userEditedRef = useRef(false);
 
-  const isFinalNotice = tone === "Final Notice";
-  const locked = !entLoading && !canSend;
-  const msSinceLastSend = lastSentAt ? Date.now() - lastSentAt.getTime() : null;
-  const recentlySent = msSinceLastSend !== null && msSinceLastSend < 24 * 3_600_000;
+  // When the parent changes defaultTone (e.g. "Send now" on a different step), adopt it
+  // if the user hasn't started editing yet.
+  useEffect(() => {
+    if (defaultTone && !userEditedRef.current && !isAiGenerated) {
+      setTone(defaultTone);
+    }
+  }, [defaultTone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load template when tone changes (resets AI flag and discards manual edits)
   useEffect(() => {
@@ -99,6 +115,41 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
     userEditedRef.current = false;
   }, [tone, invoice]);
 
+  // Resume the correct sheet state after Google OAuth.
+  // Routes immediately once the gate settles — no refetch dance needed because
+  // useEntitlement's count ?? 0 coercion already gives the right answer.
+  useEffect(() => {
+    if (!user) return;
+    const intent = sessionStorage.getItem(STORAGE_KEYS.SEND_AFTER_AUTH) as "send" | "generate" | null;
+    if (!intent) return;
+    if (gate.state === "loading") return;
+
+    sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
+
+    if (import.meta.env.DEV) {
+      console.log("[POST_OAUTH_RESUME]", {
+        intent,
+        gateState: gate.state,
+        canExecute: gate.canExecute,
+        hasFreeSend: entitlement.hasFreeSend,
+        isTrialing: entitlement.isTrialing,
+        isActive: entitlement.isActive,
+      });
+    }
+
+    if (gate.canExecute) {
+      if (intent === "generate") { void handleGenerate(); }
+      else { setSendSheet("ready"); setBodyExpanded(false); }
+    } else {
+      setSendSheetIntent(intent);
+      setIapError(null);
+      setSendSheet("needs_trial");
+    }
+    // Signal OAuthOverlay to re-evaluate dismissal now that the modal is committed
+    // and SEND_AFTER_AUTH has been cleared — this is what drops the spinner.
+    window.dispatchEvent(new Event("chasehq:oauth-signal"));
+  }, [user, gate.state, gate.canExecute]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function handleCycleTemplate() {
     const nextIndex = (templateIndex + 1) % TEMPLATE_COUNT;
     setTemplateIndex(nextIndex);
@@ -111,11 +162,14 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
   }
 
   async function handleGenerate() {
-    if (isGenerating) return; // dedupe rapid clicks
+    if (isGenerating) return;
     setIsGenerating(true);
     setGenerationError(false);
     const displayName = fullName?.trim() ? fullName.trim().replace(/\b\w/g, c => c.toUpperCase()) : undefined;
-    const result = await generateFollowup(invoice, tone, isAiGenerated ? currentDraft : undefined, displayName);
+    let result = await generateFollowup(invoice, tone, isAiGenerated ? currentDraft : undefined, displayName);
+    if (!result) {
+      result = await generateFollowup(invoice, tone, undefined, displayName);
+    }
     if (result) {
       if (result.message === currentDraft) {
         toast.message("That one came out similar. Regenerate or switch tones for a different feel.");
@@ -141,7 +195,30 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
     }
   }
 
-  async function doSend() {
+  function openSendSheet(intent: "send" | "generate") {
+    setSendSheetIntent(intent);
+    setIapError(null);
+    if (!user || gate.panelVariant === "guest") {
+      setSendSheet("signed_out");
+    } else {
+      if (import.meta.env.DEV) {
+        console.log("[NEEDS_TRIAL via openSendSheet]", {
+          gateState: gate.state, canExecute: gate.canExecute,
+          hasFreeSend: entitlement.hasFreeSend, panelVariant: gate.panelVariant,
+        });
+      }
+      setSendSheet("needs_trial");
+    }
+  }
+
+  function handleSendClick() {
+    if (gate.state === "loading") return;
+    if (!gate.canExecute) { openSendSheet("send"); return; }
+    setSendSheet("ready");
+    setBodyExpanded(false);
+  }
+
+  async function handleSheetSend() {
     if (sending) return;
     if (!currentDraft || !currentSubject) {
       toast.error("Add a subject and message before sending.");
@@ -155,25 +232,26 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
 
     const result = await sendFollowupEmail(invoice.clientEmail, currentSubject, currentDraft, invoice.dbId);
 
-    if (result.ok === false) {
+    if (!result.ok) {
       setSending(false);
       if (result.reason === "subscription_required") {
-        setAuthPaywallOpen(true);
+        if (import.meta.env.DEV) {
+          console.log("[NEEDS_TRIAL via backend rejection]", { result });
+        }
+        setSendSheet("needs_trial");
         return;
       }
+      setSendSheet("closed");
       if (result.reason === "no_mailbox") {
         toast.error("Connect your Gmail in Settings and we'll send this for you.");
-        return;
-      }
-      if (result.reason === "rate_limited") {
+      } else if (result.reason === "rate_limited") {
         toast.error(result.message || "You've hit today's send limit. We'll be ready again tomorrow.");
-        return;
+      } else {
+        toast.error(result.message || "We couldn't send this one. Your draft is safe — give it another try.");
       }
-      toast.error(result.message || "We couldn't send this one. Your draft is safe — give it another try.");
       return;
     }
 
-    // Persist follow-up history so the timeline reflects reality.
     if (user?.id) {
       await recordFollowup(user.id, invoice.dbId, {
         subject: currentSubject,
@@ -182,103 +260,142 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
         isAiGenerated,
       });
     }
-    // Cancel the next pending reminder for this invoice.
-    await advanceScheduleAfterSend(invoice.dbId);
+    await advanceScheduleAfterSend(invoice.dbId, tone);
 
     setSending(false);
-    setSent(true);
+    setSendSheet("closed");
     setLastSentAt(new Date());
     onSent?.();
-    setTimeout(() => setSent(false), 3000);
+    setSendStage("showing");
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    exitTimerRef.current = setTimeout(() => {
+      setSendStage("exiting");
+      hideTimerRef.current = setTimeout(() => setSendStage("idle"), 600);
+    }, 3500);
   }
 
-  function openGatePanel(intent: "send" | "generate") {
-    paywallIntentRef.current = intent;
-    if (gate.panelVariant === "guest") setIapSheetOpen(true);
-    else setAuthPaywallOpen(true);
-  }
-
-  function handleSendClick() {
-    if (!gate.canExecute) { openGatePanel("send"); return; }
-    if (isFinalNotice) { setConfirmFinalOpen(true); return; }
-    if (recentlySent) { setConfirmRecentSendOpen(true); return; }
-    setConfirmSendOpen(true);
-  }
-
-  function handleConfirmSend() {
-    setConfirmSendOpen(false);
-    doSend();
-  }
-
-  async function handleGoogleSignUp() {
+  async function handleGoogleSignIn() {
     if (googleLoading) return;
     setGoogleLoading(true);
-    const { error } = await startGoogleOAuth(window.location.origin + "/auth-after-invoice");
-    if (error) {
+    sessionStorage.setItem(STORAGE_KEYS.SEND_AFTER_AUTH, sendSheetIntent);
+    try {
+      flowSend("REQUEST_POST_INVOICE_AUTH");
+      const pi = readPending();
+      const piSuffix = pi ? "?pi=" + encodeURIComponent(JSON.stringify(pi)) : "";
+      const { error } = await startGoogleOAuth(window.location.origin + "/auth-after-invoice" + piSuffix);
+      if (error) {
+        if (error.code !== OAUTH_USER_CANCELED) {
+          toast.error("Sign-in didn't go through. Give it another try.");
+        }
+        sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
+        setGoogleLoading(false);
+      }
+    } catch {
+      sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
       toast.error("Sign-in didn't go through. Give it another try.");
       setGoogleLoading(false);
     }
   }
 
-  async function runIapFlow() {
-    setPaywallPhase("confirming");
+  function completeIap() {
+    setIapLoading(false);
+    if (sendSheetIntent === "generate") {
+      setSendSheet("closed");
+      handleGenerate();
+    } else {
+      setSendSheet("ready");
+      setBodyExpanded(false);
+    }
+  }
+
+  async function handleStartTrial() {
+    if (iapLoading) return;
+    setIapLoading(true);
+    setIapError(null);
     try {
-      const { purchaseSubscription } = await import("@/lib/iap");
+      const { purchaseSubscription, getActiveEntitlement } = await import("@/lib/iap");
+
+      const existing = await getActiveEntitlement();
+      if (existing?.entitled) {
+        void syncSubscriptionToSupabase(`RC_CUSTOMER:${existing.originalAppUserId}`, "chasehq_pro_monthly", false, {
+          onSynced: () => { void refetchEntitlement(); },
+          isTrialing: existing.isTrialing,
+          expiresAt: existing.expiresAt,
+        });
+        completeIap();
+        return;
+      }
+
       const iap = await purchaseSubscription();
       if (!iap.ok) {
-        setPaywallPhase("idle");
-        if (!iap.canceled) toast.error(iap.error ?? "The purchase didn't go through. Your account is unchanged — try again whenever you're ready.");
+        setIapLoading(false);
+        if (!iap.canceled) setIapError(iap.error ?? "The purchase didn't go through. Try again.");
         return;
       }
-      const val = await validateAppleReceipt(
-        iap.receipt!,
-        iap.productId ?? "chasehq_pro_monthly",
-        iap.mock ?? false,
-      );
-      if (!val.ok) {
-        setPaywallPhase("idle");
-        toast.error(val.error ?? "We couldn't activate your subscription yet. Try again and you'll be set.");
+      if (!iap.entitled) {
+        setIapLoading(false);
+        setIapError("Purchase didn't grant access yet. Try Restore Purchases.");
         return;
       }
-      await refetchEntitlement();
-      setPaywallPhase("success");
-      await new Promise((r) => setTimeout(r, 800));
-      setAuthPaywallOpen(false);
-      setPaywallPhase("idle");
-      if (paywallIntentRef.current === "generate") {
-        handleGenerate();
-      } else {
-        doSend();
-      }
+
+      void syncSubscriptionToSupabase(iap.receipt!, iap.productId ?? "chasehq_pro_monthly", iap.mock ?? false, {
+        onSynced: () => { void refetchEntitlement(); },
+        isTrialing: iap.isTrialing,
+        expiresAt: iap.expiresAt,
+      });
+
+      completeIap();
     } catch {
-      setPaywallPhase("idle");
-      toast.error("That didn't go through. Give it another try.");
+      setIapLoading(false);
+      setIapError("That didn't go through. Give it another try.");
     }
   }
 
-  function handlePaywall() {
-    if (paywallPhase !== "idle") return;
-    if (!isNativePlatform()) {
-      setMockIapOpen(true);
-      return;
+  async function handleRestorePurchases() {
+    if (iapLoading) return;
+    setIapLoading(true);
+    setIapError(null);
+    try {
+      const result = await restorePurchases();
+      if (!result.ok) {
+        setIapLoading(false);
+        setIapError(result.error ?? "No active subscription found on this account.");
+        return;
+      }
+      void syncSubscriptionToSupabase(result.receipt!, result.productId ?? "chasehq_pro_monthly", result.mock ?? false, {
+        onSynced: () => { void refetchEntitlement(); },
+        isTrialing: result.isTrialing,
+        expiresAt: result.expiresAt,
+      });
+      completeIap();
+    } catch {
+      setIapLoading(false);
+      setIapError("Restore didn't go through. Give it another try.");
     }
-    runIapFlow();
   }
 
-  async function handleMockIapConfirm() {
-    setMockIapOpen(false);
-    await runIapFlow();
-  }
-
-  if (sent) {
+  if (sendStage !== "idle") {
+    const exiting = sendStage === "exiting";
     return (
-      <div className="mt-4 bg-card border border-border rounded-2xl p-8 flex flex-col items-center justify-center text-center animate-in fade-in">
+      <div
+        className={`mt-4 bg-card border border-border rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-500 ${exiting ? "opacity-0 -translate-y-1" : "animate-in fade-in"}`}
+        onClick={() => {
+          if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+          if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+          setSendStage("exiting");
+          hideTimerRef.current = setTimeout(() => setSendStage("idle"), 600);
+        }}
+      >
         <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mb-4">
           <CheckCircle className="w-8 h-8 text-green-500" />
         </div>
         <p className="text-xl font-bold text-foreground">We're on it!</p>
         <p className="text-sm text-muted-foreground mt-1.5">
           Your follow-up is on its way to {invoice.client}.
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          We'll let you know if {invoice.client} replies.
         </p>
       </div>
     );
@@ -294,6 +411,7 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
       </div>
 
       {/* Tone selector */}
+      <CoachHint hintKey="tone_selector" side="top" title="Pick a tone" body="The tone shapes the email — Friendly for early nudges, Final Notice for last attempts. Tap one to see the draft change.">
       <div className="flex gap-2 mb-4 flex-wrap">
         {TONES.map((t) => {
           const isFinal = t === "Final Notice";
@@ -319,49 +437,35 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
           );
         })}
       </div>
+      </CoachHint>
 
       {/* Final Notice warning banner */}
       {isFinalNotice && (
         <div className="mb-4 flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50">
-          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
+          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
           <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
             This is a <strong>final escalation notice</strong>. It signals serious consequences for non-payment and should only be sent after earlier reminders. Review carefully before sending.
           </p>
         </div>
       )}
 
+      {/* Subject + body — ref used to scroll here from "Edit draft" */}
+      <div ref={editorRef}>
       {/* Subject */}
       <div className="mb-2">
         <label className="text-xs text-muted-foreground mb-1 block">Subject</label>
         <input
           value={currentSubject}
           onChange={(e) => { setCurrentSubject(e.target.value); userEditedRef.current = true; }}
-          readOnly={locked}
-          className={`w-full bg-muted border border-border rounded-xl px-3.5 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 ${locked ? "select-none" : ""}`}
+          onCopy={user ? undefined : (e) => e.preventDefault()}
+          onCut={user ? undefined : (e) => e.preventDefault()}
+          onContextMenu={user ? undefined : (e) => e.preventDefault()}
+          className={`w-full bg-muted border border-border rounded-xl px-3.5 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30${user ? "" : " select-none [-webkit-user-select:none]"}`}
         />
       </div>
 
       {/* Message body */}
-      <div className="relative">
-        {locked && !isGenerating && !generationError && (
-          <div className="absolute inset-0 z-10 bg-card/90 backdrop-blur-[2px] rounded-xl flex flex-col items-center justify-center p-4 text-center">
-            <Lock className="w-5 h-5 text-muted-foreground mb-2" />
-            <p className="text-sm font-semibold text-foreground">
-              {trialEndsAt ? "Trial ended" : "Subscription required"}
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5 mb-3 max-w-xs">
-              {trialEndsAt
-                ? "Subscribe to access your drafts and keep sending."
-                : "Start your free trial to generate and send follow-ups."}
-            </p>
-            <button
-              onClick={() => setAuthPaywallOpen(true)}
-              className="bg-primary text-primary-foreground text-xs font-semibold px-4 py-2 rounded-xl"
-            >
-              {trialEndsAt ? "Subscribe now" : "Start free trial"}
-            </button>
-          </div>
-        )}
+      <div>
         {isGenerating ? (
           <div className="space-y-2 py-3">
             <div className="h-3.5 bg-muted rounded-md animate-pulse w-full" />
@@ -379,7 +483,7 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
           </div>
         ) : generationError ? (
           <div className="flex flex-col items-center justify-center gap-3 py-10 px-4 rounded-xl bg-destructive/5 border border-destructive/20">
-            <AlertTriangle className="w-5 h-5 text-destructive" />
+            <AlertCircle className="w-5 h-5 text-destructive" />
             <p className="text-sm text-destructive text-center">That one didn't come through — it may be busy. Give it a moment and try again.</p>
             <button
               onClick={handleGenerate}
@@ -392,17 +496,20 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
           <textarea
             value={currentDraft}
             onChange={(e) => { setCurrentDraft(e.target.value); userEditedRef.current = true; }}
+            onCopy={user ? undefined : (e) => e.preventDefault()}
+            onCut={user ? undefined : (e) => e.preventDefault()}
+            onContextMenu={user ? undefined : (e) => e.preventDefault()}
             rows={10}
-            readOnly={locked}
-            className={`w-full bg-muted border border-border rounded-xl px-3.5 py-3 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed ${locked ? "select-none" : ""}`}
+            className={`w-full bg-muted border border-border rounded-xl px-3.5 py-3 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed${user ? "" : " select-none [-webkit-user-select:none]"}`}
           />
         )}
       </div>
+      </div>
 
       {/* Double-send safeguard */}
-      {recentlySent && !locked && (
+      {recentlySent && (
         <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 mt-3">
-          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+          <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
           <p className="text-xs text-amber-800 dark:text-amber-200">
             You sent a follow-up {formatAgo(msSinceLastSend!)} — sending again this soon can feel pushy.
           </p>
@@ -421,115 +528,32 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
             <Shuffle className="w-3.5 h-3.5" />
             Template {(templateIndex % TEMPLATE_COUNT) + 1}/{TEMPLATE_COUNT}
           </button>
+          <CoachHint hintKey="generate_ai" side="top" title="Generate with AI" body="Tap to draft a personalized follow-up using your invoice details and chosen tone. Edit or send it as-is.">
           <button
-            onClick={gate.canExecute ? handleGenerate : () => openGatePanel("generate")}
-            disabled={isGenerating && !locked}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-border text-sm font-medium transition-colors ${
-              locked
-                ? "text-muted-foreground/50 cursor-default"
-                : "text-muted-foreground hover:text-foreground hover:border-primary/40 disabled:opacity-50"
-            }`}
+            onClick={gate.state === "loading" ? undefined : gate.canExecute ? handleGenerate : () => openSendSheet("generate")}
+            disabled={isGenerating}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-border text-sm font-medium transition-colors text-muted-foreground hover:text-foreground hover:border-primary/40 disabled:opacity-50"
           >
-            {locked ? (
-              <><Lock className="w-3.5 h-3.5" /> Locked</>
-            ) : (
-              <><RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? "animate-spin" : ""}`} />{isAiGenerated ? "Regenerate" : "Generate with AI"}</>
-            )}
+            <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? "animate-spin" : ""}`} />{isAiGenerated ? "Regenerate" : "Generate with AI"}
           </button>
+          </CoachHint>
         </div>
         <button
           onClick={handleSendClick}
           disabled={sending || !currentDraft}
           className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-50 ${
-            sent
-              ? "bg-[hsl(var(--chart-2))] text-primary-foreground"
-              : isFinalNotice
+            isFinalNotice
               ? "bg-amber-600 hover:bg-amber-700 text-white"
               : "bg-primary text-primary-foreground hover:bg-primary/90"
           }`}
         >
-          {sent ? (
-            <span className="flex items-center gap-2 animate-scale-in">
-              <Check className="w-4 h-4" /> Sent. We'll take it from here.
-            </span>
-          ) : sending ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" /> Sending…
-            </>
-          ) : locked ? (
-            <>
-              <Lock className="w-4 h-4" /> Unlock to send
-            </>
+          {sending ? (
+            <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
           ) : (
-            <>
-              <Send className="w-4 h-4" /> {isFinalNotice ? "Send Final Notice" : recentlySent ? "Send anyway" : "Send"}
-            </>
+            <><Send className="w-4 h-4" /> {isFinalNotice ? "Send Final Notice" : recentlySent ? "Send anyway" : "Send"}</>
           )}
         </button>
       </div>
-
-      {/* Send confirmation: warm, tone-aware — shown before every non-Final-Notice send */}
-      <AlertDialog open={confirmSendOpen} onOpenChange={setConfirmSendOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Send this {tone.toLowerCase()} follow-up?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {(SEND_CONFIRM_BODY[tone] ?? `This will land in ${invoice.client}'s inbox shortly.`).replace("{client}", invoice.client)}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Go back</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmSend}>Send it</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={confirmFinalOpen} onOpenChange={setConfirmFinalOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-600" />
-              Send Final Notice to {invoice.client}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This message carries more weight than a regular reminder. Make sure all earlier follow-ups have been sent and that you intend to escalate this matter.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => { setConfirmFinalOpen(false); doSend(); }}
-              disabled={sending}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-            >
-              {sending ? "Sending…" : "Send Final Notice"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Recently-sent friction gate */}
-      <AlertDialog open={confirmRecentSendOpen} onOpenChange={setConfirmRecentSendOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>You just sent a follow-up — send again?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {msSinceLastSend !== null ? `${formatAgo(msSinceLastSend)}. ` : ""}Sending again this quickly can come across as pushy. If you can, give it another day.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setConfirmRecentSendOpen(false)}>
-              Wait a day
-            </AlertDialogAction>
-            <AlertDialogCancel
-              onClick={() => { setConfirmRecentSendOpen(false); doSend(); }}
-              className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/30"
-            >
-              Send anyway
-            </AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Tone-change guard — shown when a draft has been edited or AI-generated */}
       <AlertDialog open={pendingTone !== null} onOpenChange={(open) => { if (!open) setPendingTone(null); }}>
@@ -549,116 +573,192 @@ export default function AIDraftComposer({ invoice, onSent }: { invoice: Invoice;
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Send-time trial + sign-up gate for guest users */}
-      <MockIAPSheet
-        open={iapSheetOpen}
-        onConfirm={() => { setIapSheetOpen(false); setAuthDialogOpen(true); }}
-        onCancel={() => setIapSheetOpen(false)}
-      />
-
-      {/* Web IAP sheet for authenticated users hitting the paywall */}
-      <MockIAPSheet
-        open={mockIapOpen}
-        onConfirm={handleMockIapConfirm}
-        onCancel={() => setMockIapOpen(false)}
-      />
-
-      {authDialogOpen && (
+      {/* Send Sheet — single bottom sheet that handles auth, trial, and send confirmation */}
+      {sendSheet !== "closed" && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 animate-fade-in"
-          onClick={() => !googleLoading && setAuthDialogOpen(false)}
+          onClick={() => { if (!iapLoading && !googleLoading && !sending) setSendSheet("closed"); }}
         >
           <div
-            className="w-full max-w-md bg-card rounded-t-3xl shadow-2xl p-6 pb-[max(env(safe-area-inset-bottom,16px),24px)] animate-slide-in-up"
+            className="w-full max-w-md bg-card rounded-t-3xl shadow-2xl animate-slide-in-up"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mx-auto w-10 h-1 rounded-full bg-border mb-5" />
-            <h2 className="text-lg font-bold text-foreground mb-1">Save your trial &amp; send</h2>
-            <p className="text-sm text-muted-foreground mb-5">
-              Create your account to start your 14-day free trial and deliver this follow-up.
-            </p>
-            <button
-              onClick={handleGoogleSignUp}
-              disabled={googleLoading}
-              className="w-full flex items-center justify-center gap-3 bg-card border border-border rounded-xl py-3.5 disabled:opacity-60 transition-all duration-200 ease-out active:scale-[0.97]"
-            >
-              {googleLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin text-foreground" />
-              ) : (
-                <>
-                  <GoogleIcon className="w-5 h-5" />
-                  <span className="text-sm font-medium text-foreground">Continue with Google</span>
-                </>
-              )}
-            </button>
-            <button
-              onClick={() => setAuthDialogOpen(false)}
-              disabled={googleLoading}
-              className="mt-3 w-full py-2.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-            >
-              Maybe later
-            </button>
-          </div>
-        </div>
-      )}
+            <div className="mx-auto w-10 h-1 rounded-full bg-border mt-3 mb-1" />
 
-      {/* Inline paywall sheet for authenticated users with expired trial or no subscription */}
-      {authPaywallOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 animate-fade-in"
-          onClick={() => paywallPhase === "idle" && setAuthPaywallOpen(false)}
-        >
-          <div
-            className="w-full max-w-sm bg-card rounded-3xl shadow-2xl animate-slide-in-up overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 pt-7 pb-5">
-              <h2 className="text-xl font-bold text-foreground mb-2">
-                {trialEndsAt ? "Your trial has ended" : "Start your free trial"}
-              </h2>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {trialEndsAt
-                  ? "Subscribe to keep sending follow-ups and chasing your invoices."
-                  : "14 days free, then $19.99/month. Cancel anytime."}
-              </p>
-            </div>
-            <div className="px-6 pb-5 space-y-3">
-              {[
-                "AI-drafted follow-ups in your tone",
-                "Send from your own Gmail",
-                "Chase timeline & payment history",
-              ].map((f) => (
-                <div key={f} className="flex items-center gap-3">
-                  <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
-                  <p className="text-sm text-foreground">{f}</p>
-                </div>
-              ))}
-            </div>
-            <div className="px-6 pb-7">
-              {!trialEndsAt && (
-                <p className="text-[11px] text-muted-foreground text-center mb-3">
-                  You'll be reminded 3 days before your first charge.
+            {/* State: SIGNED_OUT */}
+            {sendSheet === "signed_out" && (
+              <div className="px-6 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
+                <h2 className="text-lg font-bold text-foreground mb-1">Sign in to continue</h2>
+                <p className="text-sm text-muted-foreground mb-5">
+                  {sendSheetIntent === "generate"
+                    ? "Create your account to generate AI drafts. ChaseHQ sends from your Gmail — you review every message."
+                    : `Create your account to send to ${invoice.clientEmail || invoice.client}. ChaseHQ sends from your Gmail — you review every message.`}
                 </p>
-              )}
-              <button
-                onClick={handlePaywall}
-                disabled={paywallPhase !== "idle"}
-                className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-90"
-              >
-                {paywallPhase === "idle" && (trialEndsAt ? "Subscribe — $19.99/month" : "Start 14-day free trial")}
-                {paywallPhase === "confirming" && (<><Loader2 className="w-4 h-4 animate-spin" />{trialEndsAt ? " Subscribing…" : " Starting trial…"}</>)}
-                {paywallPhase === "success" && (<><Check className="w-4 h-4" />{trialEndsAt ? " Subscribed!" : " Trial started!"}</>)}
-              </button>
-              <button
-                onClick={() => setAuthPaywallOpen(false)}
-                disabled={paywallPhase !== "idle"}
-                className="mt-3 w-full py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-              >
-                Maybe later
-              </button>
-            </div>
+                <button
+                  onClick={handleGoogleSignIn}
+                  disabled={googleLoading}
+                  className="w-full flex items-center justify-center gap-3 bg-card border border-border rounded-xl py-3.5 disabled:opacity-60 transition-all duration-200 ease-out active:scale-[0.97]"
+                >
+                  {googleLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-foreground" />
+                  ) : (
+                    <>
+                      <GoogleIcon className="w-5 h-5" />
+                      <span className="text-sm font-medium text-foreground">Continue with Google</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-xs text-muted-foreground text-center mt-3">Your draft is saved.</p>
+                <button
+                  onClick={() => setSendSheet("closed")}
+                  disabled={googleLoading}
+                  className="mt-3 w-full py-2.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                >
+                  Maybe later
+                </button>
+              </div>
+            )}
+
+            {/* State: NEEDS_TRIAL */}
+            {sendSheet === "needs_trial" && (
+              <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
+                <h2 className="text-base font-bold text-foreground mb-1">
+                  {trialEndsAt ? "Your trial has ended" : "Start Your 14-Day Trial"}
+                </h2>
+                <p className="text-xs text-muted-foreground mb-3">
+                  {trialEndsAt
+                    ? "Subscribe to keep sending follow-ups."
+                    : "14 days free, then $19.99/month. Cancel anytime."}
+                </p>
+                <div className="space-y-2 mb-4">
+                  {[
+                    "AI-drafted follow-ups in your tone",
+                    "Send from your own Gmail",
+                    "Chase timeline & payment history",
+                  ].map((f) => (
+                    <div key={f} className="flex items-center gap-2">
+                      <CheckCircle className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                      <p className="text-xs text-foreground">{f}</p>
+                    </div>
+                  ))}
+                </div>
+                {iapError && (
+                  <p className="text-xs text-destructive mb-2 text-center">{iapError}</p>
+                )}
+                <button
+                  onClick={handleStartTrial}
+                  disabled={iapLoading}
+                  className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-90 mb-2"
+                >
+                  {iapLoading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" />{trialEndsAt ? " Subscribing…" : " Starting trial…"}</>
+                  ) : (
+                    trialEndsAt ? "Subscribe — $19.99/month" : "Start Your 14-Day Trial"
+                  )}
+                </button>
+                <button
+                  onClick={() => setSendSheet("closed")}
+                  disabled={iapLoading}
+                  className="w-full py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                >
+                  Maybe later
+                </button>
+                <button
+                  onClick={handleRestorePurchases}
+                  disabled={iapLoading}
+                  className="mt-1 w-full py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                >
+                  Restore purchases
+                </button>
+              </div>
+            )}
+
+            {/* State: READY — explicit send confirmation with message preview */}
+            {sendSheet === "ready" && (
+              <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
+                <h2 className="text-base font-bold text-foreground mb-0.5">
+                  {hasFreeSend
+                    ? (followupsSent === 0 ? "Your first follow-up is on us" : "This one's on us")
+                    : isFinalNotice ? `Send Final Notice to ${invoice.client}?` : `Send to ${invoice.client}?`}
+                </h2>
+                <p className="text-xs text-muted-foreground mb-3">
+                  {hasFreeSend
+                    ? followupsSent === 0
+                      ? `Sending to ${invoice.clientEmail || invoice.client} · your next follow-up starts your free trial`
+                      : `Sending to ${invoice.clientEmail || invoice.client} · after this, your free 14-day trial begins`
+                    : `To: ${invoice.clientEmail || invoice.client}`}
+                </p>
+
+                <div className="bg-muted rounded-xl px-3 py-2 mb-2">
+                  <p className="text-[11px] text-muted-foreground mb-0.5">Subject</p>
+                  <p className="text-xs text-foreground font-medium">{currentSubject}</p>
+                </div>
+
+                <div className="bg-muted rounded-xl px-3 py-2 mb-3">
+                  <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap">
+                    {bodyExpanded ? currentDraft : bodyPreview}
+                  </p>
+                  {currentDraft.length > PREVIEW_CHARS && (
+                    <button
+                      onClick={() => setBodyExpanded(!bodyExpanded)}
+                      className="mt-1.5 flex items-center gap-1 text-[11px] text-primary"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${bodyExpanded ? "rotate-180" : ""}`} />
+                      {bodyExpanded ? "Show less" : "Show full message"}
+                    </button>
+                  )}
+                </div>
+
+                {isFinalNotice && (
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 mb-3">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
+                      This is a final escalation notice. Review carefully before sending.
+                    </p>
+                  </div>
+                )}
+
+                {recentlySent && (
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 mb-3">
+                    <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      You sent a follow-up {formatAgo(msSinceLastSend!)} — this could come across as pushy.
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleSheetSend}
+                  disabled={sending}
+                  className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-80 mb-2 ${
+                    isFinalNotice
+                      ? "bg-amber-600 hover:bg-amber-700 text-white"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  }`}
+                >
+                  {sending ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
+                  ) : (
+                    <><Send className="w-4 h-4" /> {isFinalNotice ? "Send Final Notice" : "Send message"}</>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    setSendSheet("closed");
+                    requestAnimationFrame(() => {
+                      editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    });
+                  }}
+                  disabled={sending}
+                  className="w-full py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                >
+                  Edit draft
+                </button>
+              </div>
+            )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

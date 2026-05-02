@@ -1,26 +1,25 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
-  ArrowLeft, RefreshCw, Send, Loader2, AlertTriangle, Shuffle, Sparkles, CalendarIcon,
+  ArrowLeft, RefreshCw, Send, Loader2, Info, Shuffle, Sparkles, CalendarIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useFlow } from "@/flow/FlowMachine";
 import { savePending, markGuestOnboarded } from "@/lib/localInvoice";
-import { startGoogleOAuth } from "@/lib/oauth";
 import MockIAPSheet from "@/components/onboarding/MockIAPSheet";
-import { GoogleIcon } from "@/components/GoogleIcon";
+import { GoogleAuthSheet } from "@/components/auth/GoogleAuthSheet";
 import { generateFollowup } from "@/hooks/useSupabaseData";
 import { useActionGate } from "@/hooks/useActionGate";
 import { getDefaultDraft, getTemplateDraft, TEMPLATE_COUNT, type Tone } from "@/components/invoice/DraftTemplates";
 import type { Invoice } from "@/lib/data";
+import { formatDate } from "@/lib/data";
 import { differenceInDays, format } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
-const TONES: Tone[] = ["Polite", "Friendly", "Firm", "Urgent", "Final Notice"];
+const TONES: Tone[] = ["Friendly", "Firm", "Urgent", "Final Notice"];
 const FIELDS_KEY = "guest_draft_fields_v1";
 
 const CTA_BY_TONE: Record<Tone, string> = {
-  "Polite":       "Send this gently",
   "Friendly":     "Send a warm nudge",
   "Firm":         "Send this clearly",
   "Urgent":       "Send — they need to know",
@@ -33,9 +32,7 @@ function buildGuestInvoice(client: string, amount: string, dueDateISO: string, c
   today.setHours(0, 0, 0, 0);
   const due = dueDateISO ? new Date(dueDateISO + "T00:00:00") : today;
   const daysPastDue = Math.max(0, differenceInDays(today, due));
-  const displayDate = dueDateISO
-    ? new Date(dueDateISO + "T00:00:00").toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
-    : "";
+  const displayDate = dueDateISO ? formatDate(dueDateISO) : "";
   const status = daysPastDue > 0 ? "Overdue" : "Upcoming";
   return {
     id: "INV-001",
@@ -82,7 +79,6 @@ export default function GuestDraftScreen() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [iapSheetOpen, setIapSheetOpen] = useState(false);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
 
   const [tone, setTone] = useState<Tone>("Friendly");
   const [currentSubject, setCurrentSubject] = useState("");
@@ -115,7 +111,7 @@ export default function GuestDraftScreen() {
   // Run synchronously-ish via useMemo to avoid the one-render flash of empty draft
   const defaultDraft = useMemo(() => {
     if (!fieldsComplete) return null;
-    return getDefaultDraft(invoice, tone);
+    return getDefaultDraft(invoice, tone, "[Your Name]");
   }, [tone, fieldsComplete, invoice]);
 
   const prevDefaultRef = useRef<typeof defaultDraft>(null);
@@ -137,7 +133,7 @@ export default function GuestDraftScreen() {
     if (!fieldsComplete) return;
     const nextIndex = (templateIndex + 1) % TEMPLATE_COUNT;
     setTemplateIndex(nextIndex);
-    const t = getTemplateDraft(invoice, tone, nextIndex);
+    const t = getTemplateDraft(invoice, tone, nextIndex, "[Your Name]");
     setCurrentSubject(t.subject);
     setCurrentDraft(t.message);
     setIsAiGenerated(false);
@@ -172,7 +168,7 @@ export default function GuestDraftScreen() {
       } else {
         // Fall back to next template variant rather than showing an error state
         const nextIndex = (templateIndex + 1) % TEMPLATE_COUNT;
-        const t = getTemplateDraft(invoice, tone, nextIndex);
+        const t = getTemplateDraft(invoice, tone, nextIndex, "[Your Name]");
         setCurrentSubject(t.subject);
         setCurrentDraft(t.message);
         setTemplateIndex(nextIndex);
@@ -223,16 +219,7 @@ export default function GuestDraftScreen() {
     setIapSheetOpen(true);
   }
 
-  async function handleGoogleSignUp() {
-    if (googleLoading) return;
-    setGoogleLoading(true);
-    send("REQUEST_AUTH");
-    const { error } = await startGoogleOAuth(window.location.origin + "/auth-after-invoice");
-    if (error) {
-      toast.error("Sign-in didn't go through. Give it another try.");
-      setGoogleLoading(false);
-    }
-  }
+
 
   const isFinalNotice = tone === "Final Notice";
 
@@ -241,7 +228,18 @@ export default function GuestDraftScreen() {
       {/* Header */}
       <div className="flex items-center gap-3 px-5 pt-[env(safe-area-inset-top,16px)] pb-4 border-b border-border shrink-0">
         <button
-          onClick={() => send("BACK_TO_DASHBOARD")}
+          onClick={() => {
+            if (client.trim()) {
+              savePending({
+                client: client.trim(),
+                clientEmail: clientEmail.trim(),
+                description: "",
+                amount: parseFloat(amount) || 0,
+                dueDate,
+              });
+            }
+            send("BACK_TO_DASHBOARD");
+          }}
           className="w-9 h-9 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -380,7 +378,7 @@ export default function GuestDraftScreen() {
 
               {isFinalNotice && (
                 <div className="mb-4 flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
+                  <Info className="w-4 h-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
                   <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
                     This is a <strong>final escalation notice</strong>. Review carefully before sending.
                   </p>
@@ -415,7 +413,7 @@ export default function GuestDraftScreen() {
                 <>
                   {generationError && (
                     <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                       <p className="text-xs text-amber-800 dark:text-amber-200">AI unavailable — showing a template draft instead.</p>
                     </div>
                   )}
@@ -478,44 +476,13 @@ export default function GuestDraftScreen() {
         onCancel={() => { setIapSheetOpen(false); setSending(false); }}
       />
 
-      {authDialogOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 animate-fade-in"
-          onClick={() => !googleLoading && setAuthDialogOpen(false)}
-        >
-          <div
-            className="w-full max-w-md bg-card rounded-t-3xl shadow-2xl p-6 pb-[max(env(safe-area-inset-bottom,16px),24px)] animate-slide-in-up"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mx-auto w-10 h-1 rounded-full bg-border mb-5" />
-            <h2 className="text-lg font-bold text-foreground mb-1">Save your draft &amp; start trial</h2>
-            <p className="text-sm text-muted-foreground mb-5">
-              Create your account to start your 14-day free trial. Your draft will be waiting in the dashboard.
-            </p>
-            <button
-              onClick={handleGoogleSignUp}
-              disabled={googleLoading}
-              className="w-full flex items-center justify-center gap-3 bg-card border border-border rounded-xl py-3.5 disabled:opacity-60 transition-all duration-200 ease-out active:scale-[0.97]"
-            >
-              {googleLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin text-foreground" />
-              ) : (
-                <>
-                  <GoogleIcon className="w-5 h-5" />
-                  <span className="text-sm font-medium text-foreground">Continue with Google</span>
-                </>
-              )}
-            </button>
-            <button
-              onClick={() => setAuthDialogOpen(false)}
-              disabled={googleLoading}
-              className="mt-3 w-full py-2.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-            >
-              Maybe later
-            </button>
-          </div>
-        </div>
-      )}
+      <GoogleAuthSheet
+        open={authDialogOpen}
+        onClose={() => setAuthDialogOpen(false)}
+        variant="save_draft"
+        flowEvent="REQUEST_AUTH"
+        sendAfterAuth="send"
+      />
     </div>
   );
 }

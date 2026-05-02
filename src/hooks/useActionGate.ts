@@ -5,13 +5,13 @@ export type GateState = "loading" | "guest" | "authed_no_trial" | "allowed";
 
 export function useActionGate() {
   const { isAuthenticated, authReady } = useApp();
-  const { loading, isTrialing, isActive, isPastDue, trialEndsAt } = useEntitlement();
+  const { loading, canSend, trialEndsAt } = useEntitlement();
 
   let state: GateState;
   if (!authReady) state = "loading";
   else if (!isAuthenticated) state = "guest";
   else if (loading) state = "loading";
-  else if (isTrialing || isActive || isPastDue) state = "allowed";
+  else if (canSend) state = "allowed";
   else state = "authed_no_trial";
 
   return {

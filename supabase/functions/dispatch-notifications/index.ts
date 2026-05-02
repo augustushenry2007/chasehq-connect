@@ -84,6 +84,18 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    // Honor paused schedules — cancel rather than deliver
+    const { data: sched } = await admin
+      .from("followup_schedules")
+      .select("paused")
+      .eq("invoice_id", n.invoice_id)
+      .maybeSingle();
+    if (sched?.paused) {
+      await admin.from("notifications").update({ status: "canceled" }).eq("id", n.id);
+      canceled++;
+      continue;
+    }
+
     // Fetch user prefs (defaults if missing)
     const { data: prefs } = await admin
       .from("notification_preferences")

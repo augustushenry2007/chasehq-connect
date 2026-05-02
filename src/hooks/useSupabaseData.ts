@@ -3,6 +3,7 @@ import { useApp } from "@/context/AppContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 import type { Invoice as FrontendInvoice } from "@/lib/data";
+import { cancelForInvoice } from "@/lib/localNotifications";
 
 export type DbInvoice = Tables<"invoices">;
 export type DbFollowup = Tables<"followups">;
@@ -18,16 +19,32 @@ export async function createInvoice(userId: string, data: {
   description: string;
   amount: number;
   dueDate: string;
+  invoiceNumber?: string;
 }, senderEmail = ""): Promise<{ invoice: DbInvoice | null; error: string | null }> {
-  // Generate invoice number scoped to this user (RLS-safe).
-  const { count, error: countError } = await supabase
-    .from("invoices")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId);
+  let invoiceNumber: string;
 
-  // If the count fails (e.g. transient RLS), fall back to a timestamp-based suffix.
-  const baseNum = countError ? Math.floor(Date.now() / 1000) % 100000 : (count || 0) + 1;
-  const invoiceNumber = `INV-${String(baseNum).padStart(3, "0")}`;
+  if (data.invoiceNumber && data.invoiceNumber.trim()) {
+    invoiceNumber = data.invoiceNumber.trim();
+    // Reject duplicates per-user so the AI follow-ups + detail screen reference a unique ID.
+    const { data: existing } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("invoice_number", invoiceNumber)
+      .limit(1);
+    if (existing && existing.length > 0) {
+      toast.error(`Invoice ID "${invoiceNumber}" is already used. Try a different one.`);
+      return { invoice: null, error: "duplicate_invoice_number" };
+    }
+  } else {
+    // Auto-generate scoped to this user (RLS-safe).
+    const { count, error: countError } = await supabase
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+    const baseNum = countError ? Math.floor(Date.now() / 1000) % 100000 : (count || 0) + 1;
+    invoiceNumber = `INV-${String(baseNum).padStart(3, "0")}`;
+  }
 
   const { data: invoice, error } = await supabase.from("invoices").insert({
     user_id: userId,
@@ -58,18 +75,34 @@ export async function markInvoicePaid(
   restoreStatus: string = "Upcoming"
 ): Promise<boolean> {
   const newStatus = paid ? "Paid" : restoreStatus;
-  const { error } = await supabase.from("invoices").update({ status: newStatus }).eq("invoice_number", invoiceNumber);
-  return !error;
+  const { data: inv, error } = await supabase
+    .from("invoices")
+    .update({ status: newStatus, paid_at: paid ? new Date().toISOString() : null })
+    .eq("invoice_number", invoiceNumber)
+    .select("id")
+    .single();
+  if (error || !inv) return false;
+  if (paid) {
+    await supabase
+      .from("notifications")
+      .update({ status: "canceled" })
+      .eq("invoice_id", inv.id)
+      .eq("status", "pending");
+  }
+  return true;
 }
 
 export async function deleteInvoice(invoiceId: string): Promise<boolean> {
-  // Best-effort cleanup of related followups (no FK cascade in schema)
+  // Best-effort cleanup of related rows (no FK cascade in schema)
   await supabase.from("followups").delete().eq("invoice_id", invoiceId);
+  await supabase.from("notifications").delete().eq("invoice_id", invoiceId);
+  await supabase.from("followup_schedules").delete().eq("invoice_id", invoiceId);
   const { error } = await supabase.from("invoices").delete().eq("id", invoiceId);
   if (error) {
     toast.error("We couldn't remove that invoice. Give it another try.");
     return false;
   }
+  await cancelForInvoice(invoiceId);
   toast.success("Removed.");
   return true;
 }
@@ -93,11 +126,20 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 export async function generateFollowup(invoice: FrontendInvoice, tone: string, previousMessage?: string, senderDisplayName?: string): Promise<{ subject: string; message: string } | null> {
   try {
+    // Tells the AI whether the user has already sent prior follow-ups on this
+    // invoice. Critical for Final Notice on back-dated invoices: with 0 priors,
+    // the prompt avoids the "as I mentioned previously" framing.
+    const { count } = await supabase
+      .from("followups")
+      .select("id", { count: "exact", head: true })
+      .eq("invoice_id", invoice.dbId);
+    const priorFollowupCount = count ?? 0;
+
     const { data, error } = await withTimeout(
       supabase.functions.invoke("generate-followup", {
-        body: { invoice, tone, previousMessage, senderDisplayName },
+        body: { invoice, tone, previousMessage, senderDisplayName, priorFollowupCount },
       }),
-      15_000,
+      25_000,
     );
 
     if (error) {
@@ -185,6 +227,7 @@ export async function validateAppleReceipt(
   productId: string,
   mock: boolean,
   restore = false,
+  clientEntitlement?: { isTrialing?: boolean; expiresAt?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const { data: { session } } = await supabase.auth.getSession();
   const userToken = session?.access_token ?? "";
@@ -198,7 +241,7 @@ export async function validateAppleReceipt(
       "Authorization": `Bearer ${anonKey}`,
       "X-User-Token": userToken,
     },
-    body: JSON.stringify({ receipt, productId, mock, restore }),
+    body: JSON.stringify({ receipt, productId, mock, restore, ...(clientEntitlement ? { clientEntitlement } : {}) }),
   });
 
   const data = await res.json().catch(() => null);

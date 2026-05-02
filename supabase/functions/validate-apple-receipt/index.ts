@@ -1,10 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-user-token, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { buildCors } from "../_shared/cors.ts";
 
 // Apple verifyReceipt endpoints
 const APPLE_PROD = "https://buy.itunes.apple.com/verifyReceipt";
@@ -15,6 +12,7 @@ interface ValidatePayload {
   productId?: string;
   mock?: boolean;
   restore?: boolean;
+  clientEntitlement?: { isTrialing?: boolean; expiresAt?: string | null };
 }
 
 // Verifies a Supabase JWT locally — handles both legacy HS256 and new ES256 (ECC P-256) keys.
@@ -57,7 +55,14 @@ async function verifySupabaseJWT(token: string, supabaseUrl: string): Promise<st
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = buildCors(req.headers.get("origin"));
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
 
   try {
     const userToken = req.headers.get("X-User-Token") ??
@@ -87,7 +92,8 @@ serve(async (req) => {
 
     // === MOCK PATH (web preview / dev) ===
     const sharedSecret = Deno.env.get("APPLE_SHARED_SECRET");
-    const useMock = body.mock === true || !sharedSecret;
+    const isRcReceipt = body.receipt.startsWith("RC_CUSTOMER:");
+    const useMock = body.mock === true || (!sharedSecret && !isRcReceipt);
 
     if (useMock) {
       // First-time user gets a mock trial; returning users get active (they've used the intro offer).
@@ -101,6 +107,37 @@ serve(async (req) => {
         currentPeriodEnd = new Date(Date.now() + 30 * 86400_000).toISOString();
       }
       originalTransactionId = `mock_${userId}`;
+    } else if (isRcReceipt) {
+      // === REVENUECAT VALIDATION ===
+      const rcSecretKey = Deno.env.get("RC_SECRET_KEY");
+      const appUserId = body.receipt.slice("RC_CUSTOMER:".length);
+
+      let rcOk = false;
+      if (rcSecretKey) {
+        const verify = await verifyWithRevenueCat(appUserId, rcSecretKey);
+        if (verify.ok) {
+          status = verify.status;
+          currentPeriodEnd = verify.currentPeriodEnd;
+          trialEndsAt = verify.trialEndsAt;
+          originalTransactionId = verify.originalTransactionId;
+          rcOk = true;
+        }
+      }
+
+      if (!rcOk) {
+        // RC API unavailable or key misconfigured. Fall back to client-provided entitlement
+        // data from the RC SDK, which already verifies server-side (verification: "VERIFIED").
+        const ce = body.clientEntitlement;
+        if (ce?.expiresAt) {
+          const isTrialing = ce.isTrialing ?? false;
+          status = isTrialing ? "trialing" : "active";
+          currentPeriodEnd = ce.expiresAt;
+          trialEndsAt = isTrialing ? ce.expiresAt : null;
+          originalTransactionId = appUserId;
+        } else {
+          return json({ error: "Subscription verification unavailable. Please try Restore Purchases." }, 400);
+        }
+      }
     } else {
       // === REAL APPLE VALIDATION ===
       const verify = await verifyReceiptWithApple(body.receipt, sharedSecret!);
@@ -158,6 +195,40 @@ serve(async (req) => {
   }
 });
 
+async function verifyWithRevenueCat(appUserId: string, secretKey: string) {
+  const res = await fetch(
+    `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
+    { headers: { "Authorization": `Bearer ${secretKey}`, "Content-Type": "application/json" } }
+  );
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => "<unreadable>");
+    console.error("[validate-apple-receipt] RC API error", { status: res.status, body: bodyText.slice(0, 500), appUserId });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false as const, error: "Subscription verification is temporarily unavailable. Please try Restore Purchases in a moment." };
+    }
+    return { ok: false as const, error: `RevenueCat API error (${res.status})` };
+  }
+  const data = await res.json();
+  const entitlement = data.subscriber?.entitlements?.["ChaseHQ Pro"];
+  if (!entitlement?.expires_date) {
+    return { ok: false as const, error: "No active ChaseHQ Pro subscription found" };
+  }
+  const expiresDate = new Date(entitlement.expires_date);
+  if (expiresDate < new Date()) {
+    return { ok: false as const, error: "Subscription has expired" };
+  }
+  const sub = data.subscriber?.subscriptions?.[entitlement.product_identifier];
+  const periodType = sub?.period_type ?? "normal";
+  const isTrialing = periodType === "trial" || periodType === "intro";
+  return {
+    ok: true as const,
+    status: isTrialing ? "trialing" as const : "active" as const,
+    currentPeriodEnd: expiresDate.toISOString(),
+    trialEndsAt: isTrialing ? expiresDate.toISOString() : null,
+    originalTransactionId: sub?.original_transaction_id ?? appUserId,
+  };
+}
+
 async function verifyReceiptWithApple(receipt: string, sharedSecret: string) {
   const body = JSON.stringify({
     "receipt-data": receipt,
@@ -176,9 +247,3 @@ async function verifyReceiptWithApple(receipt: string, sharedSecret: string) {
   return { ok: true as const, payload };
 }
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}

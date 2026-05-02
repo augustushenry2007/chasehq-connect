@@ -1,19 +1,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { buildCors } from "../_shared/cors.ts";
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = buildCors(req.headers.get("origin"));
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Not authenticated" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401, headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -27,14 +25,14 @@ serve(async (req) => {
     if (authError || !user) {
       console.error("Auth failed:", authError);
       return new Response(JSON.stringify({ error: "Invalid session" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401, headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
     const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID");
     if (!clientId) {
       return new Response(JSON.stringify({ error: "Google OAuth not configured" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500, headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -58,12 +56,12 @@ serve(async (req) => {
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
     return new Response(JSON.stringify({ url: authUrl }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("gmail-oauth-start error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 });

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { formatUSD, type Invoice } from "@/lib/data";
+import { differenceInDays, parseISO } from "date-fns";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Search, Plus, X, ChevronRight, FileText } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
@@ -11,12 +12,12 @@ import { useFlow } from "@/flow/FlowMachine";
 import { FlowState } from "@/flow/states";
 import { useApp } from "@/context/AppContext";
 import { startGoogleOAuth } from "@/lib/oauth";
-
+import { readPending } from "@/lib/localInvoice";
 type FilterTab = "all" | "overdue" | "upcoming" | "paid";
 
 function getFiltered(invoices: Invoice[], tab: FilterTab, query: string) {
   let list = invoices;
-  if (tab === "overdue") list = list.filter((i) => i.status === "Escalated" || i.status === "Overdue" || i.status === "Follow-up");
+  if (tab === "overdue") list = list.filter((i) => i.status === "Escalated" || i.status === "Overdue");
   else if (tab === "upcoming") list = list.filter((i) => i.status === "Upcoming");
   else if (tab === "paid") list = list.filter((i) => i.status === "Paid");
   if (query.trim()) {
@@ -28,7 +29,7 @@ function getFiltered(invoices: Invoice[], tab: FilterTab, query: string) {
 
 function getTabCount(invoices: Invoice[], tab: FilterTab) {
   if (tab === "all") return invoices.length;
-  if (tab === "overdue") return invoices.filter((i) => ["Escalated", "Overdue", "Follow-up"].includes(i.status)).length;
+  if (tab === "overdue") return invoices.filter((i) => i.status === "Escalated" || i.status === "Overdue").length;
   if (tab === "upcoming") return invoices.filter((i) => i.status === "Upcoming").length;
   if (tab === "paid") return invoices.filter((i) => i.status === "Paid").length;
   return 0;
@@ -50,7 +51,7 @@ export default function InvoicesScreen() {
   const [guestDraftCreated, setGuestDraftCreated] = useState(false);
   const invoiceCreatedRef = useRef(false);
   const { state: flowState, send } = useFlow();
-  const { isAuthenticated } = useApp();
+  const { isAuthenticated, authReady } = useApp();
 
   const { invoices, loading, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
@@ -78,12 +79,17 @@ export default function InvoicesScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleCreated() {
+  async function handleCreated(invoiceId?: string) {
     invoiceCreatedRef.current = true;
-    refetch();
     if (!isAuthenticated) {
       setGuestDraftCreated(true);
-      send("INVOICE_CREATED");
+      send("INVOICE_CREATED", { invoiceId: "guest" });
+      navigate("/invoice/guest", { replace: true });
+      return;
+    }
+    if (invoiceId) {
+      navigate(`/invoice/${invoiceId}`, { replace: true });
+      refetch();
     } else if (flowState === FlowState.CREATE_INVOICE) {
       send("INVOICE_CREATED");
     }
@@ -99,7 +105,7 @@ export default function InvoicesScreen() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden pt-[env(safe-area-inset-top,0px)]">
         <div className="px-5 pt-5 pb-3 flex items-start justify-between">
           <div className="space-y-2">
             <div className="h-6 w-32 bg-muted rounded-md animate-pulse" />
@@ -132,8 +138,8 @@ export default function InvoicesScreen() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden animate-page-enter">
-      {!isAuthenticated && (
+    <div className="flex-1 flex flex-col overflow-hidden pt-[env(safe-area-inset-top,0px)] animate-page-enter">
+      {authReady && !isAuthenticated && (
         <div className="mx-5 mt-4 rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 border border-primary/20 p-4">
           <p className="text-sm font-bold text-foreground">
             {guestDraftCreated ? "Your draft is saved on this device" : "Finish setting up your account"}
@@ -146,7 +152,9 @@ export default function InvoicesScreen() {
           <button
             onClick={async () => {
               send("REQUEST_POST_INVOICE_AUTH");
-              const { error } = await startGoogleOAuth(window.location.origin + "/auth-after-invoice");
+              const pending = readPending();
+              const piSuffix = pending ? "?pi=" + encodeURIComponent(JSON.stringify(pending)) : "";
+              const { error } = await startGoogleOAuth(window.location.origin + "/auth-after-invoice" + piSuffix);
               if (error) toast.error("Sign-in didn't go through. Give it another try.");
             }}
             className="w-full bg-primary text-primary-foreground py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.97]"
@@ -162,11 +170,6 @@ export default function InvoicesScreen() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {isAuthenticated && <NotificationBell />}
-          {!isEmptyWorkspace && (
-            <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3.5 py-2 rounded-xl text-sm font-semibold">
-              <Plus className="w-4 h-4" /> New
-            </button>
-          )}
         </div>
       </div>
 
@@ -216,7 +219,7 @@ export default function InvoicesScreen() {
               onClick={() => setShowNew(true)}
               className="mt-5 flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold"
             >
-              <Plus className="w-4 h-4" /> Add your first invoice
+              <Plus className="w-4 h-4" /> Add Your First Invoice
             </button>
           </div>
         ) : filtered.length === 0 ? (
@@ -236,8 +239,13 @@ export default function InvoicesScreen() {
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground truncate">{item.client}</span>
+                  <span className="text-sm font-semibold text-foreground truncate capitalize">{item.client}</span>
                   <span className="text-xs text-muted-foreground">{item.id}</span>
+                  {differenceInDays(parseISO(item.createdAtISO), parseISO(item.dueDateISO)) > 1 && (
+                    <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                      Logged late
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground truncate mt-0.5">{item.description}</p>
                 <div className="flex items-center gap-2 mt-1.5">

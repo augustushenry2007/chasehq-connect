@@ -1,8 +1,8 @@
 // Shared zod schemas for client-side input validation.
 import { z } from "zod";
 
-// Invoice creation: positive amount, valid email (or empty), today-or-future date,
-// length-bounded text fields.
+// Invoice creation: positive amount, valid email (or empty), well-formed date
+// (past dates allowed for back-dated invoices), length-bounded text fields.
 export const newInvoiceSchema = z.object({
   client: z
     .string()
@@ -26,16 +26,7 @@ export const newInvoiceSchema = z.object({
     .lte(10_000_000, { message: "Amount is too large." }),
   dueDate: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Invalid date." })
-    .refine(
-      (iso) => {
-        const d = new Date(iso + "T00:00:00");
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        return d.getTime() >= today.getTime();
-      },
-      { message: "Due date can't be in the past." },
-    ),
+    .regex(/^\d{4}-\d{2}-\d{2}$/, { message: "Invalid date." }),
 });
 
 export type NewInvoiceInput = z.infer<typeof newInvoiceSchema>;

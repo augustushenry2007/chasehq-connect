@@ -1,40 +1,59 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildCors } from "../_shared/cors.ts";
+import { checkRateLimit, getClientIp, rateLimitedResponse } from "../_shared/rate_limit.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-const TONE_INSTRUCTIONS: Record<string, string> = {
-  Polite:
-    "Warm, respectful, slightly apologetic. Assume the client simply forgot. Use soft language ('just a gentle nudge', 'whenever you have a moment'). 4-6 sentences.",
-  Friendly:
-    "Casual, upbeat, conversational. Use contractions and a personal tone. Sound like a human checking in, not a collections department. 4-6 sentences.",
-  Firm:
-    "Direct, matter-of-fact, professional. No apologies, no padding. State the facts and the expected action clearly. 4-6 sentences.",
-  Urgent:
-    "Serious and time-sensitive. Emphasize that this is now overdue and needs immediate attention. Mention that further action may follow. 4-6 sentences.",
-  "Final Notice":
-    "Formal, escalation-level final communication. Reference that multiple prior reminders have been sent. State clearly that if payment is not received within 7 days, next steps may include referral to a third-party collections agency or further recovery action. Do NOT make legal threats or claims a lawyer would make. Do NOT cite specific laws. Stay professional and offer one last chance to resolve amicably. The subject line MUST start with 'FINAL NOTICE — '. 6-9 sentences.",
-};
+function buildToneInstruction(tone: string, priorFollowupCount: number): string {
+  const TONE_INSTRUCTIONS: Record<string, string> = {
+    Polite:
+      "Warm, respectful, slightly apologetic. Assume the client simply forgot. Use soft language ('just a gentle nudge', 'whenever you have a moment'). 4-6 sentences.",
+    Friendly:
+      "Casual, upbeat, conversational. Use contractions and a personal tone. Sound like a human checking in, not a collections department. 4-6 sentences.",
+    Firm:
+      "Direct, matter-of-fact, professional. No apologies, no padding. State the facts and the expected action clearly. 4-6 sentences.",
+    Urgent:
+      "Serious and time-sensitive. Emphasize that this is now overdue and needs immediate attention. Mention that further action may follow. 4-6 sentences.",
+  };
+  if (tone === "Final Notice") {
+    if (priorFollowupCount === 0) {
+      return "Formal, escalation-level final communication, but this is the FIRST message the sender is sending about this invoice — the user just logged a back-dated invoice that's already significantly overdue. Acknowledge that this may be the first the recipient is hearing on this account (e.g. 'I realize this may be the first message you've received from me about this invoice'). Do NOT reference 'multiple prior reminders' or 'as I mentioned previously' — there are none. State clearly that if payment is not received within 7 days, next steps may include referral to a third-party collections agency or further recovery action. Do NOT make legal threats. Stay professional and offer a clear path to resolve. The subject line MUST start with 'FINAL NOTICE — '. 6-9 sentences.";
+    }
+    return "Formal, escalation-level final communication. Reference that multiple prior reminders have been sent. State clearly that if payment is not received within 7 days, next steps may include referral to a third-party collections agency or further recovery action. Do NOT make legal threats or claims a lawyer would make. Do NOT cite specific laws. Stay professional and offer one last chance to resolve amicably. The subject line MUST start with 'FINAL NOTICE — '. 6-9 sentences.";
+  }
+  return TONE_INSTRUCTIONS[tone] || `Use a ${tone.toLowerCase()} tone.`;
+}
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = buildCors(req.headers.get("origin"));
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+
+  // verify_jwt is false on this function (the guest-draft flow calls it before
+  // signup), so the only abuse-blocker is a per-IP rate limit. 20 generations/min
+  // is plenty for a real user filling out an invoice form, well below cost-of-Gemini-abuse.
+  const ip = getClientIp(req);
+  const supabaseAdmin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const rl = await checkRateLimit(supabaseAdmin, `ip:${ip}`, "generate-followup", 20);
+  if (!rl.allowed) return rateLimitedResponse(cors);
 
   try {
-    const { invoice, tone, previousMessage, senderDisplayName } = await req.json();
+    const { invoice, tone, previousMessage, senderDisplayName, priorFollowupCount } = await req.json();
 
     if (!invoice || !tone) {
       return new Response(JSON.stringify({ error: "Missing invoice or tone" }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
-    const toneInstruction = TONE_INSTRUCTIONS[tone] || `Use a ${tone.toLowerCase()} tone.`;
+    // Default 1 (legacy clients): preserves the old "reference multiple prior
+    // reminders" behavior for Final Notice. New clients pass an actual count.
+    const toneInstruction = buildToneInstruction(tone, typeof priorFollowupCount === "number" ? priorFollowupCount : 1);
 
     // Prefer the explicit display name; fall back to deriving from email
     const rawSender = invoice.sent_from || invoice.sentFrom || "";
@@ -134,13 +153,13 @@ Variation seed: ${variationSeed}${previousBlock}`;
       if (lastStatus === 429) {
         return new Response(JSON.stringify({ error: "Rate limited, please try again later." }), {
           status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
       if (lastStatus === 402) {
         return new Response(JSON.stringify({ error: "Credits exhausted. Please add funds." }), {
           status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
       const friendly = lastStatus === 503
@@ -148,7 +167,7 @@ Variation seed: ${variationSeed}${previousBlock}`;
         : `AI gateway ${lastStatus}: ${lastErrorText.slice(0, 300)}`;
       return new Response(JSON.stringify({ error: friendly }), {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -165,7 +184,7 @@ Variation seed: ${variationSeed}${previousBlock}`;
           console.error("No tool_calls or content:", JSON.stringify(data).slice(0, 1000));
           return new Response(JSON.stringify({ error: "AI returned empty response" }), {
             status: 500,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            headers: { ...cors, "Content-Type": "application/json" },
           });
         }
         const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -175,25 +194,25 @@ Variation seed: ${variationSeed}${previousBlock}`;
       console.error("Parse error:", parseErr, "data:", JSON.stringify(data).slice(0, 1000));
       return new Response(
         JSON.stringify({ error: `AI response parse failed: ${parseErr instanceof Error ? parseErr.message : "unknown"}` }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
       );
     }
 
     if (!result?.subject || !result?.message) {
       return new Response(
         JSON.stringify({ error: "AI response missing subject/message" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
       );
     }
 
     return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("generate-followup error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 });

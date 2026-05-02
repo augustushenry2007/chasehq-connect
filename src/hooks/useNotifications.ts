@@ -1,14 +1,18 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/context/AppContext";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
 import {
-  DEFAULT_STEPS,
+  buildScheduleForLateness,
+  getDefaultScheduleForInvoice,
   computeStepDate,
   buildNotificationTitle,
   buildNotificationBody,
   getUserTimezone,
   type ScheduleStep,
+  type SchedulePreset,
 } from "@/lib/scheduleDefaults";
+import { scheduleForInvoice } from "@/lib/localNotifications";
 
 export type NotificationRow = {
   id: string;
@@ -52,16 +56,26 @@ export function useNotifications() {
         .in("status", ["delivered", "read"])
         .order("scheduled_for", { ascending: false })
         .limit(50),
-      supabase
-        .from("notifications")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("status", "pending")
-        .order("scheduled_for", { ascending: true })
-        .limit(10),
+      (() => {
+        const horizon = new Date();
+        horizon.setDate(horizon.getDate() + 7);
+        return supabase
+          .from("notifications")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("status", "pending")
+          .lte("scheduled_for", horizon.toISOString())
+          .order("scheduled_for", { ascending: true })
+          .limit(50);
+      })(),
     ]);
     setNotifications((recentRes.data as NotificationRow[]) || []);
-    setUpcoming((upcomingRes.data as NotificationRow[]) || []);
+    const seen = new Set<string>();
+    const deduped: NotificationRow[] = [];
+    for (const n of (upcomingRes.data as NotificationRow[]) || []) {
+      if (!seen.has(n.invoice_id)) { seen.add(n.invoice_id); deduped.push(n); }
+    }
+    setUpcoming(deduped);
     setLoading(false);
   }, [user?.id]);
 
@@ -112,31 +126,46 @@ export function useNotifications() {
 /**
  * Create the default schedule + notification rows for a freshly created invoice.
  * Best-effort: fails silently so invoice creation isn't blocked.
+ *
+ * Uses buildScheduleForLateness so back-dated invoices get a sensibly-bucketed
+ * schedule rather than duplicate Final Notice steps from the old tone-floor logic.
  */
 export async function createScheduleForInvoice(
   userId: string,
-  invoice: { id: string; client: string; amount: number; due_date: string },
-  steps: ScheduleStep[] = DEFAULT_STEPS
+  invoice: { id: string; client: string; amount: number; due_date: string; created_at?: string },
+  preset?: SchedulePreset,
 ): Promise<void> {
   try {
     const tz = getUserTimezone();
+    const chosenPreset = preset ?? ((localStorage.getItem(STORAGE_KEYS.SCHEDULE_PRESET) ?? "active") as SchedulePreset);
+    const effectiveSteps = preset
+      ? buildScheduleForLateness(invoice.due_date, new Date().toISOString(), chosenPreset)
+      : getDefaultScheduleForInvoice(invoice.due_date, new Date().toISOString());
+
     await supabase.from("followup_schedules").insert({
       invoice_id: invoice.id,
       user_id: userId,
-      steps: steps as unknown as never,
+      steps: effectiveSteps as unknown as never,
       timezone: tz,
     });
-    const rows = steps.map((step, idx) => ({
+
+    const rows = effectiveSteps.map((step, idx) => ({
       user_id: userId,
       invoice_id: invoice.id,
       schedule_step_index: idx,
       type: step.type,
-      title: buildNotificationTitle(step.type, invoice.client, invoice.amount),
+      title: buildNotificationTitle(step.type, invoice.client, invoice.amount, step.tone),
       body: buildNotificationBody(step.type, invoice.client),
       scheduled_for: computeStepDate(invoice.due_date, step.offset_days),
       status: "pending" as const,
     }));
     if (rows.length) await supabase.from("notifications").insert(rows);
+
+    const anchorInvoice = {
+      dueDateISO: invoice.due_date,
+      createdAtISO: invoice.created_at ?? new Date().toISOString(),
+    };
+    await scheduleForInvoice(invoice.id, effectiveSteps, anchorInvoice, invoice.client, invoice.amount);
   } catch (e) {
     console.warn("Failed to create notification schedule:", e);
   }
@@ -144,8 +173,10 @@ export async function createScheduleForInvoice(
 
 /**
  * Mark the next pending step as sent (called after a successful Send).
+ * If sentTone is "Final Notice", also cancels all remaining pending steps —
+ * Final Notice is terminal; no automated steps should follow it.
  */
-export async function advanceScheduleAfterSend(invoiceId: string): Promise<void> {
+export async function advanceScheduleAfterSend(invoiceId: string, sentTone?: string): Promise<void> {
   try {
     const { data: pending } = await supabase
       .from("notifications")
@@ -156,6 +187,13 @@ export async function advanceScheduleAfterSend(invoiceId: string): Promise<void>
       .limit(1);
     if (pending && pending.length > 0) {
       await supabase.from("notifications").update({ status: "delivered", delivered_at: new Date().toISOString() }).eq("id", pending[0].id);
+    }
+    if (sentTone === "Final Notice") {
+      await supabase
+        .from("notifications")
+        .update({ status: "canceled" })
+        .eq("invoice_id", invoiceId)
+        .eq("status", "pending");
     }
   } catch (e) {
     console.warn("advanceScheduleAfterSend failed:", e);

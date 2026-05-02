@@ -13,7 +13,7 @@ import { STORAGE_KEYS } from "@/lib/storageKeys";
  *  - On sign-out (auth lost), routes back to LANDING.
  */
 export function FlowBootstrap() {
-  const { authReady, profileReady, isAuthenticated, hasCompletedOnboarding, invoices, invoicesLoading, user } = useApp();
+  const { authReady, profileReady, isAuthenticated, hasCompletedOnboarding, tourCompleted, invoices, invoicesLoading, user } = useApp();
   const { state, send } = useFlow();
   const bootedRef = useRef(false);
   const lastAuthRef = useRef<boolean | null>(null);
@@ -116,7 +116,14 @@ export function FlowBootstrap() {
       return;
     }
 
-    // Authenticated + onboarded.
+    // Authenticated + onboarded but tour not yet seen → send to feature tour.
+    if (!tourCompleted) {
+      if (import.meta.env.DEV) console.log("[FLOW BOOT] Onboarded but tour not completed → FEATURE_TOUR");
+      send("DECIDE_SKIP");
+      return;
+    }
+
+    // Authenticated + onboarded + tour done.
     // OAuth sign-in wipes sessionStorage, so treat it as a resume.
     if (postOAuth) {
       if (import.meta.env.DEV) console.log("[FLOW BOOT] Post-OAuth, onboarded → BOOT_AUTHED_RESUMING");
@@ -132,7 +139,7 @@ export function FlowBootstrap() {
     }
     if (import.meta.env.DEV) console.log("[FLOW BOOT] Authenticated + onboarded →", firstRun ? "BOOT_AUTHED_FIRST_RUN" : "BOOT_AUTHED_RESUMING");
     send(firstRun ? "BOOT_AUTHED_FIRST_RUN" : "BOOT_AUTHED_RESUMING");
-  }, [authReady, profileReady, isAuthenticated, hasCompletedOnboarding, user, state, send]);
+  }, [authReady, profileReady, isAuthenticated, hasCompletedOnboarding, tourCompleted, user, state, send]);
 
   // React to auth changes after boot (sign-out and post-boot sign-in).
   useEffect(() => {
@@ -143,17 +150,31 @@ export function FlowBootstrap() {
     }
     if (lastAuthRef.current === true && isAuthenticated === false) {
       send("SIGN_OUT");
+      lastAuthRef.current = isAuthenticated;
+      return;
     }
-    // User signed in after initial boot (e.g. email confirmation link clicked
-    // in the same tab, or auth completed while app was already showing).
+    // User signed in after initial boot (e.g. "Already have an account?" flow,
+    // email confirmation link, or auth completed while app was already showing).
     if (lastAuthRef.current === false && isAuthenticated === true) {
-      if (import.meta.env.DEV) console.log("[FLOW BOOT] Post-boot sign-in detected → AUTH_SUCCESS from", state);
+      // Wait for profile so we can route based on hasCompletedOnboarding / tourCompleted.
+      // Don't update lastAuthRef yet — the effect must re-fire when profileReady flips.
+      if (!profileReady) return;
+      if (import.meta.env.DEV) console.log("[FLOW BOOT] Post-boot sign-in detected, profileReady. hasCompletedOnboarding:", hasCompletedOnboarding, "tourCompleted:", tourCompleted, "state:", state);
       // POST_INVOICE_AUTH manages its own routing once flushedInvoiceId resolves.
-      if (state === FlowState.POST_INVOICE_AUTH) return;
-      send("AUTH_SUCCESS");
+      if (state === FlowState.POST_INVOICE_AUTH) {
+        lastAuthRef.current = isAuthenticated;
+        return;
+      }
+      if (!hasCompletedOnboarding) {
+        send("START");           // LANDING → ONBOARDING
+      } else if (!tourCompleted) {
+        send("DECIDE_SKIP");     // LANDING → FEATURE_TOUR
+      } else {
+        send("AUTH_SUCCESS");    // LANDING → DASHBOARD_ACTIVE
+      }
     }
     lastAuthRef.current = isAuthenticated;
-  }, [authReady, isAuthenticated, send, state]);
+  }, [authReady, isAuthenticated, profileReady, hasCompletedOnboarding, tourCompleted, send, state]);
 
   // Once invoices are known, refine dashboard state.
   useEffect(() => {

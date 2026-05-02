@@ -12,6 +12,19 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { newInvoiceSchema } from "@/lib/validation";
+import { differenceInDays, parseISO } from "date-fns";
+import { getStartingTone } from "@/lib/scheduleDefaults";
+
+function toAsciiDigits(s: string): string {
+  return s.replace(/[०-९০-৯٠-٩۰-۹]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    if (code >= 0x0966 && code <= 0x096F) return String(code - 0x0966);
+    if (code >= 0x09E6 && code <= 0x09EF) return String(code - 0x09E6);
+    if (code >= 0x0660 && code <= 0x0669) return String(code - 0x0660);
+    if (code >= 0x06F0 && code <= 0x06F9) return String(code - 0x06F0);
+    return ch;
+  }).replace(/[^0-9.]/g, "");
+}
 
 function formatDateMask(input: string): string {
   const digits = input.replace(/\D/g, "").slice(0, 8);
@@ -30,9 +43,9 @@ function maskedToISO(masked: string): string {
 
 // Module-level draft cache so form survives unmount/remount during navigation hiccups.
 interface Draft {
-  client: string; email: string; description: string; amount: string; dueDateMasked: string;
+  client: string; email: string; description: string; amount: string; dueDateMasked: string; invoiceId: string;
 }
-const EMPTY_DRAFT: Draft = { client: "", email: "", description: "", amount: "", dueDateMasked: "" };
+const EMPTY_DRAFT: Draft = { client: "", email: "", description: "", amount: "", dueDateMasked: "", invoiceId: "" };
 let draftCache: Draft = { ...EMPTY_DRAFT };
 
 export default function NewInvoiceModal({
@@ -42,7 +55,7 @@ export default function NewInvoiceModal({
 }: {
   visible: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (invoiceId?: string) => void;
 }) {
   const { user, isAuthenticated } = useApp();
   const [client, setClient] = useState(draftCache.client);
@@ -50,20 +63,34 @@ export default function NewInvoiceModal({
   const [description, setDescription] = useState(draftCache.description);
   const [amount, setAmount] = useState(draftCache.amount);
   const [dueDateMasked, setDueDateMasked] = useState(draftCache.dueDateMasked);
+  const [invoiceIdInput, setInvoiceIdInput] = useState(draftCache.invoiceId);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Mirror local state into the module-level cache so it persists across remounts.
   useEffect(() => {
-    draftCache = { client, email, description, amount, dueDateMasked };
-  }, [client, email, description, amount, dueDateMasked]);
+    draftCache = { client, email, description, amount, dueDateMasked, invoiceId: invoiceIdInput };
+  }, [client, email, description, amount, dueDateMasked, invoiceIdInput]);
 
   if (!visible) return null;
 
   const dueDateISO = maskedToISO(dueDateMasked);
   const dueDateValid = dueDateMasked === "" || dueDateISO !== "";
   const canSubmit = client && amount && dueDateISO && !creating;
+
+  // For back-dated invoices, preview what the chase schedule will actually do.
+  // Uses the same primitive the schedule generator uses, so what we show here
+  // is what the user will see on ChaseSchedule after Save.
+  let backDatedPreview: { daysOverdue: number; firstTone: string } | null = null;
+  if (dueDateISO) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysOverdue = Math.max(0, differenceInDays(today, parseISO(dueDateISO)));
+    if (daysOverdue > 0) {
+      backDatedPreview = { daysOverdue, firstTone: getStartingTone(dueDateISO) };
+    }
+  }
 
   async function resolveUserId(): Promise<string | null> {
     if (user?.id) return user.id;
@@ -75,7 +102,7 @@ export default function NewInvoiceModal({
 
   function resetDraft() {
     draftCache = { ...EMPTY_DRAFT };
-    setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDateMasked("");
+    setClient(""); setEmail(""); setDescription(""); setAmount(""); setDueDateMasked(""); setInvoiceIdInput("");
   }
 
   async function handleCreate() {
@@ -124,6 +151,7 @@ export default function NewInvoiceModal({
           description: v.description,
           amount: v.amount,
           dueDate: v.dueDate,
+          invoiceNumber: invoiceIdInput.trim() || undefined,
         });
       });
 
@@ -134,10 +162,11 @@ export default function NewInvoiceModal({
           client: result.invoice.client,
           amount: Number(result.invoice.amount),
           due_date: result.invoice.due_date,
+          created_at: result.invoice.created_at,
         });
         resetDraft();
         setErrorMsg(null);
-        onCreated();
+        onCreated(result.invoice.invoice_number);
         onClose();
       } else if (result.error) {
         // Generic, friendly error — never surface auth internals to authed users.
@@ -155,7 +184,6 @@ export default function NewInvoiceModal({
     { label: "Client name *", value: client, onChange: setClient, placeholder: "Apex Digital", type: "text" },
     { label: "Client email", value: email, onChange: setEmail, placeholder: "billing@client.com", type: "email" },
     { label: "Description", value: description, onChange: setDescription, placeholder: "Brand identity & logo system", type: "text" },
-    { label: "Amount ($) *", value: amount, onChange: setAmount, placeholder: "4800", type: "number" },
   ];
 
   return (
@@ -180,15 +208,48 @@ export default function NewInvoiceModal({
           ))}
 
           <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              Invoice ID <span className="text-muted-foreground/70 font-normal">(optional)</span>
+            </label>
+            <input
+              value={invoiceIdInput}
+              onChange={(e) => setInvoiceIdInput(e.target.value.slice(0, 40))}
+              placeholder="Leave blank to auto-generate (e.g. INV-001)"
+              type="text"
+              autoComplete="off"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Used in your follow-up emails. Leave blank and we'll number it for you.
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Amount ($) *</label>
+            <input
+              value={amount}
+              onChange={(e) => setAmount(toAsciiDigits(e.target.value))}
+              placeholder="4800"
+              type="text"
+              inputMode="decimal"
+              pattern="[0-9.]*"
+              autoComplete="off"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+
+          <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Due date * (MM/DD/YYYY)</label>
             <div className="relative">
               <input
                 value={dueDateMasked}
                 onChange={(e) => setDueDateMasked(formatDateMask(e.target.value))}
+                onFocus={() => setCalendarOpen(true)}
+                onClick={() => setCalendarOpen(true)}
                 placeholder="MM/DD/YYYY"
                 inputMode="numeric"
                 className={cn(
-                  "w-full px-3.5 py-2.5 pr-11 rounded-xl border bg-muted text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2",
+                  "w-full px-3.5 py-2.5 pr-11 rounded-xl border bg-muted text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 cursor-pointer",
                   dueDateValid ? "border-border focus:ring-primary/30" : "border-destructive/60 focus:ring-destructive/30"
                 )}
               />
@@ -220,6 +281,16 @@ export default function NewInvoiceModal({
             </div>
             {!dueDateValid && (
               <p className="text-[11px] text-destructive mt-1">Use MM/DD/YYYY so we know when this was due.</p>
+            )}
+            {backDatedPreview && (
+              <div className="mt-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-3 py-2.5">
+                <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                  This invoice is {backDatedPreview.daysOverdue} {backDatedPreview.daysOverdue === 1 ? "day" : "days"} overdue.
+                </p>
+                <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80 mt-0.5 leading-relaxed">
+                  ChaseHQ will start chasing today, beginning with a {backDatedPreview.firstTone} tone. You can edit the schedule on the next screen.
+                </p>
+              </div>
             )}
           </div>
 

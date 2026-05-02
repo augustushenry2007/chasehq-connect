@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, CreditCard, ExternalLink, RefreshCw, Loader2 } from "lucide-react";
+import { CreditCard, ExternalLink, RefreshCw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { openManageSubscriptions, restorePurchases } from "@/lib/iap";
+import { ScreenHeader } from "@/components/ScreenHeader";
 
 const STATUS_LABEL: Record<string, { label: string; tone: "ok" | "warn" | "muted" }> = {
   none: { label: "No subscription", tone: "muted" },
@@ -24,6 +25,8 @@ export default function BillingScreen() {
   const navigate = useNavigate();
   const ent = useEntitlement();
   const [restoring, setRestoring] = useState(false);
+
+  useEffect(() => { void ent.refetch(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const meta = STATUS_LABEL[ent.status] ?? STATUS_LABEL.none;
   const toneClass =
@@ -53,14 +56,8 @@ export default function BillingScreen() {
 
   return (
     <div className="h-screen bg-background overflow-y-auto overscroll-contain">
-      <div className="max-w-md mx-auto px-5 pt-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground mb-6 hover:text-foreground"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
-
+      <ScreenHeader fallbackPath="/settings" />
+      <div className="max-w-md mx-auto px-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
         <h1 className="text-xl font-bold text-foreground mb-1">Billing</h1>
         <p className="text-xs text-muted-foreground mb-5">Manage your ChaseHQ subscription.</p>
 
@@ -77,7 +74,7 @@ export default function BillingScreen() {
                   {meta.label}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">$5 / month</p>
+              <p className="text-xs text-muted-foreground mt-0.5">$19.99 / month</p>
             </div>
           </div>
 
@@ -105,15 +102,6 @@ export default function BillingScreen() {
         </div>
 
         {/* Actions */}
-        {!ent.isActive && !ent.isTrialing && (
-          <button
-            onClick={() => navigate("/paywall")}
-            className="w-full bg-primary text-primary-foreground rounded-xl py-3 text-sm font-semibold mb-3"
-          >
-            Start Free Trial
-          </button>
-        )}
-
         <button
           onClick={openManageSubscriptions}
           className="w-full flex items-center justify-between bg-card border border-border rounded-xl px-4 py-3 mb-2 hover:border-primary/40 transition-colors"
@@ -141,6 +129,7 @@ export default function BillingScreen() {
           Subscriptions are billed through Apple. Auto-renews monthly until canceled at least 24 hours before the end of the current period. Cancel anytime in App Store settings — your access continues until the end of your billing period.
         </p>
       </div>
+
     </div>
   );
 }
