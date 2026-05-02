@@ -71,32 +71,51 @@ serve(async (req) => {
     const { data: authUser, error: authErr } = await admin.auth.admin.getUserById(userId);
     if (authErr || !authUser.user) return json({ error: "Invalid session" }, 401);
 
-    const { data: existing } = await admin
-      .from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
-
-    if (existing && existing.status !== "none") {
-      return json({
-        ok: true,
-        already: true,
-        status: existing.status,
-        trial_ends_at: existing.trial_ends_at,
-      });
-    }
-
     const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString();
     const nowIso = new Date().toISOString();
 
-    const upsert = await admin.from("subscriptions").upsert({
+    // Atomic: UPDATE only when status = 'none' — prevents race-condition double-start.
+    // Two concurrent calls both read status='none'; only one UPDATE wins; the other
+    // finds 0 rows updated and falls through to the INSERT, which also loses to the
+    // unique constraint, landing it in the already-started branch.
+    const { data: updated } = await admin
+      .from("subscriptions")
+      .update({ status: "trialing", plan: "chasehq_pro_monthly", trial_ends_at: trialEndsAt, last_event_at: nowIso })
+      .eq("user_id", userId)
+      .eq("status", "none")
+      .select()
+      .maybeSingle();
+
+    if (updated) {
+      await admin.from("subscription_events").insert({
+        user_id: userId,
+        event_type: "trial_started",
+        payload: { trial_ends_at: trialEndsAt, plan: "chasehq_pro_monthly" },
+      });
+      return json({ ok: true, status: "trialing", trial_ends_at: trialEndsAt });
+    }
+
+    // No row to update — either already non-none, or no row exists yet. Try INSERT.
+    const { error: insertErr } = await admin.from("subscriptions").insert({
       user_id: userId,
       status: "trialing",
       plan: "chasehq_pro_monthly",
       trial_ends_at: trialEndsAt,
       last_event_at: nowIso,
-    }, { onConflict: "user_id" }).select().maybeSingle();
+    });
 
-    if (upsert.error) {
-      console.error("start-trial upsert error:", upsert.error);
-      return json({ error: upsert.error.message || "Could not start trial" }, 500);
+    if (insertErr) {
+      if (insertErr.code === "23505") {
+        // Unique violation: row exists with status != 'none' — already started.
+        const { data: existing } = await admin
+          .from("subscriptions")
+          .select("status, trial_ends_at")
+          .eq("user_id", userId)
+          .maybeSingle();
+        return json({ ok: true, already: true, status: existing?.status, trial_ends_at: existing?.trial_ends_at });
+      }
+      console.error("start-trial insert error:", insertErr);
+      return json({ error: insertErr.message || "Could not start trial" }, 500);
     }
 
     await admin.from("subscription_events").insert({
