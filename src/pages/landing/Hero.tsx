@@ -9,7 +9,7 @@ export default function Hero() {
 
         {/* Wordmark */}
         <div className="inline-flex items-center gap-2.5 mb-16 sm:mb-20">
-          <span className="text-[22px] font-bold tracking-[-0.025em] text-foreground">ChaseHQ</span>
+          <span className="text-[28px] font-bold tracking-[-0.03em] text-foreground">Chase<span className="text-primary">HQ</span></span>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.1fr] gap-14 lg:gap-16 items-center">
@@ -41,23 +41,26 @@ export default function Hero() {
               <div className="absolute inset-[8%_12%] bg-gradient-radial from-accent/60 to-transparent blur-[60px] rounded-full" />
               {/* Phone shell */}
               <div
-                className="relative w-[388px] h-[836px] bg-[#0E1B22] rounded-[54px] p-3 z-10"
-                style={{ boxShadow: "0 60px 120px rgba(0,0,0,0.45), 0 20px 40px rgba(26,43,53,0.30), 0 0 0 1px rgba(255,255,255,0.07), inset 0 0 0 1px rgba(255,255,255,0.04)" }}
+                className="relative w-[388px] h-[836px] rounded-[58px] p-[20px] z-10"
+                style={{
+                  background: "linear-gradient(160deg,#1c1c1e 0%,#0d0d0f 60%,#111 100%)",
+                  boxShadow: "0 80px 160px rgba(0,0,0,0.55), 0 30px 60px rgba(0,0,0,0.35), 0 0 0 1.5px rgba(255,255,255,0.12), inset 0 0 0 1px rgba(255,255,255,0.06)"
+                }}
                 aria-label="ChaseHQ iPhone app demo showing the full follow-up workflow"
                 role="img"
               >
                 {/* Side buttons */}
-                <div style={{ position: "absolute", left: -10, top: 132, width: 10, height: 22, background: "#080f16", borderRadius: "3px 0 0 3px", boxShadow: "-2px 0 4px rgba(0,0,0,0.7)" }} />
-                <div style={{ position: "absolute", left: -10, top: 188, width: 10, height: 46, background: "#080f16", borderRadius: "3px 0 0 3px", boxShadow: "-2px 0 4px rgba(0,0,0,0.7)" }} />
-                <div style={{ position: "absolute", left: -10, top: 252, width: 10, height: 46, background: "#080f16", borderRadius: "3px 0 0 3px", boxShadow: "-2px 0 4px rgba(0,0,0,0.7)" }} />
-                <div style={{ position: "absolute", right: -10, top: 228, width: 10, height: 72, background: "#080f16", borderRadius: "0 3px 3px 0", boxShadow: "2px 0 4px rgba(0,0,0,0.7)" }} />
+                <div style={{ position: "absolute", left: -14, top: 132, width: 14, height: 24, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
+                <div style={{ position: "absolute", left: -14, top: 194, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
+                <div style={{ position: "absolute", left: -14, top: 262, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
+                <div style={{ position: "absolute", right: -14, top: 234, width: 14, height: 80, borderRadius: "0 4px 4px 0", background: "linear-gradient(to left,#252525,#181818)", boxShadow: "3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
                 {/* Floating animation */}
                 <style>{`@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
                 <div style={{ animation: "floaty 4s ease-in-out infinite", width: "100%", height: "100%" }}>
                   {/* Screen */}
                   <div className="w-full h-full bg-[#F7F9FA] rounded-[42px] overflow-hidden flex flex-col relative">
                     {/* Dynamic Island */}
-                    <div className="absolute top-3 left-1/2 -translate-x-1/2 w-[120px] h-[35px] bg-[#0E1B22] rounded-full z-10" />
+                    <div className="absolute top-3 left-1/2 -translate-x-1/2 w-[120px] h-[35px] bg-[#111111] rounded-full z-10" />
                     {/* Status bar */}
                     <div className="flex justify-between items-center px-8 pt-[14px] pb-1 text-[13px] font-semibold text-[#1A2B35] shrink-0">
                       <span>9:41</span>
@@ -71,6 +74,10 @@ export default function Hero() {
                     {/* Animated demo screens */}
                     <div className="flex-1 overflow-hidden">
                       <HeroPhoneDemo />
+                    </div>
+                    {/* Home indicator */}
+                    <div className="shrink-0 flex justify-center py-2">
+                      <div className="w-[100px] h-[4px] bg-[#1A2B35]/20 rounded-full" />
                     </div>
                   </div>
                 </div>
