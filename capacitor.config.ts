@@ -5,7 +5,8 @@ const config: CapacitorConfig = {
   appName: 'ChaseHQ',
   webDir: 'dist',
   server: {
-    androidScheme: 'https'
+    androidScheme: 'https',
+    allowNavigation: [],
   },
   plugins: {
     LocalNotifications: {

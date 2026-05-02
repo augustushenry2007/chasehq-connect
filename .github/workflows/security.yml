@@ -1,9 +1,6 @@
 name: security
 
-# Day 1: advisory mode — every job runs but `continue-on-error: true` keeps
-# them from blocking PRs. After ~24h of clean runs, flip the boolean below
-# (or remove the continue-on-error lines) to enforce. The plan file Phase
-# 6.10 covers the rollout.
+# PR-blocking security pipeline. All jobs must pass before merge.
 on:
   pull_request:
   push:
@@ -18,7 +15,6 @@ jobs:
   secret-scan:
     name: Secret scan (gitleaks + custom grep)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,7 +36,6 @@ jobs:
   deps-audit:
     name: npm audit (high+)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,7 +49,6 @@ jobs:
   sast:
     name: Semgrep SAST
     runs-on: ubuntu-latest
-    continue-on-error: true
     container:
       image: returntocorp/semgrep:latest
     steps:
@@ -65,7 +59,6 @@ jobs:
   build-bundle-check:
     name: Built bundle has no secrets / no source maps / web entry has no Supabase
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs: [secret-scan]
     env:
       VITE_SUPABASE_URL: https://dummy.supabase.co
@@ -113,7 +106,6 @@ jobs:
   rls-regression:
     name: All public tables have RLS enabled
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         image: postgres:15
@@ -165,7 +157,6 @@ jobs:
   edge-function-tests:
     name: Deno unit tests for edge functions
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v1
