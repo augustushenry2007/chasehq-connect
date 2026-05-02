@@ -17,6 +17,7 @@ export interface Invoice {
   amount: number;
   dueDate: string;
   dueDateISO: string;
+  createdAtISO: string;
   status: InvoiceStatus;
   daysPastDue: number;
   sentFrom: string;
@@ -51,12 +52,17 @@ export function getStats(invoices: Invoice[]) {
 }
 
 export function getInvoiceById(id: string, invoices: Invoice[]): Invoice | undefined {
-  return invoices.find((i) => i.id === id);
+  return invoices.find((i) => i.id === id || i.dbId === id);
+}
+
+export function formatDate(iso: string): string {
+  const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function getChaseFeed(invoices: Invoice[]) {
   return invoices.filter(
-    (i) => i.status === "Escalated" || i.status === "Overdue" || i.status === "Follow-up"
+    (i) => i.status === "Escalated" || i.status === "Overdue"
   ).sort((a, b) => b.daysPastDue - a.daysPastDue);
 }
 

@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, AlertCircle } from "lucide-react";
 import { useEntitlement } from "@/hooks/useEntitlement";
+import PaywallSheet from "@/components/PaywallSheet";
 
 export default function TrialBanner() {
   const navigate = useNavigate();
   const { isTrialing, isPastDue, daysLeftInTrial, loading } = useEntitlement();
+  const [paywallOpen, setPaywallOpen] = useState(false);
 
   if (loading) return null;
 
@@ -37,30 +40,34 @@ export default function TrialBanner() {
     `${daysLeftInTrial} days left in your trial`;
 
   return (
-    <div
-      className={`mx-5 mt-3 flex items-center gap-2.5 p-3 rounded-xl border ${
-        urgent
-          ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50"
-          : "bg-accent border-primary/20"
-      }`}
-    >
-      <Sparkles className={`w-4 h-4 shrink-0 ${urgent ? "text-amber-600" : "text-primary"}`} />
-      <div className="flex-1 min-w-0">
-        <p className={`text-xs font-semibold ${urgent ? "text-amber-900 dark:text-amber-100" : "text-foreground"}`}>
-          {label}
-        </p>
-        <p className={`text-[11px] leading-relaxed ${urgent ? "text-amber-800 dark:text-amber-200" : "text-muted-foreground"}`}>
-          Keep follow-ups flowing for $5/month. Cancel anytime.
-        </p>
-      </div>
-      <button
-        onClick={() => navigate("/paywall")}
-        className={`text-[11px] font-semibold rounded-lg px-2.5 py-1.5 shrink-0 ${
-          urgent ? "bg-amber-600 text-white" : "bg-primary text-primary-foreground"
+    <>
+      <div
+        className={`mx-5 mt-3 flex items-center gap-2.5 p-3 rounded-xl border ${
+          urgent
+            ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50"
+            : "bg-accent border-primary/20"
         }`}
       >
-        {urgent ? "Subscribe" : "View plan"}
-      </button>
-    </div>
+        <Sparkles className={`w-4 h-4 shrink-0 ${urgent ? "text-amber-600" : "text-primary"}`} />
+        <div className="flex-1 min-w-0">
+          <p className={`text-xs font-semibold ${urgent ? "text-amber-900 dark:text-amber-100" : "text-foreground"}`}>
+            {label}
+          </p>
+          <p className={`text-[11px] leading-relaxed ${urgent ? "text-amber-800 dark:text-amber-200" : "text-muted-foreground"}`}>
+            Keep follow-ups flowing for $19.99/month. Cancel anytime.
+          </p>
+        </div>
+        <button
+          onClick={() => setPaywallOpen(true)}
+          className={`text-[11px] font-semibold rounded-lg px-2.5 py-1.5 shrink-0 ${
+            urgent ? "bg-amber-600 text-white" : "bg-primary text-primary-foreground"
+          }`}
+        >
+          {urgent ? "Subscribe" : "View plan"}
+        </button>
+      </div>
+
+      <PaywallSheet open={paywallOpen} onOpenChange={setPaywallOpen} />
+    </>
   );
 }

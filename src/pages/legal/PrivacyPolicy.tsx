@@ -1,17 +1,10 @@
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ScreenHeader } from "@/components/ScreenHeader";
 
 export default function PrivacyPolicy() {
-  const navigate = useNavigate();
   return (
     <div className="h-screen bg-background overflow-y-auto overscroll-contain">
-      <div className="max-w-2xl mx-auto px-5 py-6 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground mb-6 hover:text-foreground"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
+      <ScreenHeader fallbackPath="/welcome" />
+      <div className="max-w-2xl mx-auto px-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
 
         <h1 className="text-2xl font-bold text-foreground mb-2">Privacy Policy</h1>
         <p className="text-xs text-muted-foreground mb-8">Last updated: April 22, 2026</p>
@@ -71,7 +64,6 @@ export default function PrivacyPolicy() {
             <ul className="text-sm text-muted-foreground leading-relaxed list-disc pl-5 space-y-1">
               <li>To draft and send invoice follow-ups you have approved.</li>
               <li>To operate, maintain, and improve the service.</li>
-              <li>To detect and prevent fraud or abuse.</li>
               <li>To comply with applicable legal obligations.</li>
             </ul>
             <p className="text-sm text-muted-foreground leading-relaxed mt-2">
@@ -98,7 +90,7 @@ export default function PrivacyPolicy() {
             </p>
             <ul className="text-sm text-muted-foreground leading-relaxed list-disc pl-5 space-y-1 mt-2">
               <li>Access the personal data we hold about you (visible in-app).</li>
-              <li>Correct inaccurate information by editing it in Settings.</li>
+              <li>Correct your display name in Settings; correct invoice and client details from each invoice's detail page.</li>
               <li>Delete your account and all associated data permanently from Settings → Data controls.</li>
               <li>Export a copy of your data from <span className="text-foreground font-medium">Settings → Data controls</span>.</li>
               <li>Disconnect Google email access at any time from your Google Account permissions page.</li>

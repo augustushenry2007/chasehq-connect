@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { startGoogleOAuth } from "@/lib/oauth";
+import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/lib/oauth";
 import { GoogleIcon } from "@/components/GoogleIcon";
 import { analytics } from "@/lib/analytics";
 import { Loader2 } from "lucide-react";
@@ -27,8 +27,10 @@ export default function AuthForm({
     }, 30000);
     const { error } = await startGoogleOAuth(redirectTo);
     if (error) {
-      analytics.error("google_oauth_failed", error.message, { mode: isSignup ? "signup" : "signin" });
-      toast.error("Sign-in didn't go through. Give it another try.");
+      if (error.code !== OAUTH_USER_CANCELED) {
+        analytics.error("google_oauth_failed", error.message, { mode: isSignup ? "signup" : "signin" });
+        toast.error("Sign-in didn't go through. Give it another try.");
+      }
       setGoogleLoading(false);
       window.clearTimeout(safety);
       return;

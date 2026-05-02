@@ -2,13 +2,18 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { buildCors } from "../_shared/cors.ts";
+import { checkRateLimit, rateLimitedResponse } from "../_shared/rate_limit.ts";
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = buildCors(req.headers.get("origin"));
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
 
   try {
     const { to, subject, message } = await req.json();
@@ -31,6 +36,11 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
+
+    // Per-user/minute ceiling. SMTP costs nothing on our side, but a stolen JWT
+    // could spam through someone's mail server — this caps that blast radius.
+    const rl = await checkRateLimit(supabaseAdmin, user.id, "smtp-send", 30);
+    if (!rl.allowed) return rateLimitedResponse(cors);
     const { data: conn, error: connError } = await supabaseAdmin
       .from("smtp_connections")
       .select("*")
@@ -68,9 +78,3 @@ serve(async (req) => {
   }
 });
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}

@@ -18,6 +18,8 @@ export interface Entitlement {
   daysLeftInTrial: number | null;
   nextBillingDate: Date | null;
   canSend: boolean;
+  hasFreeSend: boolean;
+  followupsSent: number | null;
   isTrialing: boolean;
   isActive: boolean;
   isPastDue: boolean;
@@ -33,6 +35,8 @@ const DEFAULT: Entitlement = {
   daysLeftInTrial: null,
   nextBillingDate: null,
   canSend: false,
+  hasFreeSend: false,
+  followupsSent: null,
   isTrialing: false,
   isActive: false,
   isPastDue: false,
@@ -40,7 +44,7 @@ const DEFAULT: Entitlement = {
 };
 
 function deriveCanSend(row: SubRow | null): boolean {
-  if (!row) return true; // no row = free trial, allow send
+  if (!row) return false;
   const now = Date.now();
   if (row.status === "trialing") return !row.trial_ends_at || new Date(row.trial_ends_at).getTime() > now;
   if (row.status === "active") return !row.current_period_end || new Date(row.current_period_end).getTime() > now;
@@ -51,12 +55,24 @@ function deriveCanSend(row: SubRow | null): boolean {
 export function useEntitlement(): Entitlement {
   const { user, authReady } = useApp();
   const [row, setRow] = useState<SubRow | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [subLoading, setSubLoading] = useState(true);
+  const [followupsCount, setFollowupsCount] = useState<number | null>(null);
+  const [countLoading, setCountLoading] = useState(true);
+
+  // Synchronously reset loading when user identity changes so the post-OAuth
+  // recovery effect in AIDraftComposer sees loading=true on the first render
+  // after sign-in, preventing it from running with stale gate values.
+  const [prevUserId, setPrevUserId] = useState<string | undefined>(user?.id);
+  if (prevUserId !== user?.id) {
+    setPrevUserId(user?.id);
+    setSubLoading(true);
+    setCountLoading(true);
+  }
 
   const fetchRow = useCallback(async () => {
     if (!user) {
       setRow(null);
-      setLoading(false);
+      setSubLoading(false);
       return;
     }
     const { data } = await supabase
@@ -65,31 +81,57 @@ export function useEntitlement(): Entitlement {
       .eq("user_id", user.id)
       .maybeSingle();
     setRow(data ?? null);
-    setLoading(false);
+    setSubLoading(false);
+  }, [user]);
+
+  const fetchFollowupsCount = useCallback(async () => {
+    if (!user) { setFollowupsCount(null); setCountLoading(false); return; }
+    const { count } = await supabase
+      .from("followups")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
+    setFollowupsCount(count ?? 0);
+    setCountLoading(false);
   }, [user]);
 
   useEffect(() => {
     if (!authReady) return;
-    setLoading(true);
-    fetchRow();
+    setSubLoading(true);
+    setCountLoading(true);
+    void fetchRow();
+    void fetchFollowupsCount();
     if (!user) return;
     const channel = supabase
       .channel(`sub-${user.id}-${_subSeq++}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "subscriptions", filter: `user_id=eq.${user.id}` },
-        () => fetchRow()
+        () => { void fetchRow(); }
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [user, authReady, fetchRow]);
+    const followupsChannel = supabase
+      .channel(`followups-${user.id}-${_subSeq++}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "followups", filter: `user_id=eq.${user.id}` },
+        () => { void fetchFollowupsCount(); }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+      supabase.removeChannel(followupsChannel);
+    };
+  }, [user, authReady, fetchRow, fetchFollowupsCount]);
+
+  const hasFreeSend = !!user && !countLoading && followupsCount !== null && followupsCount <= 1;
+  const loading = subLoading || countLoading;
 
   if (!user) {
-    return { ...DEFAULT, loading: loading || !authReady, refetch: fetchRow };
+    return { ...DEFAULT, loading: loading || !authReady, hasFreeSend: false, refetch: fetchRow };
   }
   if (!row) {
-    // No subscription row = new user still within free trial
-    return { ...DEFAULT, loading, canSend: true, refetch: fetchRow };
+    // No subscription row = user hasn't subscribed yet; route through IAP or use free send
+    return { ...DEFAULT, loading, canSend: hasFreeSend, hasFreeSend, followupsSent: followupsCount, refetch: fetchRow };
   }
 
   const trialEndsAt = row.trial_ends_at ? new Date(row.trial_ends_at) : null;
@@ -106,7 +148,9 @@ export function useEntitlement(): Entitlement {
     currentPeriodEnd,
     daysLeftInTrial,
     nextBillingDate: currentPeriodEnd,
-    canSend: deriveCanSend(row),
+    canSend: deriveCanSend(row) || hasFreeSend,
+    hasFreeSend,
+    followupsSent: followupsCount,
     isTrialing: row.status === "trialing",
     isActive: row.status === "active",
     isPastDue: row.status === "past_due",

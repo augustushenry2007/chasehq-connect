@@ -3,10 +3,14 @@ import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import type { Tables } from "@/integrations/supabase/types";
 import type { Invoice as FrontendInvoice } from "@/lib/data";
+import { formatDate } from "@/lib/data";
 import { isTestingMode, clearTestingState } from "@/lib/testingMode";
 import { readPending, clearPending, isGuestOnboarded, clearGuestOnboarded } from "@/lib/localInvoice";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 import { createInvoice } from "@/hooks/useSupabaseData";
+import { computeInvoiceStatus, computeDaysPastDue } from "@/lib/invoiceStatus";
+import { configureRC, logoutRC, isNativePlatform, syncSubscriptionToSupabase } from "@/lib/iap";
+import { Purchases } from "@revenuecat/purchases-capacitor";
 
 type DbInvoice = Tables<"invoices">;
 
@@ -18,8 +22,9 @@ function dbToFrontend(db: DbInvoice): FrontendInvoice {
     clientEmail: db.client_email,
     description: db.description,
     amount: Number(db.amount),
-    dueDate: new Date(db.due_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }),
+    dueDate: formatDate(db.due_date),
     dueDateISO: db.due_date,
+    createdAtISO: db.created_at,
     status: db.status as FrontendInvoice["status"],
     daysPastDue: db.days_past_due,
     sentFrom: db.sent_from,
@@ -36,7 +41,7 @@ function dbToFrontend(db: DbInvoice): FrontendInvoice {
 interface NotificationSettings {
   emailNotifications: boolean;
   autoChase: boolean;
-  defaultTone: "Polite" | "Friendly" | "Firm" | "Urgent" | "Final Notice";
+  defaultTone: "Friendly" | "Firm" | "Urgent" | "Final Notice";
 }
 
 export interface ScheduleRow {
@@ -53,6 +58,9 @@ interface AppContextType {
   user: User | null;
   fullName: string | null;
   hasCompletedOnboarding: boolean;
+  tourCompleted: boolean;
+  dismissedHints: Record<string, boolean>;
+  onboardingStep: number;
   notifications: NotificationSettings;
   schedule: ScheduleRow[];
   invoices: FrontendInvoice[];
@@ -63,6 +71,7 @@ interface AppContextType {
   signOut: () => void;
   completeOnboarding: () => Promise<void>;
   restartOnboarding: () => Promise<void>;
+  updateOnboardingStep: (step: number) => Promise<void>;
   updateNotifications: (settings: NotificationSettings) => void;
   updateSchedule: (schedule: ScheduleRow[]) => void;
   updateDisplayName: (name: string | null) => Promise<void>;
@@ -84,13 +93,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // profileReady becomes true once the async profile DB query resolves (or is skipped for guests).
   const [profileReady, setProfileReady] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+  const [tourCompleted, setTourCompleted] = useState(false);
+  const [dismissedHints, setDismissedHints] = useState<Record<string, boolean>>({});
+  const [onboardingStep, setOnboardingStep] = useState<number>(1);
   const [fullName, setFullName] = useState<string | null>(null);
   const [invoices, setInvoices] = useState<FrontendInvoice[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(true);
   const [notifications, setNotifications] = useState<NotificationSettings>(() => {
     if (isTestingMode()) return { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
     const s = localStorage.getItem("notifications");
-    return s ? JSON.parse(s) : { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
+    if (s) {
+      const parsed = JSON.parse(s);
+      if (parsed.defaultTone === "Polite") parsed.defaultTone = "Friendly";
+      return parsed;
+    }
+    return { emailNotifications: true, autoChase: true, defaultTone: "Friendly" };
   });
   const [schedule, setSchedule] = useState<ScheduleRow[]>(() => {
     if (isTestingMode()) return DEFAULT_SCHEDULE;
@@ -121,7 +138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (import.meta.env.DEV) console.log("[AUTH] Fetching profile for user", user.id);
         const { data, error } = await supabase
           .from("profiles")
-          .select("onboarding_completed, full_name")
+          .select("onboarding_completed, onboarding_step, full_name, tour_completed")
           .eq("user_id", user.id)
           .maybeSingle();
         if (cancelled) return;
@@ -131,24 +148,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const metaName = (user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name || null;
         const testing = isTestingMode();
         const guestOnboarded = isGuestOnboarded();
+        const hasPending = readPending() !== null;
+        const effectivelyOnboarded = guestOnboarded || hasPending;
         if (data) {
           const testingForceFresh = testing && !completedThisSessionRef.current;
           const dbDone = !!data.onboarding_completed;
-          // By design, any authenticated user has already completed onboarding
-          // (onboarding happens before signup). Backfill the DB if it's stale.
-          const shouldBeOnboarded = testingForceFresh ? false : true;
-          setHasCompletedOnboarding(shouldBeOnboarded);
-          if (import.meta.env.DEV) console.log("[AUTH] Profile loaded: onboarding_completed:", dbDone, "guestOnboarded:", guestOnboarded, "→ hasCompletedOnboarding:", shouldBeOnboarded);
-          if (!dbDone && shouldBeOnboarded) {
+          const resolvedDone = testingForceFresh ? false : (dbDone || effectivelyOnboarded);
+          if (!dbDone && resolvedDone && !testingForceFresh) {
             try {
-              await supabase.from("profiles").update({ onboarding_completed: true }).eq("user_id", user.id);
-              if (import.meta.env.DEV) console.log("[AUTH] Backfilled onboarding_completed=true for authenticated user");
+              await supabase.from("profiles")
+                .update({ onboarding_completed: true })
+                .eq("user_id", user.id);
             } catch (err) {
-              console.error("[AUTH] Failed to update onboarding_completed:", err);
+              console.error("[AUTH] Failed to backfill onboarding_completed:", err);
             }
           }
-          const resolved = (data as any).full_name || metaName || null;
-          setFullName(resolved);
+          setHasCompletedOnboarding(resolvedDone);
+          setTourCompleted(!!(data as any).tour_completed);
+          setDismissedHints(((data as any).dismissed_hints as Record<string, boolean>) ?? {});
+          const dbStep = typeof (data as any).onboarding_step === "number" ? (data as any).onboarding_step : 1;
+          setOnboardingStep(dbStep);
+          if (import.meta.env.DEV) console.log("[AUTH] Profile loaded: onboarding_completed:", dbDone, "onboarding_step:", dbStep, "guestOnboarded:", guestOnboarded, "→ hasCompletedOnboarding:", resolvedDone);
+          const resolvedName = (data as any).full_name || metaName || null;
+          setFullName(resolvedName);
           if (!(data as any).full_name && metaName) {
             try {
               await supabase.from("profiles").update({ full_name: metaName }).eq("user_id", user.id);
@@ -156,17 +178,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
               console.error("[AUTH] Failed to update full_name:", err);
             }
           }
+          sessionStorage.removeItem(STORAGE_KEYS.SIGN_IN_INTENT);
         } else {
-          // Onboarding happens before signup by design, so any freshly-created
-          // profile belongs to a user who has already completed onboarding.
+          // No profile in DB. Distinguish sign-in (returning user expected) from sign-up.
+          const signInIntent = sessionStorage.getItem(STORAGE_KEYS.SIGN_IN_INTENT) === "1";
+          if (signInIntent) {
+            if (import.meta.env.DEV) console.log("[AUTH] Sign-in intent + no profile → no-account flow");
+            sessionStorage.removeItem(STORAGE_KEYS.SIGN_IN_INTENT);
+            sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
+            sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
+            try { await supabase.auth.signOut(); } catch {}
+            sessionStorage.setItem(STORAGE_KEYS.NO_ACCOUNT_DETECTED, "1");
+            window.dispatchEvent(new Event("chasehq:no-account"));
+            return;
+          }
+          // Legitimate signup path. Top button completed onboarding before signup, or
+          // user signed up via post-invoice flow with a pending invoice → onboarded.
+          const onboardedByGuestFlow = effectivelyOnboarded;
+          const initialStep = onboardedByGuestFlow ? 6 : 1;
           try {
-            await supabase.from("profiles").insert({ user_id: user.id, onboarding_completed: true, full_name: metaName });
+            await supabase.from("profiles").insert({
+              user_id: user.id,
+              onboarding_completed: onboardedByGuestFlow,
+              onboarding_step: initialStep,
+              full_name: metaName,
+            });
           } catch (err) {
             console.error("[AUTH] Failed to insert profile:", err);
           }
-          setHasCompletedOnboarding(true);
+          setHasCompletedOnboarding(onboardedByGuestFlow);
+          setOnboardingStep(initialStep);
           setFullName(metaName);
-          if (import.meta.env.DEV) console.log("[AUTH] Profile created for signed-up user → hasCompletedOnboarding: true");
+          if (import.meta.env.DEV) console.log("[AUTH] Profile created → hasCompletedOnboarding:", onboardedByGuestFlow, "onboarding_step:", initialStep);
         }
       } catch (err) {
         console.error("[AUTH] Profile load exception:", err);
@@ -184,6 +227,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    let callbackId: string | null = null;
+
+    configureRC(user.id).then((ready) => {
+      if (!ready || !isNativePlatform()) return;
+      Purchases.addCustomerInfoUpdateListener((customerInfo) => {
+        const ent = customerInfo.entitlements?.active?.["ChaseHQ Pro"];
+        if (ent) {
+          void syncSubscriptionToSupabase(
+            `RC_CUSTOMER:${customerInfo.originalAppUserId}`,
+            "chasehq_pro_monthly",
+            false,
+            {
+              isTrialing: ent.periodType === "TRIAL" || ent.periodType === "INTRO",
+              expiresAt: ent.expirationDate ?? customerInfo.latestExpirationDate ?? null,
+            },
+          );
+        }
+      }).then((id) => { callbackId = id; }).catch(() => {});
+    });
+
+    return () => {
+      if (callbackId) {
+        Purchases.removeCustomerInfoUpdateListener({ listenerToRemove: callbackId }).catch(() => {});
+      }
+    };
+  }, [user]);
+
   const refetchInvoices = useCallback(async () => {
     if (!user) {
       setInvoices([]);
@@ -194,7 +266,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .from("invoices")
       .select("*")
       .order("created_at", { ascending: false });
-    if (!error) setInvoices(data ? data.map(dbToFrontend) : []);
+    if (!error) {
+      // Recompute status and days_past_due on load. The daily cron persists the
+      // same values to the DB; this gives the UI correct state immediately
+      // without waiting for the next cron tick.
+      const today = new Date();
+      const mapped = (data ?? []).map(dbToFrontend).map((inv) => ({
+        ...inv,
+        status: computeInvoiceStatus(inv, today),
+        daysPastDue: computeDaysPastDue(inv, today),
+      }));
+      setInvoices(mapped);
+    }
     setInvoicesLoading(false);
   }, [user]);
 
@@ -250,8 +333,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setFlushedInvoiceId(null);
       }
       try {
-        const pendingTone = localStorage.getItem("pending_draft_tone_v1") as "Polite" | "Friendly" | "Firm" | null;
-        if (pendingTone && ["Polite", "Friendly", "Firm"].includes(pendingTone)) {
+        const raw = localStorage.getItem("pending_draft_tone_v1");
+        const pendingTone = raw === "Polite" ? "Friendly" : raw as "Friendly" | "Firm" | null;
+        if (pendingTone && ["Friendly", "Firm"].includes(pendingTone)) {
           setNotifications(prev => ({ ...prev, defaultTone: pendingTone }));
         }
         localStorage.removeItem("pending_draft_tone_v1");
@@ -344,6 +428,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   function signIn() {}
 
   async function signOut() {
+    try { await logoutRC(); } catch {}
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -352,6 +437,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("notifications");
     localStorage.removeItem("schedule");
     localStorage.removeItem(STORAGE_KEYS.ONBOARDING_DONE_SESSION);
+    sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
+    sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
+    sessionStorage.removeItem(STORAGE_KEYS.SIGN_IN_INTENT);
     clearPending();
     clearGuestOnboarded();
     completedThisSessionRef.current = false;
@@ -361,6 +449,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfileReady(false);
     setHasCompletedOnboarding(false);
+    setTourCompleted(false);
+    setDismissedHints({});
+    setOnboardingStep(1);
     setInvoices([]);
     setNotifications({ emailNotifications: true, autoChase: true, defaultTone: "Friendly" });
     setSchedule(DEFAULT_SCHEDULE);
@@ -369,10 +460,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   async function completeOnboarding() {
     completedThisSessionRef.current = true;
     setHasCompletedOnboarding(true);
+    setOnboardingStep(6);
     if (user) {
       supabase
         .from("profiles")
-        .upsert({ user_id: user.id, onboarding_completed: true }, { onConflict: "user_id" })
+        .upsert({ user_id: user.id, onboarding_completed: true, onboarding_step: 6 }, { onConflict: "user_id" })
         .then(({ error }) => {
           if (error) console.error("[AUTH] completeOnboarding upsert failed:", error);
         });
@@ -381,10 +473,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   async function restartOnboarding() {
     setHasCompletedOnboarding(false);
+    setOnboardingStep(1);
     if (user) {
       await supabase
         .from("profiles")
-        .upsert({ user_id: user.id, onboarding_completed: false }, { onConflict: "user_id" });
+        .upsert({ user_id: user.id, onboarding_completed: false, onboarding_step: 1 }, { onConflict: "user_id" });
+    }
+  }
+
+  async function updateOnboardingStep(step: number) {
+    setOnboardingStep(step);
+    if (user) {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ onboarding_step: step })
+        .eq("user_id", user.id);
+      if (error) console.error("[AUTH] updateOnboardingStep failed:", error);
     }
   }
 
@@ -416,7 +520,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={{ isAuthenticated, authReady, profileReady, user, fullName, hasCompletedOnboarding, notifications, schedule, invoices, invoicesLoading, refetchInvoices, flushedInvoiceId, signIn, signOut, completeOnboarding, restartOnboarding, updateNotifications, updateSchedule, updateDisplayName }}>
+    <AppContext.Provider value={{ isAuthenticated, authReady, profileReady, user, fullName, hasCompletedOnboarding, tourCompleted, dismissedHints, onboardingStep, notifications, schedule, invoices, invoicesLoading, refetchInvoices, flushedInvoiceId, signIn, signOut, completeOnboarding, restartOnboarding, updateOnboardingStep, updateNotifications, updateSchedule, updateDisplayName }}>
       {children}
     </AppContext.Provider>
   );

@@ -2,10 +2,10 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-user-token, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { buildCors } from "../_shared/cors.ts";
+import { checkRateLimit, rateLimitedResponse } from "../_shared/rate_limit.ts";
+
+type Json = (body: unknown, status?: number) => Response;
 
 // Verifies a Supabase JWT locally — handles both legacy HS256 and new ES256 (ECC P-256) keys.
 // Falls back to the admin getUser API if local verification fails.
@@ -51,7 +51,14 @@ async function verifySupabaseJWT(token: string, supabaseUrl: string): Promise<st
 const DAILY_SEND_CAP = 50;
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = buildCors(req.headers.get("origin"));
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+
+  const json: Json = (body, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
 
   try {
     const { to, subject, message, invoiceId } = await req.json();
@@ -81,19 +88,34 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId);
     if (authError || !user) return json({ error: "Invalid session" }, 401);
 
+    // Defense-in-depth per-user/minute ceiling on top of the 50/day cap below.
+    // Cheap to apply, blocks burst abuse from a stolen JWT before the daily count catches up.
+    const rl = await checkRateLimit(supabaseAdmin, user.id, "send-email", 30);
+    if (!rl.allowed) return rateLimitedResponse(cors);
+
     const senderName: string =
       user.user_metadata?.full_name ??
       user.user_metadata?.name ??
       "";
 
-    // === Subscription gate ===
+    // === Subscription gate: entitled OR no followups sent yet (one free send) ===
     const { data: hasEnt, error: entErr } = await supabaseAdmin
       .rpc("has_active_entitlement", { _user_id: user.id });
     if (entErr) {
       console.error("entitlement check error:", entErr);
       return json({ error: "subscription_required", message: "Could not verify subscription. Please try again." });
     }
-    if (!hasEnt) {
+
+    let canSend = !!hasEnt;
+    if (!canSend) {
+      const { count: followupsCount, error: countErr } = await supabaseAdmin
+        .from("followups")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      if (!countErr) canSend = (followupsCount ?? 0) === 0;
+    }
+
+    if (!canSend) {
       return json({ error: "subscription_required", message: "Your trial has ended. Subscribe to keep sending follow-ups." });
     }
 
@@ -132,9 +154,9 @@ serve(async (req) => {
 
     let result: Response;
     if (senderType === "gmail") {
-      result = await sendViaGmail(supabaseAdmin, user.id, to, subject, message, senderName);
+      result = await sendViaGmail(supabaseAdmin, user.id, to, subject, message, senderName, json);
     } else if (senderType === "smtp") {
-      result = await sendViaSmtp(supabaseAdmin, user.id, to, subject, message);
+      result = await sendViaSmtp(supabaseAdmin, user.id, to, subject, message, json);
     } else {
       return json({ error: "no_mailbox", message: "No sending mailbox connected." });
     }
@@ -154,7 +176,7 @@ serve(async (req) => {
   }
 });
 
-async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subject: string, message: string, senderName = "") {
+async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subject: string, message: string, senderName: string, json: Json) {
   const { data: gmailConn, error: connError } = await supabaseAdmin
     .from("gmail_connections")
     .select("*")
@@ -236,7 +258,7 @@ async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subj
   return json({ success: true, messageId: result.id, via: "gmail" });
 }
 
-async function sendViaSmtp(supabaseAdmin: any, userId: string, to: string, subject: string, message: string) {
+async function sendViaSmtp(supabaseAdmin: any, userId: string, to: string, subject: string, message: string, json: Json) {
   const { data: conn, error } = await supabaseAdmin
     .from("smtp_connections").select("*").eq("user_id", userId).maybeSingle();
   if (error || !conn) {
@@ -268,9 +290,3 @@ async function sendViaSmtp(supabaseAdmin: any, userId: string, to: string, subje
   return json({ success: true, via: "smtp" });
 }
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}

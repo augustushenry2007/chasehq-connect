@@ -1,6 +1,6 @@
 import type { Invoice } from "@/lib/data";
 
-export type Tone = "Polite" | "Friendly" | "Firm" | "Urgent" | "Final Notice";
+export type Tone = "Friendly" | "Firm" | "Urgent" | "Final Notice";
 
 export const TEMPLATE_COUNT = 5;
 
@@ -14,28 +14,6 @@ function buildTemplates(invoice: Invoice, tone: Tone, senderDisplayName?: string
   const overdueNote = daysPastDue > 0 ? ` and is now ${daysPastDue} days overdue` : "";
 
   const allTemplates: Record<Tone, Array<{ subject: string; message: string }>> = {
-    Polite: [
-      {
-        subject: `Gentle reminder: Invoice ${id} for ${client}`,
-        message: `Dear ${client} team,\n\nI hope this message finds you well. I wanted to kindly follow up regarding invoice ${id} for ${amountStr}, which was due on ${dueDate}${overdueStr}.\n\nIf the payment has already been sent, please disregard this note. Otherwise, I'd be grateful if you could let me know the expected timeline.\n\nThank you for your time.\n\nBest regards,\n${senderName}`,
-      },
-      {
-        subject: `Quick follow-up on Invoice ${id}`,
-        message: `Hi ${client},\n\nI just wanted to follow up on invoice ${id} for ${amountStr}, which was due on ${dueDate}. Could you let me know if there's anything I can do to help move this along?\n\nAppreciate your time.\n\nKind regards,\n${senderName}`,
-      },
-      {
-        subject: `Invoice ${id} – following up`,
-        message: `Dear ${client} team,\n\nThank you for our continued working relationship. I'm reaching out regarding invoice ${id} for ${amountStr} (due ${dueDate}${daysPastDue > 0 ? `, now ${daysPastDue} days past due` : ""}). I'd appreciate confirmation of the expected payment date at your earliest convenience.\n\nKind regards,\n${senderName}`,
-      },
-      {
-        subject: `Invoice ${id} – just wanted to check in`,
-        message: `Dear ${client},\n\nI know how quickly inboxes fill up, so I just wanted to make sure this didn't slip through. Invoice ${id} for ${amountStr} was due on ${dueDate}${overdueStr}.\n\nCompletely fine if payment is already on its way — if there's anything you need from me to process it, don't hesitate to ask. Happy to resend or reformat if that helps.\n\nBest,\n${senderName}`,
-      },
-      {
-        subject: `Quick check — did Invoice ${id} come through?`,
-        message: `Hi ${client},\n\nI'm following up to make sure invoice ${id} (${amountStr}, due ${dueDate}) came through without any issues. Sometimes these things get caught in filters or lost in the shuffle.\n\nPlease let me know if you'd like me to resend it, and feel free to reach out if there are any questions about the work or the payment details.\n\nMany thanks,\n${senderName}`,
-      },
-    ],
     Friendly: [
       {
         subject: `Friendly reminder: Invoice ${id} for ${client}`,

@@ -1,8 +1,9 @@
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/context/AppContext";
+import { CoachHint } from "@/components/onboarding/CoachHint";
 import {
-  getDefaultSteps,
+  buildScheduleForLateness,
   computeStepDate,
   buildNotificationTitle,
   buildNotificationBody,
@@ -11,9 +12,10 @@ import {
   type ScheduleStep,
   type SchedulePreset,
 } from "@/lib/scheduleDefaults";
+import { scheduleForInvoice, cancelForInvoice } from "@/lib/localNotifications";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 import type { Invoice } from "@/lib/data";
-import { Check, Loader2, Pause, Play, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Loader2, Pause, Play, RotateCcw } from "lucide-react";
 import { format, isValid } from "date-fns";
 import { toast } from "sonner";
 import {
@@ -41,11 +43,10 @@ type TimelineItem =
   | { kind: "sent"; date: Date; entry: SentEntry }
   | { kind: "due"; date: Date };
 
-const TONE_OPTIONS: ScheduleStep["tone"][] = ["Polite", "Friendly", "Firm", "Urgent", "Final Notice"];
+const TONE_OPTIONS: ScheduleStep["tone"][] = ["Friendly", "Firm", "Urgent", "Final Notice"];
 const PRESETS: SchedulePreset[] = ["active", "patient", "light"];
 
 const TONE_BADGE: Record<ScheduleStep["tone"], string> = {
-  Polite:        "bg-slate-100 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400",
   Friendly:      "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   Firm:          "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
   Urgent:        "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
@@ -72,9 +73,19 @@ function daysFromToday(date: Date): number {
   return Math.round((d.getTime() - today.getTime()) / 86_400_000);
 }
 
-function matchSentToSteps(steps: ScheduleStep[], sent: SentEntry[]): (SentEntry | null)[] {
+function matchSentToSteps(steps: ScheduleStep[], sent: SentEntry[], dueDateISO: string): (SentEntry | null)[] {
   const sorted = [...sent].sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime());
-  return steps.map((_, idx) => sorted[idx] ?? null);
+  const used = new Set<number>();
+  return steps.map((step) => {
+    const stepMs = new Date(computeStepDate(dueDateISO, step.offset_days)).getTime();
+    const windowStart = stepMs - 86_400_000; // 1-day tolerance: catches same-day or 1-day-early sends
+    const idx = sorted.findIndex(
+      (s, i) => !used.has(i) && new Date(s.sent_at).getTime() >= windowStart,
+    );
+    if (idx === -1) return null;
+    used.add(idx);
+    return sorted[idx];
+  });
 }
 
 function StepRow({
@@ -83,12 +94,18 @@ function StepRow({
   onOffsetChange,
   onOffsetBlur,
   onToneChange,
+  isActionable = false,
+  paused = false,
+  onSendNow,
 }: {
   item: Extract<TimelineItem, { kind: "step" }>;
   editMode: boolean;
   onOffsetChange: (v: number) => void;
   onOffsetBlur: () => void;
   onToneChange: (t: ScheduleStep["tone"]) => void;
+  isActionable?: boolean;
+  paused?: boolean;
+  onSendNow?: () => void;
 }) {
   const { step, date, status } = item;
   const typeLabel = step.type === "due" ? "due reminder" : step.type === "escalation" ? "escalation" : "follow-up";
@@ -101,12 +118,22 @@ function StepRow({
     upcoming: "bg-card border-border",
   }[status];
 
-  const chip = {
-    sent:     <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Sent</span>,
-    today:    <span className="text-[11px] font-medium text-primary">Today</span>,
-    overdue:  <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Send now</span>,
-    upcoming: <span className="text-[11px] text-muted-foreground">In {days} day{days === 1 ? "" : "s"}</span>,
-  }[status];
+  const chip = (() => {
+    if (status === "sent") return <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Sent</span>;
+    if (isActionable && (status === "today" || status === "overdue") && !paused && onSendNow) {
+      return (
+        <button
+          onClick={onSendNow}
+          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] transition"
+        >
+          Send now
+        </button>
+      );
+    }
+    if (status === "today") return <span className="text-[11px] font-medium text-primary">Today</span>;
+    if (status === "overdue") return <span className="text-[11px] text-muted-foreground">Overdue</span>;
+    return <span className="text-[11px] text-muted-foreground">In {days} day{days === 1 ? "" : "s"}</span>;
+  })();
 
   return (
     <div className="relative flex items-center gap-3 py-3">
@@ -138,7 +165,7 @@ function StepRow({
           </div>
         ) : (
           <div>
-            <p className="text-sm font-semibold text-foreground leading-snug">{isValid(date) ? format(date, "MMM d") : "—"}</p>
+            <p className="text-sm font-semibold text-foreground leading-snug">{isValid(date) ? format(date, "MMM d, yyyy") : "—"}</p>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${TONE_BADGE[step.tone] ?? ""}`}>
                 {step.tone}
@@ -156,13 +183,24 @@ function StepRow({
 
 function DueRow({ date }: { date: Date }) {
   return (
-    <div className="relative flex items-center gap-3 py-3">
-      <div className="w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 z-10 bg-amber-50 border-amber-400 dark:bg-amber-900/30 dark:border-amber-600">
-        <span className="text-[8px] font-bold text-amber-600 dark:text-amber-400">DUE</span>
+    <div className="relative flex items-stretch gap-3 py-1.5">
+      <div className="w-6 flex items-center justify-center shrink-0 z-10">
+        <div className="w-6 h-6 rounded-full bg-amber-400 dark:bg-amber-500 flex items-center justify-center shadow-sm ring-4 ring-background">
+          <span className="text-[8px] font-extrabold text-white tracking-wider">DUE</span>
+        </div>
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground leading-snug">{isValid(date) ? format(date, "MMM d") : "—"}</p>
-        <p className="text-[11px] text-muted-foreground">Invoice due</p>
+      <div className="flex-1 min-w-0 rounded-xl bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 px-3.5 py-2.5 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-amber-900 dark:text-amber-100 leading-tight">
+            {isValid(date) ? format(date, "MMM d, yyyy") : "—"}
+          </p>
+          <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300 mt-0.5">
+            Invoice due
+          </p>
+        </div>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900 dark:text-amber-100 bg-amber-200 dark:bg-amber-800 px-2 py-0.5 rounded-full shrink-0">
+          Due Date
+        </span>
       </div>
     </div>
   );
@@ -176,7 +214,7 @@ function SentRow({ entry }: { entry: SentEntry }) {
         <Check className="w-3 h-3" strokeWidth={3} />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground leading-snug">{(() => { const d = new Date(entry.sent_at); return isValid(d) ? format(d, "MMM d") : "—"; })()}</p>
+        <p className="text-sm font-semibold text-foreground leading-snug">{(() => { const d = new Date(entry.sent_at); return isValid(d) ? format(d, "MMM d, yyyy") : "—"; })()}</p>
         {tone && (
           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${TONE_BADGE[tone] ?? "bg-muted text-muted-foreground"}`}>
             {tone}
@@ -188,9 +226,17 @@ function SentRow({ entry }: { entry: SentEntry }) {
   );
 }
 
-export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: Invoice; refreshKey?: number }) {
+export default function ChaseSchedule({
+  invoice,
+  refreshKey = 0,
+  onSendNow,
+}: {
+  invoice: Invoice;
+  refreshKey?: number;
+  onSendNow?: (tone: ScheduleStep["tone"]) => void;
+}) {
   const { user } = useApp();
-  const [steps, setSteps] = useState<ScheduleStep[]>(() => getDefaultSteps());
+  const [steps, setSteps] = useState<ScheduleStep[]>([]);
   const [paused, setPaused] = useState(false);
   const [sent, setSent] = useState<SentEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -201,6 +247,8 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
   const [currentPreset, setCurrentPreset] = useState<SchedulePreset>(
     () => (localStorage.getItem(STORAGE_KEYS.SCHEDULE_PRESET) ?? "active") as SchedulePreset,
   );
+  const [scheduleOpen, setScheduleOpen] = useState(true);
+  const [presetOverrideNote, setPresetOverrideNote] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,16 +258,19 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
     ]).then(([sched, followups]) => {
       if (cancelled) return;
       if (sched.data) {
-        setSteps((sched.data.steps as unknown as ScheduleStep[]) || getDefaultSteps());
+        const stored = (sched.data.steps as unknown as ScheduleStep[]);
+        setSteps(stored?.length ? stored : buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), currentPreset));
         setPaused(sched.data.paused);
+      } else {
+        setSteps(buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), currentPreset));
       }
       setSent(followups.data ?? []);
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [invoice.dbId, refreshKey]);
+  }, [invoice.dbId, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function persist(nextSteps: ScheduleStep[], nextPaused: boolean, silent = false) {
+  async function persist(nextSteps: ScheduleStep[], nextPaused: boolean, silent = false, message?: string) {
     if (!user?.id) return;
     setSaving(true);
     await supabase.from("followup_schedules").upsert(
@@ -240,8 +291,13 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
       }));
       if (rows.length) await supabase.from("notifications").insert(rows);
     }
+    const anchorInvoice = { dueDateISO: invoice.dueDateISO, createdAtISO: invoice.createdAtISO };
+    await cancelForInvoice(invoice.dbId);
+    if (!nextPaused) {
+      await scheduleForInvoice(invoice.dbId, nextSteps, anchorInvoice, invoice.client, invoice.amount);
+    }
     setSaving(false);
-    if (!silent) toast.success("Your schedule's set.");
+    if (!silent) toast.success(message ?? "Schedule saved.");
   }
 
   function flashSaved() {
@@ -250,11 +306,20 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
   }
 
   function handlePreset(preset: SchedulePreset) {
-    const next = PRESET_STEPS[preset];
+    const next = buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), preset);
     localStorage.setItem(STORAGE_KEYS.SCHEDULE_PRESET, preset);
     setCurrentPreset(preset);
     setSteps(next);
     persist(next, paused, true);
+    const dueMs = new Date(`${invoice.dueDateISO.slice(0, 10)}T09:00:00`).getTime();
+    const daysLate = Math.max(0, Math.floor((Date.now() - dueMs) / 86_400_000));
+    if (daysLate >= 7) {
+      const label = preset.charAt(0).toUpperCase() + preset.slice(1);
+      setPresetOverrideNote(`${label} preset adjusted — this invoice is ${daysLate} day${daysLate === 1 ? "" : "s"} overdue.`);
+      setTimeout(() => setPresetOverrideNote(null), 4000);
+    } else {
+      setPresetOverrideNote(null);
+    }
   }
 
   function updateOffset(idx: number, val: number) {
@@ -262,7 +327,7 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
   }
 
   function updateTone(idx: number, tone: ScheduleStep["tone"]) {
-    const type: ScheduleStep["type"] = (tone === "Final Notice" || tone === "Urgent") ? "escalation" : "followup"; // Polite, Friendly, Firm all map to followup
+    const type: ScheduleStep["type"] = (tone === "Final Notice" || tone === "Urgent") ? "escalation" : "followup"; // Friendly, Firm all map to followup
     const next = steps.map((s, i) => (i === idx ? { ...s, tone, type } : s));
     setSteps(next);
     persist(next, paused, true);
@@ -272,18 +337,24 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
   function togglePaused() {
     const next = !paused;
     setPaused(next);
-    persist(steps, next);
+    if (!next) {
+      const rebucketed = buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), currentPreset);
+      setSteps(rebucketed);
+      persist(rebucketed, false, false, "You're back on track — reminders are back on.");
+    } else {
+      persist(steps, true, false, "Follow-ups paused. You're in control.");
+    }
   }
 
   function resetDefaults() {
-    const d = getDefaultSteps();
+    const d = buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), currentPreset);
     setSteps(d);
     setPaused(false);
     persist(d, false);
   }
 
-  const { items, dividerAt } = useMemo(() => {
-    const matched = matchSentToSteps(steps, sent);
+  const { items, actionableStepIdx, collapsedIdxSet } = useMemo(() => {
+    const matched = matchSentToSteps(steps, sent, invoice.dueDateISO);
     const usedIds = new Set(matched.filter(Boolean).map((e) => e!.id));
 
     const stepItems: TimelineItem[] = steps.map((step, idx) => {
@@ -304,15 +375,27 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
       .filter((it) => isValid(it.date))
       .sort((a, b) => a.date.getTime() - b.date.getTime());
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const firstFuture = all.findIndex((it) => {
-      const d = new Date(it.date);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime() >= todayStart.getTime();
-    });
-    return { items: all, dividerAt: firstFuture > 0 && firstFuture < all.length ? firstFuture : -1 };
+    let actionableStepIdx = -1;
+    const collapsedIdxSet = new Set<number>();
+    for (const it of all) {
+      if (it.kind === "step" && (it.status === "today" || it.status === "overdue") && !it.sentEntry) {
+        if (actionableStepIdx === -1) {
+          actionableStepIdx = it.idx;
+        } else {
+          collapsedIdxSet.add(it.idx);
+        }
+      }
+    }
+
+    return { items: all, actionableStepIdx, collapsedIdxSet };
   }, [steps, sent, invoice.dueDateISO]);
+
+  const scheduleComplete = useMemo(
+    () => steps.length > 0 && items
+      .filter((it): it is Extract<TimelineItem, { kind: "step" }> => it.kind === "step")
+      .every((it) => it.status === "sent"),
+    [items, steps.length],
+  );
 
   if (loading) {
     return (
@@ -339,10 +422,28 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
 
   return (
     <div className="mt-4 bg-card border border-border rounded-2xl overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <h3 className="text-sm font-semibold text-foreground">Chase Schedule</h3>
-        <div className="flex items-center gap-1">
+      {/* Collapsible header */}
+      <CoachHint
+        hintKey="chase_schedule"
+        side="top"
+        title="Chase Schedule"
+        body="This is the timeline of follow-up messages for this invoice. Tap to expand and customize when each reminder goes out."
+      >
+        <button
+          onClick={() => setScheduleOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-4 py-3"
+        >
+          <span className="text-sm font-semibold text-foreground">Chase Schedule</span>
+          <ChevronDown
+            className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${scheduleOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+      </CoachHint>
+
+      {scheduleOpen && (
+      <div className="border-t border-border">
+      {/* Preset row */}
+        <div className="flex items-center justify-end gap-1 px-4 pt-3 pb-1">
           {PRESETS.map((p) => (
             <button
               key={p}
@@ -357,7 +458,13 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
             </button>
           ))}
         </div>
-      </div>
+
+      {/* Preset override note — shown when bucket overrode the selected preset */}
+      {presetOverrideNote && (
+        <div className="mx-4 mb-2 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50">
+          <p className="text-xs text-blue-800 dark:text-blue-200">{presetOverrideNote}</p>
+        </div>
+      )}
 
       {/* Edit-mode lock warning — shown when any steps have already been sent */}
       {editMode && sent.length > 0 && (
@@ -374,46 +481,63 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
         {items.length > 1 && (
           <span className="absolute left-[28px] top-6 bottom-6 w-px bg-border" aria-hidden="true" />
         )}
-        {items.flatMap((item, i) => {
-          const rows = [];
-          if (dividerAt === i) {
-            rows.push(
-              <div key="today-divider" className="flex items-center gap-3 py-1.5">
-                <div className="flex-1 h-px bg-border" />
-                <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">Today</span>
-                <div className="flex-1 h-px bg-border" />
-              </div>,
-            );
-          }
-          if (item.kind === "step") {
-            rows.push(
-              <StepRow
-                key={`s-${item.idx}`}
-                item={item}
-                editMode={editMode}
-                onOffsetChange={(v) => updateOffset(item.idx, v)}
-                onOffsetBlur={() => persist(steps, paused)}
-                onToneChange={(t) => updateTone(item.idx, t)}
-              />,
-            );
-          } else if (item.kind === "due") {
-            rows.push(<DueRow key="due-date" date={item.date} />);
-          } else {
-            rows.push(<SentRow key={`u-${item.entry.id}`} entry={item.entry} />);
-          }
-          return rows;
-        })}
+        {(() => {
+          const renderedRows: React.ReactNode[] = [];
+          // Render in reverse-chronological order (latest at top, closest upcoming at bottom).
+          let skippedLineShown = false;
+          [...items].reverse().forEach((item) => {
+            if (item.kind === "step") {
+              if (collapsedIdxSet.has(item.idx)) return;
+              renderedRows.push(
+                <StepRow
+                  key={`s-${item.idx}`}
+                  item={item}
+                  editMode={editMode}
+                  onOffsetChange={(v) => updateOffset(item.idx, v)}
+                  onOffsetBlur={() => persist(steps, paused)}
+                  onToneChange={(t) => updateTone(item.idx, t)}
+                  isActionable={item.idx === actionableStepIdx}
+                  paused={paused}
+                  onSendNow={onSendNow ? () => onSendNow(item.step.tone) : undefined}
+                />,
+              );
+              // "N skipped" note sits below the actionable step in the reversed view
+              if (item.idx === actionableStepIdx && collapsedIdxSet.size > 0 && !skippedLineShown) {
+                skippedLineShown = true;
+                renderedRows.push(
+                  <div key="collapsed-skipped" className="flex items-center gap-2 py-1.5 pl-9">
+                    <span className="text-[11px] text-muted-foreground">
+                      {collapsedIdxSet.size} earlier reminder{collapsedIdxSet.size === 1 ? "" : "s"} skipped — your next send catches them up
+                    </span>
+                  </div>,
+                );
+              }
+            } else if (item.kind === "due") {
+              renderedRows.push(<DueRow key="due-date" date={item.date} />);
+            } else {
+              renderedRows.push(<SentRow key={`u-${item.entry.id}`} entry={item.entry} />);
+            }
+          });
+          return renderedRows;
+        })()}
       </div>
+
+      {/* Schedule complete note */}
+      {scheduleComplete && !paused && (
+        <div className="mx-4 mb-3 px-3 py-2 rounded-xl bg-muted/50 border border-border">
+          <p className="text-xs text-muted-foreground text-center">Schedule complete — manual sends only from here.</p>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-border mt-1">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setEditMode((e) => !e)}
-            className="text-xs font-medium text-primary hover:opacity-80"
-          >
-            {editMode ? "Done editing" : "Edit timing"}
-          </button>
+            <button
+              onClick={() => setEditMode((e) => !e)}
+              className="text-xs font-medium text-primary hover:opacity-80"
+            >
+              {editMode ? "Done editing" : "Edit timing"}
+            </button>
           {editMode && (
             <>
               {savedIndicator && (
@@ -432,23 +556,25 @@ export default function ChaseSchedule({ invoice, refreshKey = 0 }: { invoice: In
         </div>
         <div className="flex items-center gap-2">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-          <button
-            onClick={togglePaused}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              paused ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {paused ? <><Play className="w-3 h-3" /> Resume</> : <><Pause className="w-3 h-3" /> Pause auto follow-ups</>}
-          </button>
+            <button
+              onClick={togglePaused}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                paused ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {paused ? <><Play className="w-3 h-3" /> Resume</> : <><Pause className="w-3 h-3" /> Pause auto follow-ups</>}
+            </button>
         </div>
       </div>
+      </div>
+      )}
 
       <AlertDialog open={confirmResetOpen} onOpenChange={setConfirmResetOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Restore default schedule?</AlertDialogTitle>
             <AlertDialogDescription>
-              This replaces your current steps with the Active preset. Any custom timing or tones you've set will be lost.
+              This replaces your current steps with the {currentPreset.charAt(0).toUpperCase() + currentPreset.slice(1)} preset, adjusted for current lateness. Any custom timing or tones will be lost.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

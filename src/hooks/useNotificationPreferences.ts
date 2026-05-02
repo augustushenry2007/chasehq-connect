@@ -71,20 +71,12 @@ export function useNotificationPreferences() {
   }
 
   async function enableAndRequestPermission(): Promise<boolean> {
-    // Try Capacitor LocalNotifications first (mobile), fall back to Web Notification.
     let granted = false;
-    try {
-      const { LocalNotifications } = await import("@capacitor/local-notifications");
-      const result = await LocalNotifications.requestPermissions();
-      granted = result.display === "granted";
-    } catch {
-      // Web fallback
-      if (typeof window !== "undefined" && "Notification" in window) {
-        const res = await Notification.requestPermission();
-        granted = res === "granted";
-      } else {
-        granted = true; // No native API — just record the in-app preference.
-      }
+    if (typeof window !== "undefined" && "Notification" in window) {
+      const res = await Notification.requestPermission();
+      granted = res === "granted";
+    } else {
+      granted = true; // No native API — record in-app preference only.
     }
     await update({ enabled: true, push_enabled: granted });
     return granted;

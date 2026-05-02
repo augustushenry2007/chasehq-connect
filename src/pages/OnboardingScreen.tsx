@@ -8,17 +8,15 @@ import { analytics } from "@/lib/analytics";
 import { useFlow } from "@/flow/FlowMachine";
 import { ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
 
-const STORAGE_KEY = "onboarding_v5";
+const STORAGE_KEY = "onboarding_v6";
 const TOTAL_STEPS = 6;
 
 type MirrorType = "overdue" | "overthinking" | "avoidance" | "inconsistent";
-type ToneType = "polite" | "friendly" | "firm";
-type InstinctType = "wait" | "nudge" | "persist";
+type StyleType = "warm" | "steady" | "firm";
 
 interface OnboardingState {
   mirror_types: MirrorType[];
-  tone_preference: ToneType | null;
-  chase_instinct: InstinctType | null;
+  follow_up_style: StyleType | null;
   current_step: number;
 }
 
@@ -29,22 +27,15 @@ const MIRROR_OPTIONS: { id: MirrorType; label: string }[] = [
   { id: "inconsistent", label: "Letting invoices slide because I hate the whole thing" },
 ];
 
-const TONE_OPTIONS: { id: ToneType; label: string; desc: string }[] = [
-  { id: "polite",   label: "Polite",   desc: "Courteous and measured — respectful even when payment is overdue" },
-  { id: "friendly", label: "Friendly", desc: "Warm and personable — keeps the relationship intact" },
-  { id: "firm",     label: "Firm",     desc: "Direct and assertive — clear that payment is needed now" },
-];
-
-const INSTINCT_OPTIONS: { id: InstinctType; label: string; desc: string }[] = [
-  { id: "wait",    label: "Give it time",      desc: "Let reminders do the work — one follow-up, then patience" },
-  { id: "nudge",   label: "One gentle nudge",  desc: "A timely follow-up or two, then step back" },
-  { id: "persist", label: "Keep following up", desc: "Stay on it — systematic until you're paid" },
+const STYLE_OPTIONS: { id: StyleType; label: string; desc: string }[] = [
+  { id: "warm",   label: "Warm & patient",        desc: "Gentle reminders with plenty of breathing room — low pressure, high trust" },
+  { id: "steady", label: "Steady & professional",  desc: "Warm but consistent — regular follow-ups that mean business" },
+  { id: "firm",   label: "Direct & persistent",    desc: "Clear, systematic follow-ups until you're paid" },
 ];
 
 const DEFAULT_STATE: OnboardingState = {
   mirror_types: [],
-  tone_preference: null,
-  chase_instinct: null,
+  follow_up_style: null,
   current_step: 1,
 };
 
@@ -52,7 +43,7 @@ function toggle<T>(arr: T[], val: T): T[] {
   return arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val];
 }
 
-const VALID_TONES = new Set<ToneType>(["polite", "friendly", "firm"]);
+const VALID_STYLES = new Set<StyleType>(["warm", "steady", "firm"]);
 
 function loadState(): OnboardingState {
   if (isTestingMode()) return { ...DEFAULT_STATE };
@@ -61,12 +52,10 @@ function loadState(): OnboardingState {
     if (!raw) return { ...DEFAULT_STATE };
     const parsed = JSON.parse(raw);
     const step = typeof parsed.current_step === "number" ? Math.max(1, Math.min(parsed.current_step, TOTAL_STEPS)) : 1;
-    const savedTone = parsed.tone_preference;
-    const savedInstinct = parsed.chase_instinct;
+    const savedStyle = parsed.follow_up_style;
     return {
       mirror_types: Array.isArray(parsed.mirror_types) ? parsed.mirror_types : [],
-      tone_preference: typeof savedTone === "string" && VALID_TONES.has(savedTone as ToneType) ? (savedTone as ToneType) : null,
-      chase_instinct: typeof savedInstinct === "string" && (["wait", "nudge", "persist"] as string[]).includes(savedInstinct) ? (savedInstinct as InstinctType) : null,
+      follow_up_style: typeof savedStyle === "string" && VALID_STYLES.has(savedStyle as StyleType) ? (savedStyle as StyleType) : null,
       current_step: step,
     };
   } catch {
@@ -75,7 +64,7 @@ function loadState(): OnboardingState {
 }
 
 export default function OnboardingScreen() {
-  const { isAuthenticated, hasCompletedOnboarding, profileReady, notifications, updateNotifications } = useApp();
+  const { isAuthenticated, hasCompletedOnboarding, profileReady, onboardingStep, notifications, updateNotifications, completeOnboarding, updateOnboardingStep } = useApp();
   const { send: sendFlow } = useFlow();
   const navigate = useNavigate();
 
@@ -87,10 +76,13 @@ export default function OnboardingScreen() {
 
   const initial = useMemo(() => loadState(), []);
 
-  const [currentStep, setCurrentStep] = useState<number>(initial.current_step);
+  // Authenticated users resume from the DB-persisted step; guests fall back to localStorage.
+  const initialStep = isAuthenticated && profileReady && onboardingStep > 0
+    ? Math.max(1, Math.min(onboardingStep, TOTAL_STEPS))
+    : initial.current_step;
+  const [currentStep, setCurrentStep] = useState<number>(initialStep);
   const [mirrorTypes, setMirrorTypes] = useState<MirrorType[]>(initial.mirror_types);
-  const [tonePreference, setTonePreference] = useState<ToneType | null>(initial.tone_preference);
-  const [chaseInstinct, setChaseInstinct] = useState<InstinctType | null>(initial.chase_instinct);
+  const [followUpStyle, setFollowUpStyle] = useState<StyleType | null>(initial.follow_up_style);
 
   const progress = (currentStep / TOTAL_STEPS) * 100;
 
@@ -98,12 +90,22 @@ export default function OnboardingScreen() {
     if (isTestingMode()) return;
     const data: OnboardingState = {
       mirror_types: mirrorTypes,
-      tone_preference: tonePreference,
-      chase_instinct: chaseInstinct,
+      follow_up_style: followUpStyle,
       current_step: currentStep,
     };
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
-  }, [currentStep, mirrorTypes, tonePreference, chaseInstinct]);
+  }, [currentStep, mirrorTypes, followUpStyle]);
+
+  // Persist current step to DB for authenticated users so they resume from where they left off.
+  useEffect(() => {
+    if (isTestingMode()) return;
+    if (!isAuthenticated) return;
+    if (currentStep === onboardingStep) return;
+    const t = window.setTimeout(() => {
+      updateOnboardingStep(currentStep);
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [currentStep, isAuthenticated, onboardingStep, updateOnboardingStep]);
 
   function canGoBack() { return currentStep > 1 && currentStep <= TOTAL_STEPS; }
 
@@ -112,7 +114,7 @@ export default function OnboardingScreen() {
     if (currentStep === 2) return true;
     if (currentStep === 3) return true;
     if (currentStep === 4) return true;
-    if (currentStep === 5) return tonePreference !== null && chaseInstinct !== null;
+    if (currentStep === 5) return followUpStyle !== null;
     return false; // Step 6 has its own CTA
   }
 
@@ -120,17 +122,22 @@ export default function OnboardingScreen() {
   function goBack() { if (canGoBack()) setCurrentStep((s) => s - 1); }
 
   function applyOnboardingDefaults() {
-    const toneMap: Record<ToneType, "Polite" | "Friendly" | "Firm"> = { polite: "Polite", friendly: "Friendly", firm: "Firm" };
-    const tone = tonePreference ? toneMap[tonePreference] : "Friendly";
+    const styleMap: Record<StyleType, { tone: "Friendly" | "Firm"; preset: "patient" | "light" | "active" }> = {
+      warm:   { tone: "Friendly", preset: "patient" },
+      steady: { tone: "Friendly", preset: "light"   },
+      firm:   { tone: "Firm",     preset: "active"  },
+    };
+    const { tone, preset } = followUpStyle ? styleMap[followUpStyle] : styleMap.steady;
     updateNotifications({ ...notifications, defaultTone: tone });
-
-    const presetMap: Record<InstinctType, "patient" | "light" | "active"> = { wait: "patient", nudge: "light", persist: "active" };
-    const preset = chaseInstinct ? presetMap[chaseInstinct] : "patient";
     try { localStorage.setItem(STORAGE_KEYS.SCHEDULE_PRESET, preset); } catch {}
   }
 
-  function handleFinishOnboarding() {
-    markGuestOnboarded();
+  async function handleFinishOnboarding() {
+    if (isAuthenticated) {
+      await completeOnboarding();
+    } else {
+      markGuestOnboarded();
+    }
     applyOnboardingDefaults();
     analytics.onboardingCompleted([], [], []);
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
@@ -186,7 +193,7 @@ export default function OnboardingScreen() {
                 aria-disabled={mirrorTypes.length === 0}
                 className={`mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] ${mirrorTypes.length === 0 ? "opacity-40 pointer-events-none" : ""}`}
               >
-                That's me <ArrowRight className="w-4 h-4" />
+                That's Me <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}
@@ -212,7 +219,7 @@ export default function OnboardingScreen() {
                 onClick={goNext}
                 className="mt-6 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97]"
               >
-                Show me how <ArrowRight className="w-4 h-4" />
+                Show Me How <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}
@@ -240,7 +247,7 @@ export default function OnboardingScreen() {
                 onClick={goNext}
                 className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97]"
               >
-                Sounds like a relief <ArrowRight className="w-4 h-4" />
+                Sounds Like a Relief <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}
@@ -269,7 +276,7 @@ export default function OnboardingScreen() {
                 onClick={goNext}
                 className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97]"
               >
-                Okay, I'm in <ArrowRight className="w-4 h-4" />
+                Okay, I'm In <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}
@@ -277,30 +284,17 @@ export default function OnboardingScreen() {
           {/* Step 5 — Personalization */}
           {currentStep === 5 && (
             <div className="bg-card border border-border rounded-2xl p-5 mt-2">
-              <h2 className="text-xl font-bold text-foreground mt-2 mb-1">Two quick things so ChaseHQ works like you do.</h2>
+              <h2 className="text-xl font-bold text-foreground mt-2 mb-1">One quick thing so ChaseHQ works like you do.</h2>
               <p className="text-sm text-muted-foreground mb-6">Pick what feels closest — you can adjust anytime.</p>
 
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Communication Style</p>
-              <div className="flex flex-col gap-2 mb-6">
-                {TONE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => setTonePreference(opt.id)}
-                    className={`text-left px-4 py-3.5 rounded-xl border-[1.5px] transition-colors ${tonePreference === opt.id ? "border-primary bg-accent" : "border-border bg-card"}`}
-                  >
-                    <p className="text-sm font-semibold text-foreground">{opt.label}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
-                  </button>
-                ))}
-              </div>
-
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Follow-up Style</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Your Follow-Up Style</p>
               <div className="flex flex-col gap-2">
-                {INSTINCT_OPTIONS.map((opt) => (
+                {STYLE_OPTIONS.map((opt) => (
                   <button
                     key={opt.id}
-                    onClick={() => setChaseInstinct(opt.id)}
-                    className={`text-left px-4 py-3.5 rounded-xl border-[1.5px] transition-colors ${chaseInstinct === opt.id ? "border-primary bg-accent" : "border-border bg-card"}`}
+                    onClick={() => setFollowUpStyle(opt.id)}
+                    style={{ touchAction: "manipulation" }}
+                    className={`text-left px-4 py-3.5 rounded-xl border-[1.5px] transition-colors ${followUpStyle === opt.id ? "border-primary bg-accent" : "border-border bg-card"}`}
                   >
                     <p className="text-sm font-semibold text-foreground">{opt.label}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
@@ -308,13 +302,16 @@ export default function OnboardingScreen() {
                 ))}
               </div>
 
+              <p className="text-xs text-muted-foreground mt-4 text-center">
+                These shape how ChaseHQ writes and times your follow-ups — for every invoice.
+              </p>
               <button
-                onClick={goNext}
-                disabled={tonePreference === null || chaseInstinct === null}
-                aria-disabled={tonePreference === null || chaseInstinct === null}
-                className={`mt-5 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] ${tonePreference === null || chaseInstinct === null ? "opacity-40 pointer-events-none" : ""}`}
+                onClick={() => { if (followUpStyle) goNext(); }}
+                aria-disabled={!followUpStyle}
+                style={{ touchAction: "manipulation" }}
+                className={`mt-3 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] ${followUpStyle ? "" : "opacity-40 pointer-events-none"}`}
               >
-                Set my defaults <ArrowRight className="w-4 h-4" />
+                Set My Style <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}
@@ -331,7 +328,7 @@ export default function OnboardingScreen() {
                 onClick={handleFinishOnboarding}
                 className="mt-10 w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97]"
               >
-                Let's go get paid <ArrowRight className="w-4 h-4" />
+                Let's Go Get Paid <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}

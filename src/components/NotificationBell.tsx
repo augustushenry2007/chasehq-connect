@@ -46,10 +46,15 @@ export default function NotificationBell() {
         </button>
       </SheetTrigger>
       <SheetContent side="right" className="w-full sm:max-w-md">
-        <SheetHeader className="flex-row items-center justify-between space-y-0">
-          <SheetTitle>Notifications</SheetTitle>
+        <SheetHeader className="flex-row items-center justify-between space-y-0 pb-1">
+          <div>
+            <SheetTitle className="text-xl font-bold">Notifications</SheetTitle>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {isEmpty ? "All caught up" : `${upcoming.length} upcoming · ${notifications.length} sent`}
+            </p>
+          </div>
           {unreadCount > 0 && (
-            <button onClick={markAllRead} className="text-xs font-medium text-primary mr-6">
+            <button onClick={markAllRead} className="text-xs font-medium text-primary mr-6 mt-1">
               Mark all read
             </button>
           )}
@@ -62,28 +67,28 @@ export default function NotificationBell() {
                 <Inbox className="w-5 h-5 text-muted-foreground" />
               </div>
               <p className="text-sm font-medium text-foreground">You're all caught up</p>
-              <p className="text-xs text-muted-foreground mt-1">Reminders show up here on due dates and follow-up days.</p>
+              <p className="text-sm text-muted-foreground mt-1">Reminders show up here on due dates and follow-up days.</p>
             </div>
           ) : (
             <>
               {/* Upcoming section */}
               {hasUpcoming && (
                 <div className="mb-2">
-                  <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase mb-1.5 px-1">Upcoming</p>
+                  <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase mb-1.5 px-1">Upcoming</p>
                   <div className="flex flex-col gap-1">
                     {upcoming.map((n) => (
                       <button
                         key={n.id}
                         onClick={() => { setOpen(false); navigate(`/invoice/${n.invoice_id}`); }}
-                        className="text-left p-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+                        className="text-left p-3.5 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-foreground flex-1 truncate">{n.title}</p>
-                          <span className="text-[11px] font-medium text-muted-foreground shrink-0">
+                          <p className="text-sm font-semibold text-foreground flex-1 line-clamp-2">{n.title}</p>
+                          <span className="text-xs font-semibold text-foreground/70 shrink-0">
                             {formatUpcomingDate(n.scheduled_for)}
                           </span>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate">{n.body}</p>
+                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{n.body}</p>
                       </button>
                     ))}
                   </div>
@@ -94,25 +99,25 @@ export default function NotificationBell() {
               {hasRecent && (
                 <div>
                   {hasUpcoming && (
-                    <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase mb-1.5 px-1 mt-2">Recent</p>
+                    <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase mb-1.5 px-1 mt-2">Recent</p>
                   )}
                   <div className="flex flex-col gap-1">
                     {notifications.map((n) => (
                       <button
                         key={n.id}
                         onClick={() => handleTap(n)}
-                        className={`text-left p-3 rounded-xl border transition-colors ${
+                        className={`text-left p-3.5 rounded-xl border transition-colors ${
                           n.status === "delivered"
                             ? "bg-primary/5 border-primary/20 hover:bg-primary/10"
                             : "bg-card border-border hover:bg-muted"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-semibold text-foreground flex-1">{n.title}</p>
+                          <p className="text-sm font-semibold text-foreground flex-1 leading-snug">{n.title}</p>
                           {n.status === "delivered" && <span className="w-2 h-2 rounded-full bg-primary mt-1.5 shrink-0" />}
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
-                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{n.body}</p>
+                        <p className="text-xs text-foreground/60 mt-2">
                           {(() => { const d = new Date(n.scheduled_for); return isValid(d) ? formatDistanceToNow(d, { addSuffix: true }) : "recently"; })()}
                         </p>
                       </button>
