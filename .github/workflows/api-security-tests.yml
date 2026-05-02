@@ -1,0 +1,32 @@
+name: api-security-tests
+
+# Nightly contract tests against staging. Advisory only — these tests touch a
+# live environment (rate limits, RLS, IDOR) and shouldn't block PRs since
+# staging can be flaky for unrelated reasons. Failures should page on Slack
+# instead of failing CI on every push.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.STAGING_SUPABASE_URL != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci --ignore-scripts
+      - name: Run security contract tests
+        run: npm run test:security
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+          TEST_USER_A_JWT: ${{ secrets.TEST_USER_A_JWT }}
+          TEST_USER_B_JWT: ${{ secrets.TEST_USER_B_JWT }}

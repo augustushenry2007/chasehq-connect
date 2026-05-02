@@ -2,16 +2,28 @@
 // re-validates the underlying invoice, respects user preferences + quiet hours,
 // then marks them delivered and sends Resend email if email_enabled.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { logError, logWarn } from "../_shared/log.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const FROM_EMAIL = "ChaseHQ <onboarding@resend.dev>";
+
+// Advisory-lock key. Any 32-bit int will do; we just need a constant so all
+// invocations contend on the same lock.
+const ADVISORY_LOCK_KEY = 7271_1942;
+
+function constantTimeStringEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 function hourInTimezone(tz: string): number {
   try {
@@ -30,7 +42,7 @@ function isQuietHour(hour: number, start: number, end: number): boolean {
 
 async function sendResendEmail(to: string, subject: string, html: string): Promise<boolean> {
   if (!RESEND_API_KEY) {
-    console.warn("RESEND_API_KEY not set — skipping email");
+    logWarn("RESEND_API_KEY not set — skipping email");
     return false;
   }
   const res = await fetch("https://api.resend.com/emails", {
@@ -39,7 +51,7 @@ async function sendResendEmail(to: string, subject: string, html: string): Promi
     body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
   });
   if (!res.ok) {
-    console.error("Resend error:", res.status, await res.text());
+    logError("Resend error:", res.status, (await res.text()).slice(0, 300));
     return false;
   }
   return true;
@@ -48,7 +60,48 @@ async function sendResendEmail(to: string, subject: string, html: string): Promi
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
+  // === Auth gate ===
+  // The function is verify_jwt=false because pg_cron's HTTP wrapper doesn't
+  // mint user JWTs. Instead we require a shared secret in a custom header so
+  // an attacker on the public internet can't trigger the send loop. The
+  // secret is set as a Supabase function secret and configured into the cron
+  // job's `headers` parameter.
+  const cronSecret = Deno.env.get("CRON_DISPATCH_SECRET");
+  if (!cronSecret) {
+    logError("CRON_DISPATCH_SECRET not set — refusing to run unauthenticated dispatcher");
+    return new Response(JSON.stringify({ error: "Dispatcher not configured" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const provided = req.headers.get("x-cron-secret") ?? "";
+  if (!constantTimeStringEqual(provided, cronSecret)) {
+    logWarn("dispatch-notifications: missing/invalid x-cron-secret");
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+  // === Concurrency guard ===
+  // Postgres advisory lock: if another invocation is already running, bail
+  // out so we don't double-send. Released automatically when this function
+  // exits (transaction-scoped advisory locks are session-scoped here).
+  const lockRes = await admin.rpc("pg_try_advisory_lock", { key: ADVISORY_LOCK_KEY });
+  // Supabase RPC for built-in functions may need a wrapper SQL function;
+  // fall back gracefully if the RPC isn't available — the duplicate-send
+  // window is small (1 minute) and the email_send_log + notifications.status
+  // already de-dup at the per-row level.
+  if (lockRes.error) {
+    logWarn("advisory lock unavailable, continuing without:", lockRes.error.message);
+  } else if (lockRes.data === false) {
+    return new Response(JSON.stringify({ skipped: "another dispatch in progress" }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   const nowISO = new Date().toISOString();
   const { data: due, error } = await admin
@@ -59,7 +112,7 @@ Deno.serve(async (req) => {
     .limit(200);
 
   if (error) {
-    console.error("Fetch pending failed:", error);
+    logError("Fetch pending failed:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

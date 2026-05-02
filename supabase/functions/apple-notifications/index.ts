@@ -1,44 +1,107 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// Public endpoint: Apple App Store Server Notifications V2.
-// Apple POSTs a signed JWS payload. We decode & route by notificationType.
-// Note: Full JWS signature verification against Apple's public certificate chain
-// is recommended for production. This implementation decodes the JWS payload
-// and updates state; signature verification can be hardened once
-// APPLE_KEY_ID / APPLE_ISSUER_ID / APPLE_PRIVATE_KEY are configured.
+import { verifyAppleJws } from "../_shared/apple_jws.ts";
+import { checkRateLimit, getClientIp, rateLimitedResponse } from "../_shared/rate_limit.ts";
+import { logError, logWarn, logInfo } from "../_shared/log.ts";
+
+// Public endpoint (verify_jwt = false) for Apple App Store Server Notifications V2.
+// Apple POSTs a signed JWS — we verify the chain to Apple Root CA G3, the cert
+// signatures, and the JWS signature with the leaf cert before trusting any
+// payload field. Replays are blocked via apple_notification_log idempotency.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type",
 };
 
+interface OuterPayload {
+  notificationType: string;
+  subtype?: string;
+  notificationUUID?: string;
+  data?: {
+    signedTransactionInfo?: string;
+    signedRenewalInfo?: string;
+  };
+}
+
+interface TransactionInfo {
+  originalTransactionId: string;
+  expiresDate?: string;
+  productId?: string;
+}
+
+interface RenewalInfo {
+  autoRenewStatus?: number;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+
+  const ip = getClientIp(req);
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  // Per-IP rate limit. Apple's real notification rate is well under this; any
+  // abuse is by definition not Apple.
+  const rl = await checkRateLimit(admin, `ip:${ip}`, "apple-notifications", 60);
+  if (!rl.allowed) return rateLimitedResponse(corsHeaders);
 
   try {
     const body = await req.json();
     const signedPayload: string | undefined = body?.signedPayload;
     if (!signedPayload) return json({ error: "Missing signedPayload" }, 400);
 
-    const decoded = decodeJws(signedPayload);
-    if (!decoded) return json({ error: "Invalid signedPayload" }, 400);
+    // 1. Verify the outer JWS — chain + signatures + Apple root pin.
+    const verified = await verifyAppleJws<OuterPayload>(signedPayload);
+    if (!verified) {
+      logWarn("apple-notifications: JWS verification failed");
+      return json({ error: "Invalid signedPayload" }, 401);
+    }
+    const outer = verified.payload;
+    const notificationUUID = outer.notificationUUID;
+    if (!notificationUUID) {
+      logWarn("apple-notifications: missing notificationUUID");
+      return json({ error: "Missing notificationUUID" }, 400);
+    }
 
-    const notificationType: string = decoded.notificationType;
-    const subtype: string | undefined = decoded.subtype;
-    const dataSignedTransactionInfo = decoded.data?.signedTransactionInfo;
-    const dataSignedRenewalInfo = decoded.data?.signedRenewalInfo;
-    const transactionInfo = dataSignedTransactionInfo ? decodeJws(dataSignedTransactionInfo) : null;
-    const renewalInfo = dataSignedRenewalInfo ? decodeJws(dataSignedRenewalInfo) : null;
+    // 2. Idempotency: claim this notificationUUID. If insert hits the unique
+    // primary key, we've already processed this notification — return 200
+    // so Apple doesn't retry, but make no DB changes.
+    const claim = await admin.from("apple_notification_log").insert({
+      notification_uuid: notificationUUID,
+      notification_type: outer.notificationType,
+      subtype: outer.subtype ?? null,
+    }).select("notification_uuid").maybeSingle();
 
-    const originalTransactionId: string | undefined = transactionInfo?.originalTransactionId;
-    if (!originalTransactionId) return json({ error: "No originalTransactionId" }, 400);
+    if (claim.error) {
+      // Conflict (duplicate) is what we want to detect — Postgres returns 23505.
+      const code = (claim.error as { code?: string }).code;
+      if (code === "23505") {
+        logInfo("apple-notifications: duplicate notification, ignoring", notificationUUID);
+        return json({ ok: true, idempotent: true });
+      }
+      logError("apple-notifications: log insert error:", claim.error);
+      return json({ error: "Could not claim notification" }, 500);
+    }
 
-    const admin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    // 3. Verify each nested signed JWS.
+    const transactionInfo = outer.data?.signedTransactionInfo
+      ? (await verifyAppleJws<TransactionInfo>(outer.data.signedTransactionInfo))?.payload ?? null
+      : null;
+    const renewalInfo = outer.data?.signedRenewalInfo
+      ? (await verifyAppleJws<RenewalInfo>(outer.data.signedRenewalInfo))?.payload ?? null
+      : null;
+
+    if (!transactionInfo?.originalTransactionId) {
+      logWarn("apple-notifications: nested JWS verification failed or missing originalTransactionId");
+      return json({ error: "Invalid signed transaction info" }, 400);
+    }
+
+    const originalTransactionId = transactionInfo.originalTransactionId;
 
     const { data: subRow } = await admin
       .from("subscriptions")
@@ -47,16 +110,21 @@ serve(async (req) => {
       .maybeSingle();
 
     if (!subRow) {
-      console.warn("apple-notifications: no subscription row for", originalTransactionId);
+      logWarn("apple-notifications: no subscription row for", originalTransactionId);
+      // Mark log entry processed so we don't keep retrying lookups for it.
+      await admin
+        .from("apple_notification_log")
+        .update({ processed_ok: true, original_transaction_id: originalTransactionId })
+        .eq("notification_uuid", notificationUUID);
       return json({ ok: true, ignored: true });
     }
 
-    const expiresMs = parseInt(transactionInfo?.expiresDate || "0", 10);
+    const expiresMs = parseInt(transactionInfo.expiresDate || "0", 10);
     const nowIso = new Date().toISOString();
     const update: Record<string, unknown> = { last_event_at: nowIso };
     let eventType = "webhook_received";
 
-    switch (notificationType) {
+    switch (outer.notificationType) {
       case "DID_RENEW":
       case "SUBSCRIBED":
         update.status = "active";
@@ -94,29 +162,20 @@ serve(async (req) => {
     await admin.from("subscription_events").insert({
       user_id: subRow.user_id,
       event_type: eventType,
-      payload: { notificationType, subtype, transactionInfo, renewalInfo },
+      payload: { notificationType: outer.notificationType, subtype: outer.subtype, transactionInfo, renewalInfo, notificationUUID },
     });
+
+    await admin
+      .from("apple_notification_log")
+      .update({ processed_ok: true, original_transaction_id: originalTransactionId })
+      .eq("notification_uuid", notificationUUID);
 
     return json({ ok: true });
   } catch (e) {
-    console.error("apple-notifications error:", e);
+    logError("apple-notifications error:", e);
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
 });
-
-function decodeJws(jws: string): any {
-  try {
-    const parts = jws.split(".");
-    if (parts.length < 2) return null;
-    const payload = parts[1];
-    // base64url decode
-    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
-    const json = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

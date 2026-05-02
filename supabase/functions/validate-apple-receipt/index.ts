@@ -12,7 +12,15 @@ interface ValidatePayload {
   productId?: string;
   mock?: boolean;
   restore?: boolean;
-  clientEntitlement?: { isTrialing?: boolean; expiresAt?: string | null };
+  // NOTE: clientEntitlement was removed deliberately. The client cannot be the
+  // source of truth for subscription state — that's a free-Pro vector. If the
+  // server-side RC verification fails, the client must call Restore Purchases
+  // and we re-verify against RevenueCat from scratch.
+}
+
+function isDevEnv(): boolean {
+  const env = Deno.env.get("DENO_ENV") || Deno.env.get("ENVIRONMENT") || "production";
+  return env === "development" || env === "dev" || env === "local";
 }
 
 // Verifies a Supabase JWT locally — handles both legacy HS256 and new ES256 (ECC P-256) keys.
@@ -90,10 +98,14 @@ serve(async (req) => {
     let latestReceipt = body.receipt;
     const wasNew = !existing || existing.status === "none" || !existing.status;
 
-    // === MOCK PATH (web preview / dev) ===
+    // === MOCK PATH (dev only) ===
+    // The mock path used to fire whenever neither APPLE_SHARED_SECRET nor an
+    // RC receipt was present — that meant a misconfigured prod deploy would
+    // silently grant trials to anyone. Now we hard-gate on dev env so a
+    // production environment NEVER honors mock state, regardless of input.
     const sharedSecret = Deno.env.get("APPLE_SHARED_SECRET");
     const isRcReceipt = body.receipt.startsWith("RC_CUSTOMER:");
-    const useMock = body.mock === true || (!sharedSecret && !isRcReceipt);
+    const useMock = isDevEnv() && (body.mock === true || (!sharedSecret && !isRcReceipt));
 
     if (useMock) {
       // First-time user gets a mock trial; returning users get active (they've used the intro offer).
@@ -125,18 +137,13 @@ serve(async (req) => {
       }
 
       if (!rcOk) {
-        // RC API unavailable or key misconfigured. Fall back to client-provided entitlement
-        // data from the RC SDK, which already verifies server-side (verification: "VERIFIED").
-        const ce = body.clientEntitlement;
-        if (ce?.expiresAt) {
-          const isTrialing = ce.isTrialing ?? false;
-          status = isTrialing ? "trialing" : "active";
-          currentPeriodEnd = ce.expiresAt;
-          trialEndsAt = isTrialing ? ce.expiresAt : null;
-          originalTransactionId = appUserId;
-        } else {
-          return json({ error: "Subscription verification unavailable. Please try Restore Purchases." }, 400);
-        }
+        // No client-fallback. If we can't verify with RC, we don't grant
+        // entitlement — the client must Restore Purchases to re-trigger
+        // server-side verification.
+        return json(
+          { error: "Subscription verification unavailable. Please try Restore Purchases in a moment." },
+          503,
+        );
       }
     } else {
       // === REAL APPLE VALIDATION ===

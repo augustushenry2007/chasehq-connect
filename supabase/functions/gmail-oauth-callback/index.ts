@@ -1,6 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+import { verifyState, REDIRECT_ALLOWLIST } from "../_shared/oauth_state.ts";
+import { logError, truncate } from "../_shared/log.ts";
+
 serve(async (req) => {
   try {
     const url = new URL(req.url);
@@ -9,18 +12,30 @@ serve(async (req) => {
     const error = url.searchParams.get("error");
 
     if (error) {
-      return redirect("", false, "Google authorization was denied");
+      return redirectSafe("", false, "Google authorization was denied");
     }
 
     if (!code || !stateParam) {
-      return redirect("", false, "Missing authorization code");
+      return redirectSafe("", false, "Missing authorization code");
     }
 
-    let state: { userId: string; redirectUri: string };
-    try {
-      state = JSON.parse(atob(stateParam));
-    } catch {
-      return redirect("", false, "Invalid state parameter");
+    // === Verify the state HMAC ===
+    // The old implementation parsed `state` as base64-JSON with no signature,
+    // which let an attacker craft a state with any userId and bind a victim's
+    // tokens to the attacker's account (or vice versa). Now we sign + verify
+    // with HMAC-SHA-256, enforce a 10-minute max age (replay protection),
+    // and reject any redirectUri not on the server-side allowlist.
+    const stateSecret = Deno.env.get("OAUTH_STATE_SECRET");
+    if (!stateSecret) {
+      logError("OAUTH_STATE_SECRET not set");
+      return redirectSafe("", false, "OAuth not fully configured");
+    }
+    const state = await verifyState(stateParam, stateSecret, {
+      maxAgeMs: 10 * 60 * 1000,
+      redirectAllowlist: REDIRECT_ALLOWLIST,
+    });
+    if (!state) {
+      return redirectSafe("", false, "Invalid or expired state");
     }
 
     const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")!;
@@ -43,8 +58,8 @@ serve(async (req) => {
 
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || !tokenData.access_token) {
-      console.error("Token exchange failed:", tokenData);
-      return redirect(state.redirectUri, false, "Token exchange failed");
+      logError("Token exchange failed:", truncate(JSON.stringify(tokenData)));
+      return redirectSafe(state.redirectUri, false, "Token exchange failed");
     }
 
     // Get user's Gmail email
@@ -74,8 +89,8 @@ serve(async (req) => {
       }, { onConflict: "user_id" });
 
     if (dbError) {
-      console.error("DB error storing gmail connection:", dbError);
-      return redirect(state.redirectUri, false, "Failed to save connection");
+      logError("DB error storing gmail connection:", dbError);
+      return redirectSafe(state.redirectUri, false, "Failed to save connection");
     }
 
     // Mark profile sender_type as gmail (overwrite 'none', preserve explicit 'smtp' choice)
@@ -85,16 +100,19 @@ serve(async (req) => {
       .eq("user_id", state.userId)
       .in("sender_type", ["none", "gmail"]);
 
-    return redirect(state.redirectUri, true);
+    return redirectSafe(state.redirectUri, true);
   } catch (e) {
-    console.error("gmail-oauth-callback error:", e);
+    logError("gmail-oauth-callback error:", e);
     return new Response(`Error: ${e instanceof Error ? e.message : "Unknown"}`, { status: 500 });
   }
 });
 
-function redirect(redirectUri: string, success: boolean, errorMsg?: string): Response {
-  const base = redirectUri || "/";
+// Only redirect to URIs on the server-side allowlist. Any other value falls
+// through to "/" so a forged or malformed state can never produce an open
+// redirect even if it slipped past verifyState() somehow.
+function redirectSafe(redirectUri: string, success: boolean, errorMsg?: string): Response {
+  const safeBase = REDIRECT_ALLOWLIST.includes(redirectUri) ? redirectUri : "/";
   const param = success ? "gmail_connected=true" : "gmail_error=" + encodeURIComponent(errorMsg || "Unknown error");
-  const finalUrl = base.includes("?") ? `${base}&${param}` : `${base}?${param}`;
+  const finalUrl = safeBase.includes("?") ? `${safeBase}&${param}` : `${safeBase}?${param}`;
   return new Response(null, { status: 302, headers: { Location: finalUrl } });
 }

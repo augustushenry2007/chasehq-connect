@@ -18,4 +18,10 @@ export default defineConfig(({ mode }) => ({
     },
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query", "@tanstack/query-core"],
   },
+  build: {
+    // Source maps would expose the unminified app code (including the AppNative
+    // chunk that ships with the iOS build) to anyone hitting chasehq.app with
+    // dev tools open. Strip them in production.
+    sourcemap: mode === "development",
+  },
 }));
