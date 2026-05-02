@@ -110,18 +110,16 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-    const { error: upsertError } = await supabaseAdmin
-      .from("smtp_connections")
-      .upsert({
-        user_id: user.id,
-        from_email,
-        from_name: from_name || null,
-        smtp_host: host,
-        smtp_port: port,
-        smtp_username,
-        smtp_password,
-        verified: true,
-      }, { onConflict: "user_id" });
+    const { error: upsertError } = await supabaseAdmin.rpc("upsert_smtp_connection", {
+      p_user_id:       user.id,
+      p_from_email:    from_email,
+      p_from_name:     from_name || null,
+      p_smtp_host:     host,
+      p_smtp_port:     port,
+      p_smtp_username: smtp_username,
+      p_smtp_password: smtp_password,
+      p_verified:      true,
+    });
 
     if (upsertError) {
       logError("smtp-verify db upsert error:", upsertError);

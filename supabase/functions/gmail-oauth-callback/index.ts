@@ -78,15 +78,13 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { error: dbError } = await supabase
-      .from("gmail_connections")
-      .upsert({
-        user_id: state.userId,
-        email: gmailEmail,
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        token_expires_at: expiresAt,
-      }, { onConflict: "user_id" });
+    const { error: dbError } = await supabase.rpc("upsert_gmail_connection", {
+      p_user_id:          state.userId,
+      p_email:            gmailEmail,
+      p_access_token:     tokenData.access_token,
+      p_refresh_token:    tokenData.refresh_token ?? null,
+      p_token_expires_at: expiresAt,
+    });
 
     if (dbError) {
       logError("DB error storing gmail connection:", dbError);
