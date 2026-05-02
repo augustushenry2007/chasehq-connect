@@ -1,0 +1,44 @@
+/* Landing-page-only overrides + reveal-on-scroll machinery.
+ * Lives in its own stylesheet so we can drop 'unsafe-inline' from CSP.
+ * The iOS WebView CSS (src/index.css, with its mobile body-lock) is
+ * untouched — only the landing chunk imports this file.
+ */
+
+html,
+body,
+#root {
+  height: auto !important;
+  overflow: auto !important;
+}
+
+body {
+  overscroll-behavior-y: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+      opacity 700ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .reveal.is-revealed {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes device-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-device-float {
+  animation: device-float 4s ease-in-out infinite;
+}

@@ -1,7 +1,20 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCors } from "../_shared/cors.ts";
-import { checkRateLimit, getClientIp, rateLimitedResponse } from "../_shared/rate_limit.ts";
+import {
+  checkRateLimit,
+  checkDailyQuota,
+  getClientIp,
+  rateLimitedResponse,
+  quotaExceededResponse,
+} from "../_shared/rate_limit.ts";
+import {
+  sanitizeUserText,
+  readJsonWithCap,
+  MAX_FIELD_CHARS,
+  MAX_SHORT_FIELD_CHARS,
+} from "../_shared/prompt_filter.ts";
+import { logError, logWarn, truncate } from "../_shared/log.ts";
 
 function buildToneInstruction(tone: string, priorFollowupCount: number): string {
   const TONE_INSTRUCTIONS: Record<string, string> = {
@@ -27,19 +40,49 @@ serve(async (req) => {
   const cors = buildCors(req.headers.get("origin"));
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
-  // verify_jwt is false on this function (the guest-draft flow calls it before
-  // signup), so the only abuse-blocker is a per-IP rate limit. 20 generations/min
-  // is plenty for a real user filling out an invoice form, well below cost-of-Gemini-abuse.
+  // verify_jwt is false (the guest-draft flow calls it before signup), so we
+  // layer protections: per-IP per-minute, per-IP per-day, per-user where a
+  // JWT is present, plus payload caps and prompt-injection sanitization.
   const ip = getClientIp(req);
   const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const rl = await checkRateLimit(supabaseAdmin, `ip:${ip}`, "generate-followup", 20);
+
+  // If the caller is authenticated, prefer per-user limits over per-IP. This
+  // prevents legitimate users behind shared NAT (offices, coffee shops) from
+  // exhausting an IP-keyed quota that another user is also drawing down.
+  let userId: string | null = null;
+  const authHeader = req.headers.get("Authorization");
+  if (authHeader) {
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+    const { data: { user } } = await supabaseAdmin.auth.getUser(token);
+    if (user?.id) userId = user.id;
+  }
+  const subject = userId ? userId : `ip:${ip}`;
+  const dailyCap = userId ? 200 : 50;
+
+  const rl = await checkRateLimit(supabaseAdmin, subject, "generate-followup", 20);
   if (!rl.allowed) return rateLimitedResponse(cors);
 
+  const dq = await checkDailyQuota(supabaseAdmin, subject, "generate-followup", dailyCap);
+  if (!dq.allowed) return quotaExceededResponse(cors);
+
   try {
-    const { invoice, tone, previousMessage, senderDisplayName, priorFollowupCount } = await req.json();
+    const parsed = await readJsonWithCap<{
+      invoice?: Record<string, unknown>;
+      tone?: string;
+      previousMessage?: string;
+      senderDisplayName?: string;
+      priorFollowupCount?: number;
+    }>(req);
+    if (!parsed.ok) {
+      return new Response(JSON.stringify({ error: parsed.error }), {
+        status: parsed.status,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const { invoice, tone, previousMessage, senderDisplayName, priorFollowupCount } = parsed.body ?? {};
 
     if (!invoice || !tone) {
       return new Response(JSON.stringify({ error: "Missing invoice or tone" }), {
@@ -51,17 +94,45 @@ serve(async (req) => {
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
+    // Sanitize every user-controlled string against prompt injection and
+    // truncate to a sane length. The invoice description is the largest
+    // attack surface — clients can put arbitrary text in there.
+    let injectionAttempts = 0;
+    const cleanShort = (s: unknown) => {
+      const r = sanitizeUserText(s, MAX_SHORT_FIELD_CHARS);
+      injectionAttempts += r.attempts;
+      return r.sanitized;
+    };
+    const cleanLong = (s: unknown) => {
+      const r = sanitizeUserText(s, MAX_FIELD_CHARS);
+      injectionAttempts += r.attempts;
+      return r.sanitized;
+    };
+
+    const safeInvoice = {
+      invoice_number: cleanShort((invoice as Record<string, unknown>).invoice_number ?? (invoice as Record<string, unknown>).id),
+      client: cleanShort((invoice as Record<string, unknown>).client),
+      amount: cleanShort((invoice as Record<string, unknown>).amount),
+      due_date: cleanShort((invoice as Record<string, unknown>).due_date ?? (invoice as Record<string, unknown>).dueDate),
+      days_past_due: cleanShort(
+        (invoice as Record<string, unknown>).days_past_due ?? (invoice as Record<string, unknown>).daysPastDue ?? 0,
+      ),
+      description: cleanLong((invoice as Record<string, unknown>).description),
+      sent_from: cleanShort((invoice as Record<string, unknown>).sent_from ?? (invoice as Record<string, unknown>).sentFrom),
+    };
+    const safePrev = previousMessage ? cleanLong(previousMessage) : "";
+
     // Default 1 (legacy clients): preserves the old "reference multiple prior
     // reminders" behavior for Final Notice. New clients pass an actual count.
     const toneInstruction = buildToneInstruction(tone, typeof priorFollowupCount === "number" ? priorFollowupCount : 1);
 
     // Prefer the explicit display name; fall back to deriving from email
-    const rawSender = invoice.sent_from || invoice.sentFrom || "";
+    const rawSender = safeInvoice.sent_from;
     const derivedName = rawSender
       ? rawSender.split("@")[0].replace(/\./g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())
       : "the sender";
-    const senderName = senderDisplayName?.trim()
-      ? senderDisplayName.trim().replace(/\b\w/g, (c: string) => c.toUpperCase())
+    const senderName = senderDisplayName && cleanShort(senderDisplayName).trim()
+      ? cleanShort(senderDisplayName).trim().replace(/\b\w/g, (c: string) => c.toUpperCase())
       : derivedName;
 
     const systemPrompt = `You are a professional follow-up email writer for freelancers and agencies chasing unpaid invoices.
@@ -78,24 +149,25 @@ TONE GUIDELINES for "${tone}":
 ${toneInstruction}`;
 
     const variationSeed = crypto.randomUUID();
-    const previousBlock = previousMessage
-      ? `\n\nThe previous draft was:\n"""\n${previousMessage}\n"""\nWrite a meaningfully different variation — different opening, different sentence structure, different word choices. Do not repeat phrases.`
+    const previousBlock = safePrev
+      ? `\n\nThe previous draft was:\n"""\n${safePrev}\n"""\nWrite a meaningfully different variation — different opening, different sentence structure, different word choices. Do not repeat phrases.`
       : "";
 
-    const userPrompt = `Write a ${tone} follow-up email for this invoice:
-- Invoice: ${invoice.invoice_number || invoice.id}
-- Client: ${invoice.client}
-- Amount: $${invoice.amount}
-- Due date: ${invoice.due_date || invoice.dueDate}
-- Days overdue: ${invoice.days_past_due || invoice.daysPastDue || 0}
+    const userPrompt = `Write a ${cleanShort(tone)} follow-up email for this invoice:
+- Invoice: ${safeInvoice.invoice_number}
+- Client: ${safeInvoice.client}
+- Amount: $${safeInvoice.amount}
+- Due date: ${safeInvoice.due_date}
+- Days overdue: ${safeInvoice.days_past_due}
 - Sender: ${senderName}
-- Description: ${invoice.description}
+- Description: ${safeInvoice.description}
 
 Variation seed: ${variationSeed}${previousBlock}`;
 
     const buildBody = (model: string) => JSON.stringify({
       model,
       temperature: 0.95,
+      max_tokens: 800,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -144,7 +216,7 @@ Variation seed: ${variationSeed}${previousBlock}`;
       if (response.ok) break;
       lastStatus = response.status;
       lastErrorText = await response.text();
-      console.error(`AI gateway error (model=${attempt.model}):`, response.status, lastErrorText);
+      logError(`AI gateway error (model=${attempt.model}):`, response.status, truncate(lastErrorText));
       // Only retry on transient upstream failures.
       if (response.status !== 503 && response.status !== 502 && response.status !== 504 && response.status !== 500) break;
     }
@@ -162,9 +234,12 @@ Variation seed: ${variationSeed}${previousBlock}`;
           headers: { ...cors, "Content-Type": "application/json" },
         });
       }
+      // Don't echo upstream error bodies to clients — they can include
+      // internal hints, request IDs, or partial credentials. Log on the
+      // server only.
       const friendly = lastStatus === 503
         ? "AI is busy right now. Please try again in a moment."
-        : `AI gateway ${lastStatus}: ${lastErrorText.slice(0, 300)}`;
+        : "AI service error. Please try again.";
       return new Response(JSON.stringify({ error: friendly }), {
         status: 500,
         headers: { ...cors, "Content-Type": "application/json" },
@@ -181,7 +256,7 @@ Variation seed: ${variationSeed}${previousBlock}`;
       } else {
         const content: string | undefined = data.choices?.[0]?.message?.content;
         if (!content) {
-          console.error("No tool_calls or content:", JSON.stringify(data).slice(0, 1000));
+          logError("No tool_calls or content:", truncate(JSON.stringify(data)));
           return new Response(JSON.stringify({ error: "AI returned empty response" }), {
             status: 500,
             headers: { ...cors, "Content-Type": "application/json" },
@@ -191,9 +266,9 @@ Variation seed: ${variationSeed}${previousBlock}`;
         result = JSON.parse(jsonMatch ? jsonMatch[1] : content);
       }
     } catch (parseErr) {
-      console.error("Parse error:", parseErr, "data:", JSON.stringify(data).slice(0, 1000));
+      logError("Parse error:", parseErr, "data:", truncate(JSON.stringify(data)));
       return new Response(
-        JSON.stringify({ error: `AI response parse failed: ${parseErr instanceof Error ? parseErr.message : "unknown"}` }),
+        JSON.stringify({ error: "AI response parse failed" }),
         { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
       );
     }
@@ -205,12 +280,26 @@ Variation seed: ${variationSeed}${previousBlock}`;
       );
     }
 
+    // Cost telemetry — best-effort, doesn't fail the request on insert error.
+    const usage = data.usage ?? {};
+    supabaseAdmin.from("gemini_usage").insert({
+      function_name: "generate-followup",
+      subject,
+      model: "gemini-2.5-flash",
+      input_tokens: usage.prompt_tokens ?? null,
+      output_tokens: usage.completion_tokens ?? null,
+      total_tokens: usage.total_tokens ?? null,
+      prompt_injection_attempts: injectionAttempts,
+    }).then(({ error }) => {
+      if (error) logWarn("gemini_usage insert failed:", error.message);
+    });
+
     return new Response(JSON.stringify(result), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("generate-followup error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
+    logError("generate-followup error:", e);
+    return new Response(JSON.stringify({ error: "Unknown error" }), {
       status: 500,
       headers: { ...cors, "Content-Type": "application/json" },
     });

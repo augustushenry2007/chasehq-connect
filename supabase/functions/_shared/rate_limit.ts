@@ -47,3 +47,39 @@ export function rateLimitedResponse(headers: Record<string, string>): Response {
     },
   );
 }
+
+// Per-(subject, function) per-day counter. Layered on top of the per-minute
+// limit above to catch attackers who pace themselves under the 1-minute
+// ceiling but rack up thousands of paid-API calls across the day.
+export async function checkDailyQuota(
+  supabase: SupabaseClient,
+  subject: string,
+  fn: string,
+  maxPerDay: number,
+): Promise<{ allowed: boolean; count: number }> {
+  // Use UTC-day in ISO date format. Different from per-minute window deliberately
+  // — a UTC day boundary is fine for cost gating; we don't need timezone-aware
+  // resets here.
+  const day = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase.rpc("increment_daily_quota", {
+    p_subject: subject,
+    p_function_name: fn,
+    p_day: day,
+  });
+  if (error) {
+    console.error("[daily_quota] RPC failed; failing open:", error);
+    return { allowed: true, count: 0 };
+  }
+  const count = typeof data === "number" ? data : (data?.count ?? 0);
+  return { allowed: count <= maxPerDay, count };
+}
+
+export function quotaExceededResponse(headers: Record<string, string>): Response {
+  return new Response(
+    JSON.stringify({ error: "Daily quota exceeded. Try again tomorrow." }),
+    {
+      status: 429,
+      headers: { ...headers, "Content-Type": "application/json", "Retry-After": "86400" },
+    },
+  );
+}

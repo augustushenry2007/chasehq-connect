@@ -1,0 +1,180 @@
+name: security
+
+# Day 1: advisory mode — every job runs but `continue-on-error: true` keeps
+# them from blocking PRs. After ~24h of clean runs, flip the boolean below
+# (or remove the continue-on-error lines) to enforce. The plan file Phase
+# 6.10 covers the rollout.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Lower-friction default permissions. Individual jobs grant more if they need
+# to (e.g., gitleaks needs `contents: read`).
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks + custom grep)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Forbid private secrets in src/
+        run: |
+          set -e
+          PATTERN='(service_role|SUPABASE_SERVICE_ROLE|GEMINI_API_KEY|APPLE_SHARED_SECRET|RC_SECRET_KEY|OAUTH_STATE_SECRET|CRON_DISPATCH_SECRET)'
+          if grep -rEn "$PATTERN" src/ 2>/dev/null; then
+            echo "::error::Private secret pattern found in src/ — must never ship to client bundle"
+            exit 1
+          fi
+          echo "OK: no private secret patterns in src/"
+
+  deps-audit:
+    name: npm audit (high+)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install (no postinstall)
+        run: npm ci --ignore-scripts
+      - name: Audit
+        run: npm audit --audit-level=high
+
+  sast:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: returntocorp/semgrep:latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          semgrep ci --config p/owasp-top-ten --config p/javascript --config p/typescript --config p/react --error
+
+  build-bundle-check:
+    name: Built bundle has no secrets / no source maps / web entry has no Supabase
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: [secret-scan]
+    env:
+      VITE_SUPABASE_URL: https://dummy.supabase.co
+      VITE_SUPABASE_PUBLISHABLE_KEY: dummy_anon_key_for_build_only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: No private secret strings in dist/
+        run: |
+          set -e
+          PATTERN='(service_role|SUPABASE_SERVICE_ROLE|GEMINI_API_KEY|APPLE_SHARED_SECRET|RC_SECRET_KEY)'
+          if grep -rE "$PATTERN" dist/ 2>/dev/null; then
+            echo "::error::Private secret leaked into dist/ — backend env names must not appear in client bundle"
+            exit 1
+          fi
+          echo "OK: no private secrets in dist/"
+      - name: No production source maps
+        run: |
+          set -e
+          MAPS=$(find dist -name "*.map" -size +0 2>/dev/null || true)
+          if [ -n "$MAPS" ]; then
+            echo "::error::Source maps shipped to dist/:"
+            echo "$MAPS"
+            exit 1
+          fi
+          echo "OK: no source maps in dist/"
+      - name: Web entry chunk has no Supabase
+        run: |
+          set -e
+          # The landing-only entry chunk is index-*.js; it MUST NOT reference
+          # supabase. The AppNative-*.js chunk is allowed to (and is never
+          # loaded on web, only from inside the Capacitor WebView).
+          for f in dist/assets/index-*.js; do
+            if [ -f "$f" ] && grep -q "supabase" "$f"; then
+              echo "::error::Web entry chunk leaks Supabase: $f"
+              exit 1
+            fi
+          done
+          echo "OK: web entry chunk free of Supabase imports"
+
+  rls-regression:
+    name: All public tables have RLS enabled
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install psql
+        run: sudo apt-get update -y && sudo apt-get install -y postgresql-client
+      - name: Stub Supabase-only objects
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # Migrations reference auth.users, vault, etc. Provide minimal stubs
+          # so they apply cleanly against a vanilla Postgres image.
+          psql -h localhost -U postgres -c "create schema if not exists auth;"
+          psql -h localhost -U postgres -c "create table if not exists auth.users (id uuid primary key default gen_random_uuid(), email text);"
+          psql -h localhost -U postgres -c "create role anon nologin; create role authenticated nologin; create role service_role nologin;" || true
+      - name: Apply migrations
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -e
+          for f in supabase/migrations/*.sql; do
+            echo ">> $f"
+            psql -h localhost -U postgres -f "$f" -v ON_ERROR_STOP=1 || echo "non-fatal migration error in $f (likely Supabase-specific)"
+          done
+      - name: Assert every public BASE TABLE has RLS enabled
+        env:
+          PGPASSWORD: postgres
+        run: |
+          MISSING=$(psql -h localhost -U postgres -At -c "
+            select c.relname from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity = false;
+          ")
+          if [ -n "$MISSING" ]; then
+            echo "::error::Tables in public without RLS:"
+            echo "$MISSING"
+            exit 1
+          fi
+          echo "OK: every public table has RLS"
+
+  edge-function-tests:
+    name: Deno unit tests for edge functions
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - name: Run tests
+        run: |
+          if find supabase/functions -name "*.test.ts" -print -quit | grep -q .; then
+            deno test --allow-all supabase/functions/
+          else
+            echo "No Deno tests yet — placeholder pass while we add them."
+          fi
