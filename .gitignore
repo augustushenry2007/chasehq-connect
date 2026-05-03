@@ -21,6 +21,7 @@ dist-ssr
 *.pem
 *.key
 *.crt
+*.cer
 *.p12
 *.mobileprovision
 .npmrc
