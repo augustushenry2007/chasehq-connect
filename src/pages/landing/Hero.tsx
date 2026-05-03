@@ -3,14 +3,9 @@ import HeroPhoneDemo from "./HeroPhoneDemo";
 
 export default function Hero() {
   return (
-    <section className="relative px-6 pt-14 pb-24 sm:pt-16 sm:pb-28 overflow-hidden">
+    <section className="relative px-6 pt-12 pb-24 sm:pt-14 sm:pb-28 overflow-hidden">
       <div className="absolute inset-x-0 top-0 h-[420px] bg-gradient-to-b from-accent/40 via-accent/15 to-transparent pointer-events-none" />
       <div className="relative max-w-6xl mx-auto">
-
-        {/* Wordmark */}
-        <div className="inline-flex items-center gap-2.5 mb-16 sm:mb-20">
-          <span className="text-[28px] font-bold tracking-[-0.03em] text-foreground">Chase<span className="text-primary">HQ</span></span>
-        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.1fr] gap-14 lg:gap-16 items-center">
           {/* Copy */}
