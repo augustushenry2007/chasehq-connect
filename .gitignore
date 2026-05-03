@@ -17,6 +17,20 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Secrets / credentials — never commit these, even to a private repo
+*.pem
+*.key
+*.crt
+*.p12
+*.mobileprovision
+.npmrc
+.netrc
+
+# One-shot setup scripts often hardcode service-role keys.
+# Force everyone to read from env vars instead.
+setup-*.js
+setup-*.ts
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -27,3 +41,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.vercel

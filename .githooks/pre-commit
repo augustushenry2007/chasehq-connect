@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pre-commit secret scanner.
+# Activate with: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "warning: gitleaks not installed — skipping secret scan."
+  echo "         install with: brew install gitleaks"
+  exit 0
+fi
+
+# Scan only staged changes; refuse the commit if anything looks like a secret.
+if ! gitleaks protect --staged --redact --no-banner; then
+  echo
+  echo "✖ pre-commit blocked: gitleaks found a likely secret in staged changes."
+  echo "  if this is a false positive, add an inline allowlist comment or update .gitleaks.toml,"
+  echo "  then re-stage and commit."
+  exit 1
+fi
