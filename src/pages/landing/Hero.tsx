@@ -68,13 +68,26 @@ export default function Hero() {
                   </div>
                 </div>
 
-                {/* Frame PNG sits on top — provides bezel, side buttons, and Dynamic Island */}
+                {/* Frame PNG sits on top — provides bezel, side buttons */}
                 <img
                   src={phoneFrame}
                   alt=""
                   aria-hidden="true"
                   className="absolute inset-0 w-full h-full pointer-events-none select-none"
                   draggable={false}
+                />
+                {/* Modern Dynamic Island — masks the PNG's painted-in iPhone-13-era notch */}
+                <div
+                  className="absolute bg-black pointer-events-none"
+                  style={{
+                    left: "34%",
+                    right: "34%",
+                    top: "2.6%",
+                    height: "4.9%",
+                    borderRadius: "999px",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.4)",
+                  }}
+                  aria-hidden="true"
                 />
               </div>
             </div>
