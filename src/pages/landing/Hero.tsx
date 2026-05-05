@@ -1,5 +1,6 @@
 import AppStoreBadge from "./AppStoreBadge";
 import HeroPhoneDemo from "./HeroPhoneDemo";
+import phoneFrame from "@/assets/phone-mockup.png";
 
 export default function Hero() {
   return (
@@ -34,48 +35,47 @@ export default function Hero() {
             <div className="relative flex justify-center">
               {/* Glow */}
               <div className="absolute inset-[8%_12%] bg-gradient-radial from-accent/60 to-transparent blur-[60px] rounded-full" />
-              {/* Phone shell */}
+              {/* Phone */}
+              <style>{`@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
               <div
-                className="relative w-[388px] h-[836px] rounded-[58px] p-[20px] z-10"
-                style={{
-                  background: "linear-gradient(160deg,#E07830 0%,#C46018 55%,#D06C24 100%)",
-                  boxShadow: "0 80px 160px rgba(180,70,10,0.40), 0 30px 60px rgba(0,0,0,0.30), 0 0 0 1.5px rgba(255,200,120,0.30), inset 0 0 0 1px rgba(255,220,150,0.12)"
-                }}
-                aria-label="ChaseHQ iPhone app demo showing the full follow-up workflow"
+                className="relative w-[388px] z-10"
+                style={{ aspectRatio: "365 / 750", animation: "floaty 4s ease-in-out infinite", filter: "drop-shadow(0 60px 80px rgba(0,0,0,0.30)) drop-shadow(0 20px 40px rgba(0,0,0,0.20))" }}
+                aria-label="ChaseHQ iPhone app demo showing the follow-up workflow"
                 role="img"
               >
-                {/* Side buttons */}
-                <div style={{ position: "absolute", left: -14, top: 132, width: 14, height: 24, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#D47028,#B85E18)", boxShadow: "-3px 0 6px rgba(100,30,0,0.8),inset 0 1px 0 rgba(255,200,120,0.15)" }} />
-                <div style={{ position: "absolute", left: -14, top: 194, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#D47028,#B85E18)", boxShadow: "-3px 0 6px rgba(100,30,0,0.8),inset 0 1px 0 rgba(255,200,120,0.15)" }} />
-                <div style={{ position: "absolute", left: -14, top: 262, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#D47028,#B85E18)", boxShadow: "-3px 0 6px rgba(100,30,0,0.8),inset 0 1px 0 rgba(255,200,120,0.15)" }} />
-                <div style={{ position: "absolute", right: -14, top: 234, width: 14, height: 80, borderRadius: "0 4px 4px 0", background: "linear-gradient(to left,#D47028,#B85E18)", boxShadow: "3px 0 6px rgba(100,30,0,0.8),inset 0 1px 0 rgba(255,200,120,0.15)" }} />
-                {/* Floating animation */}
-                <style>{`@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
-                <div style={{ animation: "floaty 4s ease-in-out infinite", width: "100%", height: "100%" }}>
-                  {/* Screen */}
-                  <div className="w-full h-full bg-[#F7F9FA] rounded-[42px] overflow-hidden flex flex-col relative">
-                    {/* Dynamic Island */}
-                    <div className="absolute top-3 left-1/2 -translate-x-1/2 w-[120px] h-[35px] bg-[#111111] rounded-full z-10" />
-                    {/* Status bar */}
-                    <div className="flex justify-between items-center px-8 pt-[14px] pb-1 text-[13px] font-semibold text-[#1A2B35] shrink-0">
-                      <span>9:41</span>
-                      <span className="inline-flex gap-1 items-center">
-                        <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><path d="M1 7.5C3 5 5.5 4 8 4s5 1 7 3.5L14 9c-1.5-2-3.5-3-6-3s-4.5 1-6 3L1 7.5z" fill="#1A2B35"/></svg>
-                        <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><rect x="0" y="3" width="3" height="6" rx="0.5" fill="#1A2B35"/><rect x="4" y="2" width="3" height="7" rx="0.5" fill="#1A2B35"/><rect x="8" y="1" width="3" height="8" rx="0.5" fill="#1A2B35"/><rect x="12" y="0" width="3" height="9" rx="0.5" fill="#1A2B35"/></svg>
-                        <svg width="22" height="10" viewBox="0 0 22 10" fill="none"><rect x="0.5" y="0.5" width="18" height="9" rx="2" stroke="#1A2B35" fill="none"/><rect x="2" y="2" width="14" height="6" rx="1" fill="#1A2B35"/><rect x="19.5" y="3" width="1.5" height="4" rx="0.75" fill="#1A2B35"/></svg>
-                      </span>
-                    </div>
+                {/* Screen content sits in the PNG's transparent screen cutout */}
+                <div
+                  className="absolute bg-[#F7F9FA] overflow-hidden flex flex-col"
+                  style={{ left: "4.38%", right: "4.38%", top: "7.33%", bottom: "1.87%", borderRadius: "11.5%/5.4%" }}
+                >
+                  {/* Status bar — pushed below the PNG's painted-in Dynamic Island */}
+                  <div className="flex justify-between items-center px-8 pt-2 pb-1 text-[13px] font-semibold text-[#1A2B35] shrink-0">
+                    <span>9:41</span>
+                    <span className="inline-flex gap-1 items-center">
+                      <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><path d="M1 7.5C3 5 5.5 4 8 4s5 1 7 3.5L14 9c-1.5-2-3.5-3-6-3s-4.5 1-6 3L1 7.5z" fill="#1A2B35"/></svg>
+                      <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><rect x="0" y="3" width="3" height="6" rx="0.5" fill="#1A2B35"/><rect x="4" y="2" width="3" height="7" rx="0.5" fill="#1A2B35"/><rect x="8" y="1" width="3" height="8" rx="0.5" fill="#1A2B35"/><rect x="12" y="0" width="3" height="9" rx="0.5" fill="#1A2B35"/></svg>
+                      <svg width="22" height="10" viewBox="0 0 22 10" fill="none"><rect x="0.5" y="0.5" width="18" height="9" rx="2" stroke="#1A2B35" fill="none"/><rect x="2" y="2" width="14" height="6" rx="1" fill="#1A2B35"/><rect x="19.5" y="3" width="1.5" height="4" rx="0.75" fill="#1A2B35"/></svg>
+                    </span>
+                  </div>
 
-                    {/* Animated demo screens */}
-                    <div className="flex-1 overflow-hidden">
-                      <HeroPhoneDemo />
-                    </div>
-                    {/* Home indicator */}
-                    <div className="shrink-0 flex justify-center py-2">
-                      <div className="w-[100px] h-[4px] bg-[#1A2B35]/20 rounded-full" />
-                    </div>
+                  {/* Animated demo screens */}
+                  <div className="flex-1 overflow-hidden">
+                    <HeroPhoneDemo />
+                  </div>
+                  {/* Home indicator */}
+                  <div className="shrink-0 flex justify-center py-2">
+                    <div className="w-[100px] h-[4px] bg-[#1A2B35]/30 rounded-full" />
                   </div>
                 </div>
+
+                {/* Frame PNG sits on top — provides bezel, side buttons, and Dynamic Island */}
+                <img
+                  src={phoneFrame}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 w-full h-full pointer-events-none select-none"
+                  draggable={false}
+                />
               </div>
             </div>
           </div>
