@@ -65,7 +65,7 @@ export default function InvoiceDetailScreen() {
 
   const handleSendNow = useCallback((tone: ScheduleStep["tone"]) => {
     setActiveTone(tone);
-    setTimeout(() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+    setTimeout(() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
   }, []);
 
   async function handleMarkPaid() {
@@ -172,7 +172,7 @@ export default function InvoiceDetailScreen() {
 
   return (
     <div className="h-screen overflow-y-auto bg-background pb-24 animate-page-enter">
-      <div className="flex items-center justify-between pr-3">
+      <div className="sticky top-0 z-10 bg-background flex items-center justify-between pr-3">
         <ScreenHeader
           title="Back to Follow-ups"
           fallbackPath="/invoices"

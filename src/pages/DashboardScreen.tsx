@@ -139,7 +139,7 @@ export default function DashboardScreen() {
   const greetingText = firstName ? `${greeting()}, ${firstName}` : greeting();
 
   return (
-    <div className="flex-1 overflow-auto pb-24 pt-[env(safe-area-inset-top,0px)] animate-page-enter">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24 pt-[env(safe-area-inset-top,0px)] animate-page-enter">
       <TrialBanner />
       {!isAuthenticated && (
         <button

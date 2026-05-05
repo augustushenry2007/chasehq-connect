@@ -617,7 +617,7 @@ export default function SettingsScreen() {
 
 
   return (
-    <div className="flex-1 overflow-auto pb-24 pt-[env(safe-area-inset-top,0px)] animate-page-enter">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24 pt-[env(safe-area-inset-top,0px)] animate-page-enter">
       <div className="px-5 pt-5">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-bold text-foreground">Settings</h1>

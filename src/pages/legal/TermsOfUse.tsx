@@ -191,8 +191,8 @@ export default function TermsOfUse() {
             <h2 className="text-lg font-semibold mb-2">15. Contact</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Questions about these Terms can be sent to{" "}
-              <a href="mailto:legal@chasehq.app" className="text-primary underline">
-                legal@chasehq.app
+              <a href="mailto:support@chasehq.app" className="text-primary underline">
+                support@chasehq.app
               </a>
               .
             </p>
