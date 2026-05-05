@@ -179,8 +179,8 @@ export default function PrivacyPolicy() {
               This policy is governed by the laws of the Republic of India. Disputes shall be
               subject to the exclusive jurisdiction of the competent courts of Bhopal, Madhya
               Pradesh, India. Questions or requests can be sent to{" "}
-              <a href="mailto:privacy@chasehq.app" className="text-primary underline">
-                privacy@chasehq.app
+              <a href="mailto:support@chasehq.app" className="text-primary underline">
+                support@chasehq.app
               </a>
               .
             </p>

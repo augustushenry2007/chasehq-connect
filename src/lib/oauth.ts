@@ -23,6 +23,10 @@ export async function startGoogleOAuth(
   if (isNative) {
     try {
       const { GoogleAuth } = await import("@/lib/googleNativeAuth");
+      // Set COMPLETED before the native modal opens so that Capacitor Browser's
+      // browserFinished event — which fires when GIDSignIn's internal browser closes,
+      // before GoogleAuth.signIn() resolves — always sees COMPLETED="1" and is a no-op.
+      sessionStorage.setItem(STORAGE_KEYS.OAUTH_COMPLETED, "1");
       // Double-rAF: the second callback fires after WebKit has completed at least one full
       // paint cycle, guaranteeing the OAuthOverlay (committed via flushSync) is in the
       // compositor frame buffer before GoogleAuth.signIn() triggers the native modal.
@@ -30,11 +34,7 @@ export async function startGoogleOAuth(
       // the overlay, not the underlying route.
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const result = await GoogleAuth.signIn();
-      // Assert overlay immediately after native dialog closes — before any subsequent awaits.
-      // Guards against browserFinished clearing OAUTH_IN_PROGRESS between SVC close and
-      // signInWithIdToken completing; also re-shows the overlay if briefly dismissed.
-      sessionStorage.setItem(STORAGE_KEYS.OAUTH_COMPLETED, "1");
-      window.dispatchEvent(new Event("chasehq:oauth-signal"));
+      window.dispatchEvent(new Event("chasehq:oauth-signal")); // re-assert overlay after dialog closes
 
       const { data: sessionData, error: idError } = await supabase.auth.signInWithIdToken({
         provider: "google",
@@ -42,6 +42,7 @@ export async function startGoogleOAuth(
       });
       if (idError || !sessionData.session) {
         sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
+        sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
         window.dispatchEvent(new Event("chasehq:oauth-signal"));
         console.error("[startGoogleOAuth native] signInWithIdToken failed:", idError);
         return { error: idError ?? new Error("Sign-in failed") };
@@ -80,6 +81,7 @@ export async function startGoogleOAuth(
       return { error: null };
     } catch (e: unknown) {
       sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
+      sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
       window.dispatchEvent(new Event("chasehq:oauth-signal"));
       const code = (e as { code?: string })?.code;
       const err: Error & { code?: string } = e instanceof Error ? e : new Error("Sign-in failed");

@@ -8,6 +8,9 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
     allowNavigation: [],
   },
+  ios: {
+    scrollEnabled: false,
+  },
   plugins: {
     LocalNotifications: {
       smallIcon: 'ic_stat_icon_config_sample',

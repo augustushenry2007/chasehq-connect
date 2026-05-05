@@ -183,7 +183,12 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
       setGenerationError(true);
     }
     setIsGenerating(false);
-    setTimeout(() => draftRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+    setTimeout(() => {
+      const rect = draftRef.current?.getBoundingClientRect();
+      if (rect && rect.top > window.innerHeight * 0.7) {
+        draftRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 100);
   }
 
   function handleToneChange(t: Tone) {
@@ -375,32 +380,6 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
     }
   }
 
-  if (sendStage !== "idle") {
-    const exiting = sendStage === "exiting";
-    return (
-      <div
-        className={`mt-4 bg-card border border-border rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-500 ${exiting ? "opacity-0 -translate-y-1" : "animate-in fade-in"}`}
-        onClick={() => {
-          if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
-          if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-          setSendStage("exiting");
-          hideTimerRef.current = setTimeout(() => setSendStage("idle"), 600);
-        }}
-      >
-        <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mb-4">
-          <CheckCircle className="w-8 h-8 text-green-500" />
-        </div>
-        <p className="text-xl font-bold text-foreground">We're on it!</p>
-        <p className="text-sm text-muted-foreground mt-1.5">
-          Your follow-up is on its way to {invoice.client}.
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          We'll let you know if {invoice.client} replies.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="mt-4 bg-card border border-border rounded-2xl p-4" ref={draftRef}>
       <div className="flex items-center justify-between mb-3">
@@ -500,6 +479,7 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
             onCut={user ? undefined : (e) => e.preventDefault()}
             onContextMenu={user ? undefined : (e) => e.preventDefault()}
             rows={10}
+            style={{ fontSize: "16px" }}
             className={`w-full bg-muted border border-border rounded-xl px-3.5 py-3 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed${user ? "" : " select-none [-webkit-user-select:none]"}`}
           />
         )}
@@ -756,6 +736,39 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
                 </button>
               </div>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Fixed bottom toast — visible regardless of scroll position */}
+      {sendStage !== "idle" && createPortal(
+        <div
+          className="fixed inset-x-0 bottom-0 z-50 flex justify-center px-4"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 8px) + 72px)" }}
+        >
+          <div
+            className={`w-full max-w-sm bg-card border border-border rounded-2xl shadow-lg px-4 py-3.5 flex items-center gap-3 cursor-pointer transition-all duration-500 ${
+              sendStage === "exiting"
+                ? "opacity-0 translate-y-4"
+                : "animate-in slide-in-from-bottom-4 fade-in duration-300"
+            }`}
+            onClick={() => {
+              if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+              if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+              setSendStage("exiting");
+              hideTimerRef.current = setTimeout(() => setSendStage("idle"), 500);
+            }}
+          >
+            <div className="w-9 h-9 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
+              <CheckCircle className="w-[18px] h-[18px] text-green-500" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-bold text-foreground">We're on it!</p>
+              <p className="text-[12px] text-muted-foreground leading-snug">
+                Follow-up sent to {invoice.client}.
+              </p>
+            </div>
           </div>
         </div>,
         document.body
