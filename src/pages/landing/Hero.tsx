@@ -38,17 +38,17 @@ export default function Hero() {
               <div
                 className="relative w-[388px] h-[836px] rounded-[58px] p-[20px] z-10"
                 style={{
-                  background: "linear-gradient(160deg,#1c1c1e 0%,#0d0d0f 60%,#111 100%)",
-                  boxShadow: "0 80px 160px rgba(0,0,0,0.55), 0 30px 60px rgba(0,0,0,0.35), 0 0 0 1.5px rgba(255,255,255,0.12), inset 0 0 0 1px rgba(255,255,255,0.06)"
+                  background: "linear-gradient(160deg,#E07830 0%,#C46018 55%,#D06C24 100%)",
+                  boxShadow: "0 80px 160px rgba(180,70,10,0.40), 0 30px 60px rgba(0,0,0,0.30), 0 0 0 1.5px rgba(255,200,120,0.30), inset 0 0 0 1px rgba(255,220,150,0.12)"
                 }}
                 aria-label="ChaseHQ iPhone app demo showing the full follow-up workflow"
                 role="img"
               >
                 {/* Side buttons */}
-                <div style={{ position: "absolute", left: -14, top: 132, width: 14, height: 24, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
-                <div style={{ position: "absolute", left: -14, top: 194, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
-                <div style={{ position: "absolute", left: -14, top: 262, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
-                <div style={{ position: "absolute", right: -14, top: 234, width: 14, height: 80, borderRadius: "0 4px 4px 0", background: "linear-gradient(to left,#252525,#181818)", boxShadow: "3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
+                <div style={{ position: "absolute", left: -14, top: 132, width: 14, height: 24, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#D47028,#B85E18)", boxShadow: "-3px 0 6px rgba(100,30,0,0.8),inset 0 1px 0 rgba(255,200,120,0.15)" }} />
+                <div style={{ position: "absolute", left: -14, top: 194, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#D47028,#B85E18)", boxShadow: "-3px 0 6px rgba(100,30,0,0.8),inset 0 1px 0 rgba(255,200,120,0.15)" }} />
+                <div style={{ position: "absolute", left: -14, top: 262, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#D47028,#B85E18)", boxShadow: "-3px 0 6px rgba(100,30,0,0.8),inset 0 1px 0 rgba(255,200,120,0.15)" }} />
+                <div style={{ position: "absolute", right: -14, top: 234, width: 14, height: 80, borderRadius: "0 4px 4px 0", background: "linear-gradient(to left,#D47028,#B85E18)", boxShadow: "3px 0 6px rgba(100,30,0,0.8),inset 0 1px 0 rgba(255,200,120,0.15)" }} />
                 {/* Floating animation */}
                 <style>{`@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
                 <div style={{ animation: "floaty 4s ease-in-out infinite", width: "100%", height: "100%" }}>
