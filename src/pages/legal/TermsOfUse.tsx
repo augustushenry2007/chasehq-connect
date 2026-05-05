@@ -1,29 +1,12 @@
 import { Capacitor } from "@capacitor/core";
 import { ScreenHeader } from "@/components/ScreenHeader";
-
-function WebHeader() {
-  return (
-    <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur-sm px-6 py-4">
-      <div className="max-w-2xl mx-auto flex items-center justify-between">
-        <a href="/" className="text-[22px] font-bold tracking-[-0.03em] text-foreground hover:opacity-80 transition-opacity">
-          Chase<span className="text-primary">HQ</span>
-        </a>
-        <a href="/" className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M19 12H5M12 5l-7 7 7 7"/>
-          </svg>
-          Back
-        </a>
-      </div>
-    </header>
-  );
-}
+import SiteNav from "@/components/SiteNav";
 
 export default function TermsOfUse() {
   const isNative = Capacitor.isNativePlatform();
   return (
     <div className={isNative ? "h-screen bg-background overflow-y-auto overscroll-contain" : "min-h-screen bg-background"}>
-      {isNative ? <ScreenHeader fallbackPath="/welcome" /> : <WebHeader />}
+      {isNative ? <ScreenHeader fallbackPath="/welcome" /> : <SiteNav />}
       <div className="max-w-2xl mx-auto px-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
 
         <h1 className="text-[28px] font-bold text-foreground tracking-[-0.02em] mb-1 pt-8">Terms of Use</h1>
