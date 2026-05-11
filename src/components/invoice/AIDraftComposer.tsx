@@ -3,16 +3,17 @@ import { createPortal } from "react-dom";
 import { RefreshCw, Send, Loader2, AlertCircle, Info, Check, CheckCircle, Shuffle, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
-import { generateFollowup, sendFollowupEmail, recordFollowup } from "@/hooks/useSupabaseData";
+import { generateFollowupStream, sendFollowupEmail } from "@/hooks/useSupabaseData";
 import { advanceScheduleAfterSend } from "@/hooks/useNotifications";
 import { getDefaultDraft, getTemplateDraft, TEMPLATE_COUNT, type Tone } from "./DraftTemplates";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { useActionGate } from "@/hooks/useActionGate";
+import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { useApp } from "@/context/AppContext";
 import { useFlow } from "@/flow/FlowMachine";
 import { supabase } from "@/integrations/supabase/client";
-import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/lib/oauth";
-import { isNativePlatform, restorePurchases, syncSubscriptionToSupabase } from "@/lib/iap";
+import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/integrations/oauth";
+import { isNativePlatform, restorePurchases, syncSubscriptionToSupabase } from "@/integrations/iap";
 import { readPending } from "@/lib/localInvoice";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 import { GoogleIcon } from "@/components/GoogleIcon";
@@ -31,6 +32,12 @@ import {
 const TONES: Tone[] = ["Friendly", "Firm", "Urgent", "Final Notice"];
 const PREVIEW_CHARS = 220;
 
+// Module-scoped so an in-flight send survives a navigation/remount. A second
+// AIDraftComposer instance (e.g. opened on another invoice's detail screen)
+// shares this set, so it can't slip a concurrent free send past the per-instance
+// guard while the first send's followups row hasn't been written yet.
+const inFlightSendUsers = new Set<string>();
+
 function formatAgo(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   if (minutes < 1) return "moments ago";
@@ -39,22 +46,27 @@ function formatAgo(ms: number): string {
   return `${hours} hour${hours === 1 ? "" : "s"} ago`;
 }
 
-type SendSheetState = "closed" | "signed_out" | "needs_trial" | "ready";
+type SendSheetState = "closed" | "signed_out" | "needs_gmail" | "needs_trial" | "ready";
 
 export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invoice: Invoice; onSent?: () => void; defaultTone?: Tone }) {
-  const { user, notifications, fullName } = useApp();
+  const { user, notifications, fullName, userProfile, isDemo } = useApp();
   const { send: flowSend } = useFlow();
   const entitlement = useEntitlement();
   const { canSend, trialEndsAt, refetch: refetchEntitlement, isTrialing, isActive, isPastDue, hasFreeSend, followupsSent } = entitlement;
   const gate = useActionGate();
+  const gmailConn = useGmailConnection();
+  const [gmailConnecting, setGmailConnecting] = useState(false);
 
   const [tone, setTone] = useState<Tone>((defaultTone ?? notifications.defaultTone) as Tone);
   const [currentSubject, setCurrentSubject] = useState("");
   const [currentDraft, setCurrentDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState(false);
-  const [sending, setSending] = useState(false);
   const [sendStage, setSendStage] = useState<"idle" | "showing" | "exiting">("idle");
+  // While a real send is in flight the toast says "Sending…" (a spinner, no green
+  // check) and won't auto-dismiss; it flips to "Sent" only once the send is
+  // confirmed. So the green check is never shown before the email is actually out.
+  const [sendOutcome, setSendOutcome] = useState<"pending" | "sent">("pending");
   const [isAiGenerated, setIsAiGenerated] = useState(false);
   const [templateIndex, setTemplateIndex] = useState(0);
   const [pendingTone, setPendingTone] = useState<Tone | null>(null);
@@ -73,6 +85,7 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
   const userEditedRef = useRef(false);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendInFlight = () => !!user?.id && inFlightSendUsers.has(user.id);
 
   const isFinalNotice = tone === "Final Notice";
   const msSinceLastSend = lastSentAt ? Date.now() - lastSentAt.getTime() : null;
@@ -106,7 +119,7 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
   // Load template when tone changes (resets AI flag and discards manual edits)
   useEffect(() => {
     if (isGenerating) return;
-    const def = getDefaultDraft(invoice, tone, fullName || undefined);
+    const def = getDefaultDraft(invoice, tone, fullName || undefined, userProfile);
     setCurrentSubject(def.subject);
     setCurrentDraft(def.message);
     setIsAiGenerated(false);
@@ -128,32 +141,47 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
 
     if (import.meta.env.DEV) {
       console.log("[POST_OAUTH_RESUME]", {
-        intent,
-        gateState: gate.state,
-        canExecute: gate.canExecute,
-        hasFreeSend: entitlement.hasFreeSend,
-        isTrialing: entitlement.isTrialing,
-        isActive: entitlement.isActive,
+        intent, gateState: gate.state, canExecute: gate.canExecute,
+        hasFreeSend: entitlement.hasFreeSend, t: performance.now(),
       });
     }
 
     if (gate.canExecute) {
-      if (intent === "generate") { void handleGenerate(); }
-      else { setSendSheet("ready"); setBodyExpanded(false); }
+      if (intent === "generate") {
+        void handleGenerate();
+        // Generate path: no sheet, two-rAF is enough.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          window.dispatchEvent(new Event("chasehq:oauth-signal"));
+        }));
+        return;
+      }
+      setSendSheet("ready");
+      setBodyExpanded(false);
     } else {
       setSendSheetIntent(intent);
       setIapError(null);
       setSendSheet("needs_trial");
     }
-    // Signal OAuthOverlay to re-evaluate dismissal now that the modal is committed
-    // and SEND_AFTER_AUTH has been cleared — this is what drops the spinner.
-    window.dispatchEvent(new Event("chasehq:oauth-signal"));
-  }, [user, gate.state, gate.canExecute]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Wait 400ms before signalling overlay dismissal — enough for React to commit
+    // setSendSheet (0-32ms) and animate-slide-in-up to complete (260ms), with buffer.
+    window.setTimeout(() => {
+      window.dispatchEvent(new Event("chasehq:oauth-signal"));
+    }, 400);
+  }, [user?.id, gate.state, gate.canExecute]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When Gmail consent completes while the needs_gmail sheet is open, auto-advance.
+  useEffect(() => {
+    if (gmailConn.gmail.connected && sendSheet === "needs_gmail") {
+      setGmailConnecting(false);
+      setSendSheet("ready");
+      setBodyExpanded(false);
+    }
+  }, [gmailConn.gmail.connected, sendSheet]);
 
   function handleCycleTemplate() {
     const nextIndex = (templateIndex + 1) % TEMPLATE_COUNT;
     setTemplateIndex(nextIndex);
-    const t = getTemplateDraft(invoice, tone, nextIndex, fullName || undefined);
+    const t = getTemplateDraft(invoice, tone, nextIndex, fullName || undefined, userProfile);
     setCurrentSubject(t.subject);
     setCurrentDraft(t.message);
     setIsAiGenerated(false);
@@ -165,22 +193,69 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
     if (isGenerating) return;
     setIsGenerating(true);
     setGenerationError(false);
-    const displayName = fullName?.trim() ? fullName.trim().replace(/\b\w/g, c => c.toUpperCase()) : undefined;
-    let result = await generateFollowup(invoice, tone, isAiGenerated ? currentDraft : undefined, displayName);
-    if (!result) {
-      result = await generateFollowup(invoice, tone, undefined, displayName);
-    }
-    if (result) {
-      if (result.message === currentDraft) {
-        toast.message("That one came out similar. Regenerate or switch tones for a different feel.");
-      }
-      setCurrentDraft(result.message);
-      setCurrentSubject(result.subject);
+
+    // Demo mode: simulate AI generation with a realistic delay and a polished fake draft.
+    if (isDemo) {
+      await new Promise((r) => setTimeout(r, 1400));
+      const def = getDefaultDraft(invoice, tone, fullName || undefined, userProfile);
+      setCurrentSubject(def.subject);
+      setCurrentDraft(def.message);
       setIsAiGenerated(true);
       setGenerationError(false);
       userEditedRef.current = false;
+      setIsGenerating(false);
+      return;
+    }
+
+    const displayName = fullName?.trim() ? fullName.trim().replace(/\b\w/g, c => c.toUpperCase()) : undefined;
+    const previousDraft = isAiGenerated ? currentDraft : undefined;
+    // Clear the editor while we stream in the new draft. Without this the
+    // skeleton (which gates on `isGenerating && !currentDraft`) never shows
+    // on Regenerate because the prior draft is still in state.
+    setCurrentSubject("");
+    setCurrentDraft("");
+
+    let streamedMessage = "";
+    let errorReason: { kind: "rate_limited" | "error"; message?: string } | null = null;
+
+    await generateFollowupStream(
+      invoice, tone, previousDraft, displayName, userProfile,
+      {
+        onSubject: (s) => setCurrentSubject(s),
+        onMessageDelta: (delta) => {
+          streamedMessage += delta;
+          setCurrentDraft(streamedMessage);
+        },
+        onDone: () => { /* finalization handled below */ },
+        onError: (kind, message) => { errorReason = { kind, message }; },
+      },
+    );
+
+    if (errorReason) {
+      const reason = errorReason as { kind: "rate_limited" | "error"; message?: string };
+      if (reason.kind === "rate_limited") {
+        toast.error(reason.message || "AI is busy right now. Wait a moment and try again.");
+        // Don't clobber the editor with a fallback on rate-limit — leave it
+        // empty so the user can tap Regenerate without losing context.
+        setIsAiGenerated(false);
+        setGenerationError(true);
+      } else {
+        const fallback = getDefaultDraft(invoice, tone, fullName || undefined, userProfile);
+        setCurrentSubject(fallback.subject);
+        setCurrentDraft(fallback.message);
+        setIsAiGenerated(false);
+        setGenerationError(true);
+        if (reason.message) toast.error(reason.message);
+      }
+      userEditedRef.current = false;
     } else {
-      setGenerationError(true);
+      // Surface the "came out similar" hint even on the streamed path.
+      if (previousDraft && streamedMessage.trim() === previousDraft.trim()) {
+        toast.message("That one came out similar. Regenerate or switch tones for a different feel.");
+      }
+      setIsAiGenerated(true);
+      setGenerationError(false);
+      userEditedRef.current = false;
     }
     setIsGenerating(false);
     setTimeout(() => {
@@ -217,14 +292,75 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
   }
 
   function handleSendClick() {
-    if (gate.state === "loading") return;
-    if (!gate.canExecute) { openSendSheet("send"); return; }
+    // Block re-entry while a send is in flight — prevents stale canSend routing
+    // if the user taps again before noteFollowupSent() commits (2–5s window).
+    if (sendInFlight()) return;
+
+    if (gate.state === "loading" || entitlement.loading || gmailConn.loading) return;
+    if (!entitlement.canSend) {
+      openSendSheet("send");
+      return;
+    }
+    // If user signed in with Google but hasn't granted gmail.send yet,
+    // surface the consent step before letting them send via the fallback.
+    if (gmailConn.signedInWithGoogle && gmailConn.needsSendPermission) {
+      setSendSheetIntent("send");
+      setIapError(null);
+      setSendSheet("needs_gmail");
+      return;
+    }
     setSendSheet("ready");
     setBodyExpanded(false);
   }
 
-  async function handleSheetSend() {
-    if (sending) return;
+  async function handleConnectGmail() {
+    if (gmailConnecting) return;
+    setGmailConnecting(true);
+    try {
+      const { error } = await gmailConn.connectGmail();
+      if (error) {
+        toast.error(error || "Couldn't open Gmail consent. Try again.");
+        setGmailConnecting(false);
+      }
+      // On success the page redirects to Google — no further state to set.
+    } catch {
+      toast.error("Couldn't open Gmail consent. Try again.");
+      setGmailConnecting(false);
+    }
+  }
+
+  function startSentToastDismissTimer() {
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    exitTimerRef.current = setTimeout(() => {
+      setSendStage("exiting");
+      hideTimerRef.current = setTimeout(() => setSendStage("idle"), 600);
+    }, 3500);
+  }
+
+  function showSentToast(outcome: "pending" | "sent" = "pending") {
+    setSendStage("showing");
+    setSendOutcome(outcome);
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    // "pending" stays up until the send resolves (could be ~15s); only "sent"
+    // (or the demo path) auto-dismisses.
+    if (outcome === "sent") startSentToastDismissTimer();
+  }
+
+  function markSentToastDelivered() {
+    setSendOutcome("sent");
+    startSentToastDismissTimer();
+  }
+
+  function hideSentToast() {
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    setSendStage("idle");
+  }
+
+  function handleSheetSend() {
+    if (sendInFlight()) return;
     if (!currentDraft || !currentSubject) {
       toast.error("Add a subject and message before sending.");
       return;
@@ -233,51 +369,95 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
       toast.error("Add your client's email so we can send this for you.");
       return;
     }
-    setSending(true);
 
-    const result = await sendFollowupEmail(invoice.clientEmail, currentSubject, currentDraft, invoice.dbId);
+    // Snapshot mutable inputs at tap time so the background call uses exactly
+    // what the user saw, even if state changes while the call is in flight.
+    const snapshot = {
+      clientEmail: invoice.clientEmail,
+      subject: currentSubject,
+      draft: currentDraft,
+      dbId: invoice.dbId,
+      tone,
+      isAiGenerated,
+    };
 
-    if (!result.ok) {
-      setSending(false);
-      if (result.reason === "subscription_required") {
-        if (import.meta.env.DEV) {
-          console.log("[NEEDS_TRIAL via backend rejection]", { result });
-        }
-        setSendSheet("needs_trial");
-        return;
-      }
-      setSendSheet("closed");
-      if (result.reason === "no_mailbox") {
-        toast.error("Connect your Gmail in Settings and we'll send this for you.");
-      } else if (result.reason === "rate_limited") {
-        toast.error(result.message || "You've hit today's send limit. We'll be ready again tomorrow.");
-      } else {
-        toast.error(result.message || "We couldn't send this one. Your draft is safe — give it another try.");
-      }
+    setSendSheet("closed");
+
+    // Demo mode: instant confirmation, no real network call.
+    if (isDemo) {
+      showSentToast("sent");
       return;
     }
 
-    if (user?.id) {
-      await recordFollowup(user.id, invoice.dbId, {
-        subject: currentSubject,
-        message: currentDraft,
-        tone,
-        isAiGenerated,
-      });
-    }
-    await advanceScheduleAfterSend(invoice.dbId, tone);
+    const uid = user?.id;
+    if (!uid) return; // not reachable in practice — the ready sheet requires auth
+    inFlightSendUsers.add(uid);
 
-    setSending(false);
-    setSendSheet("closed");
-    setLastSentAt(new Date());
-    onSent?.();
-    setSendStage("showing");
-    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    exitTimerRef.current = setTimeout(() => {
-      setSendStage("exiting");
-      hideTimerRef.current = setTimeout(() => setSendStage("idle"), 600);
-    }, 3500);
+    // Show "Sending follow-up to {client}…" immediately; the background send
+    // flips it to "Follow-up sent" only once confirmed.
+    showSentToast("pending");
+    void performBackgroundSend(snapshot, uid);
+  }
+
+  async function performBackgroundSend(snapshot: {
+    clientEmail: string;
+    subject: string;
+    draft: string;
+    dbId: string;
+    tone: Tone;
+    isAiGenerated: boolean;
+  }, uid: string) {
+    try {
+      const result = await sendFollowupEmail(
+        snapshot.clientEmail, snapshot.subject, snapshot.draft, snapshot.dbId, snapshot.tone, snapshot.isAiGenerated,
+      );
+
+      if (!result.ok) {
+        hideSentToast();
+        if (result.reason === "subscription_required") {
+          if (import.meta.env.DEV) {
+            console.log("[NEEDS_TRIAL via backend rejection]", { result });
+          }
+          // Global toast too — setSendSheet is a no-op if the composer unmounted
+          // (user navigated away from the invoice detail screen during the send).
+          toast.error(result.message || "Your trial has ended. Subscribe to keep sending follow-ups.");
+          setSendSheet("needs_trial");
+          return;
+        }
+        if (result.reason === "gmail_not_connected" || result.reason === "gmail_reauth_required") {
+          // Backend says profile.sender_type=gmail but no/expired tokens — refetch
+          // and show the consent step so the user can re-grant permission.
+          toast.error(result.message || "Your Gmail link needs reconnecting. Open Settings to fix it.");
+          gmailConn.refetch();
+          setSendSheet("needs_gmail");
+          return;
+        }
+        if (result.reason === "rate_limited") {
+          toast.error(result.message || "You've hit today's send limit. We'll be ready again tomorrow.");
+        } else {
+          toast.error(result.message || "We couldn't send this one. Your draft is safe — give it another try.");
+        }
+        return;
+      }
+
+      // Confirmed — now flip the toast from "Sending…" to "Follow-up sent".
+      markSentToastDelivered();
+
+      // The followups timeline row is written server-side by send-email now.
+      // Flip hasFreeSend to false synchronously so the next tap routes to the
+      // trial paywall instead of re-rendering the "Your first follow-up is on us"
+      // sheet while the realtime followups INSERT is still in flight.
+      entitlement.noteFollowupSent();
+      await advanceScheduleAfterSend(snapshot.dbId, snapshot.tone);
+
+      setLastSentAt(new Date());
+      onSent?.();
+    } catch {
+      hideSentToast();
+      toast.error("We couldn't send this one. Your draft is safe — give it another try.");
+    } finally {
+      inFlightSendUsers.delete(uid);
+    }
   }
 
   async function handleGoogleSignIn() {
@@ -314,17 +494,28 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
     }
   }
 
+  // syncSubscriptionToSupabase couldn't write the `subscriptions` row after the
+  // retries (e.g. validate-apple-receipt briefly down). The purchase itself went
+  // through on-device, so useEntitlement's RevenueCat fallback should still let
+  // the user send — re-check it now, and tell them in case it doesn't clear.
+  const onSubscriptionSyncFailed = () => {
+    void refetchEntitlement();
+    toast.error("We couldn't confirm your subscription just yet. You can keep using ChaseHQ — reopen the app if anything looks off.");
+  };
+  const onSubscriptionSynced = () => { void refetchEntitlement(); };
+
   async function handleStartTrial() {
     if (iapLoading) return;
     setIapLoading(true);
     setIapError(null);
     try {
-      const { purchaseSubscription, getActiveEntitlement } = await import("@/lib/iap");
+      const { purchaseSubscription, getActiveEntitlement } = await import("@/integrations/iap");
 
       const existing = await getActiveEntitlement();
       if (existing?.entitled) {
         void syncSubscriptionToSupabase(`RC_CUSTOMER:${existing.originalAppUserId}`, "chasehq_pro_monthly", false, {
-          onSynced: () => { void refetchEntitlement(); },
+          onSynced: onSubscriptionSynced,
+          onFailed: onSubscriptionSyncFailed,
           isTrialing: existing.isTrialing,
           expiresAt: existing.expiresAt,
         });
@@ -345,7 +536,8 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
       }
 
       void syncSubscriptionToSupabase(iap.receipt!, iap.productId ?? "chasehq_pro_monthly", iap.mock ?? false, {
-        onSynced: () => { void refetchEntitlement(); },
+        onSynced: onSubscriptionSynced,
+        onFailed: onSubscriptionSyncFailed,
         isTrialing: iap.isTrialing,
         expiresAt: iap.expiresAt,
       });
@@ -369,7 +561,8 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
         return;
       }
       void syncSubscriptionToSupabase(result.receipt!, result.productId ?? "chasehq_pro_monthly", result.mock ?? false, {
-        onSynced: () => { void refetchEntitlement(); },
+        onSynced: onSubscriptionSynced,
+        onFailed: onSubscriptionSyncFailed,
         isTrialing: result.isTrialing,
         expiresAt: result.expiresAt,
       });
@@ -380,10 +573,15 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
     }
   }
 
+  const recoveryPending =
+    typeof window !== "undefined" &&
+    sessionStorage.getItem(STORAGE_KEYS.SEND_AFTER_AUTH) !== null;
+  const sheetIsOpen = sendSheet !== "closed";
+
   return (
-    <div className="mt-4 bg-card border border-border rounded-2xl p-4" ref={draftRef}>
+    <div className="mt-4 bg-card border border-border rounded-3xl p-4" style={{ boxShadow: "var(--shadow-card)" }} ref={draftRef}>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-foreground">AI Follow-up Draft</h3>
+        <h3 className="text-[15px] font-semibold text-foreground tracking-[-0.01em]">AI Follow-up Draft</h3>
         {isAiGenerated && (
           <span className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">AI Generated</span>
         )}
@@ -445,7 +643,9 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
 
       {/* Message body */}
       <div>
-        {isGenerating ? (
+        {/* Skeleton until the first streamed byte lands. Once `currentDraft`
+            is non-empty the streamed text takes over and renders live. */}
+        {isGenerating && !currentDraft ? (
           <div className="space-y-2 py-3">
             <div className="h-3.5 bg-muted rounded-md animate-pulse w-full" />
             <div className="h-3.5 bg-muted rounded-md animate-pulse w-5/6" />
@@ -460,28 +660,31 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
               Generating {tone.toLowerCase()} follow-up…
             </div>
           </div>
-        ) : generationError ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-10 px-4 rounded-xl bg-destructive/5 border border-destructive/20">
-            <AlertCircle className="w-5 h-5 text-destructive" />
-            <p className="text-sm text-destructive text-center">That one didn't come through — it may be busy. Give it a moment and try again.</p>
-            <button
-              onClick={handleGenerate}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-destructive/30 text-xs font-semibold text-destructive hover:bg-destructive/10 transition-colors"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> Try again
-            </button>
-          </div>
         ) : (
-          <textarea
-            value={currentDraft}
-            onChange={(e) => { setCurrentDraft(e.target.value); userEditedRef.current = true; }}
-            onCopy={user ? undefined : (e) => e.preventDefault()}
-            onCut={user ? undefined : (e) => e.preventDefault()}
-            onContextMenu={user ? undefined : (e) => e.preventDefault()}
-            rows={10}
-            style={{ fontSize: "16px" }}
-            className={`w-full bg-muted border border-border rounded-xl px-3.5 py-3 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed${user ? "" : " select-none [-webkit-user-select:none]"}`}
-          />
+          <>
+            {generationError && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 mb-2 rounded-xl bg-muted border border-border/60">
+                <p className="text-xs text-muted-foreground">AI is busy — template loaded.</p>
+                <button
+                  onClick={handleGenerate}
+                  disabled={isGenerating}
+                  className="flex items-center gap-1 text-xs font-medium text-primary shrink-0"
+                >
+                  <RefreshCw className="w-3 h-3" /> Try AI
+                </button>
+              </div>
+            )}
+            <textarea
+              value={currentDraft}
+              onChange={(e) => { setCurrentDraft(e.target.value); userEditedRef.current = true; }}
+              onCopy={user ? undefined : (e) => e.preventDefault()}
+              onCut={user ? undefined : (e) => e.preventDefault()}
+              onContextMenu={user ? undefined : (e) => e.preventDefault()}
+              rows={10}
+              style={{ fontSize: "16px" }}
+              className={`w-full bg-muted border border-border rounded-xl px-3.5 py-3 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed${user ? "" : " select-none [-webkit-user-select:none]"}`}
+            />
+          </>
         )}
       </div>
       </div>
@@ -520,18 +723,14 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
         </div>
         <button
           onClick={handleSendClick}
-          disabled={sending || !currentDraft}
-          className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-50 ${
+          disabled={!currentDraft}
+          className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97] disabled:opacity-50 shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)] ${
             isFinalNotice
               ? "bg-amber-600 hover:bg-amber-700 text-white"
               : "bg-primary text-primary-foreground hover:bg-primary/90"
           }`}
         >
-          {sending ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
-          ) : (
-            <><Send className="w-4 h-4" /> {isFinalNotice ? "Send Final Notice" : recentlySent ? "Send anyway" : "Send"}</>
-          )}
+          <><Send className="w-4 h-4" /> {isFinalNotice ? "Send Final Notice" : recentlySent ? "Send anyway" : "Send"}</>
         </button>
       </div>
 
@@ -556,11 +755,13 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
       {/* Send Sheet — single bottom sheet that handles auth, trial, and send confirmation */}
       {sendSheet !== "closed" && createPortal(
         <div
+          data-oauth-sheet
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 animate-fade-in"
-          onClick={() => { if (!iapLoading && !googleLoading && !sending) setSendSheet("closed"); }}
+          onClick={() => { if (!iapLoading && !googleLoading) setSendSheet("closed"); }}
         >
           <div
-            className="w-full max-w-md bg-card rounded-t-3xl shadow-2xl animate-slide-in-up"
+            data-oauth-sheet-card
+            className="w-full max-w-md bg-card rounded-t-3xl shadow-2xl border-t border-border/30 animate-slide-in-up"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto w-10 h-1 rounded-full bg-border mt-3 mb-1" />
@@ -571,8 +772,8 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
                 <h2 className="text-lg font-bold text-foreground mb-1">Sign in to continue</h2>
                 <p className="text-sm text-muted-foreground mb-5">
                   {sendSheetIntent === "generate"
-                    ? "Create your account to generate AI drafts. ChaseHQ sends from your Gmail — you review every message."
-                    : `Create your account to send to ${invoice.clientEmail || invoice.client}. ChaseHQ sends from your Gmail — you review every message.`}
+                    ? "Create your account to generate AI drafts. ChaseHQ sends follow-ups for you — you review every message."
+                    : `Create your account to send to ${invoice.clientEmail || invoice.client}. ChaseHQ sends follow-ups for you — you review every message and replies come back to your inbox.`}
                 </p>
                 <button
                   onClick={handleGoogleSignIn}
@@ -599,6 +800,37 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
               </div>
             )}
 
+            {/* State: NEEDS_GMAIL — user signed in with Google but hasn't granted gmail.send yet */}
+            {sendSheet === "needs_gmail" && (
+              <div className="px-6 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
+                <h2 className="text-lg font-bold text-foreground mb-1">Send from your own Gmail</h2>
+                <p className="text-sm text-muted-foreground mb-5">
+                  Grant Gmail send permission so {invoice.client} sees the email come straight from your address — not from ChaseHQ. You stay in control: review every message, replies land in your inbox.
+                </p>
+                <button
+                  onClick={handleConnectGmail}
+                  disabled={gmailConnecting}
+                  className="w-full flex items-center justify-center gap-3 bg-card border border-border rounded-xl py-3.5 disabled:opacity-60 transition-all duration-200 ease-out active:scale-[0.97]"
+                >
+                  {gmailConnecting ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-foreground" />
+                  ) : (
+                    <>
+                      <GoogleIcon className="w-5 h-5" />
+                      <span className="text-sm font-medium text-foreground">Connect Gmail</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setSendSheet("closed")}
+                  disabled={gmailConnecting}
+                  className="mt-3 w-full py-2.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                >
+                  Maybe later
+                </button>
+              </div>
+            )}
+
             {/* State: NEEDS_TRIAL */}
             {sendSheet === "needs_trial" && (
               <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
@@ -608,16 +840,18 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
                 <p className="text-xs text-muted-foreground mb-3">
                   {trialEndsAt
                     ? "Subscribe to keep sending follow-ups."
-                    : "14 days free, then $19.99/month. Cancel anytime."}
+                    : "14 days free, then $9.99/month. Cancel anytime."}
                 </p>
                 <div className="space-y-2 mb-4">
                   {[
                     "AI-drafted follow-ups in your tone",
-                    "Send from your own Gmail",
+                    "Replies route straight back to you",
                     "Chase timeline & payment history",
                   ].map((f) => (
-                    <div key={f} className="flex items-center gap-2">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                    <div key={f} className="flex items-center gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-green-50 dark:bg-green-950/30 flex items-center justify-center shrink-0">
+                        <CheckCircle className="w-3 h-3 text-green-500" />
+                      </span>
                       <p className="text-xs text-foreground">{f}</p>
                     </div>
                   ))}
@@ -628,12 +862,12 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
                 <button
                   onClick={handleStartTrial}
                   disabled={iapLoading}
-                  className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-90 mb-2"
+                  className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-90 mb-2 shadow-[0_8px_24px_rgba(91,123,142,0.25)]"
                 >
                   {iapLoading ? (
                     <><Loader2 className="w-4 h-4 animate-spin" />{trialEndsAt ? " Subscribing…" : " Starting trial…"}</>
                   ) : (
-                    trialEndsAt ? "Subscribe — $19.99/month" : "Start Your 14-Day Trial"
+                    trialEndsAt ? "Subscribe — $9.99/month" : "Start Your 14-Day Trial"
                   )}
                 </button>
                 <button
@@ -656,25 +890,23 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
             {/* State: READY — explicit send confirmation with message preview */}
             {sendSheet === "ready" && (
               <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
-                <h2 className="text-base font-bold text-foreground mb-0.5">
+                <h2 className="text-[18px] font-bold text-foreground tracking-[-0.02em] mb-0.5">
                   {hasFreeSend
-                    ? (followupsSent === 0 ? "Your first follow-up is on us" : "This one's on us")
+                    ? "Your first follow-up is on us"
                     : isFinalNotice ? `Send Final Notice to ${invoice.client}?` : `Send to ${invoice.client}?`}
                 </h2>
-                <p className="text-xs text-muted-foreground mb-3">
+                <p className="text-[13px] text-muted-foreground mb-3">
                   {hasFreeSend
-                    ? followupsSent === 0
-                      ? `Sending to ${invoice.clientEmail || invoice.client} · your next follow-up starts your free trial`
-                      : `Sending to ${invoice.clientEmail || invoice.client} · after this, your free 14-day trial begins`
+                    ? `Sending to ${invoice.clientEmail || invoice.client} · your next follow-up starts your free trial`
                     : `To: ${invoice.clientEmail || invoice.client}`}
                 </p>
 
-                <div className="bg-muted rounded-xl px-3 py-2 mb-2">
+                <div className="bg-muted border border-border/60 rounded-xl px-3 py-2 mb-2">
                   <p className="text-[11px] text-muted-foreground mb-0.5">Subject</p>
                   <p className="text-xs text-foreground font-medium">{currentSubject}</p>
                 </div>
 
-                <div className="bg-muted rounded-xl px-3 py-2 mb-3">
+                <div className="bg-muted border border-border/60 rounded-xl px-3 py-2 mb-3">
                   <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap">
                     {bodyExpanded ? currentDraft : bodyPreview}
                   </p>
@@ -709,18 +941,13 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
 
                 <button
                   onClick={handleSheetSend}
-                  disabled={sending}
-                  className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] disabled:opacity-80 mb-2 ${
+                  className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] mb-2 shadow-[0_8px_24px_rgba(91,123,142,0.25)] ${
                     isFinalNotice
                       ? "bg-amber-600 hover:bg-amber-700 text-white"
                       : "bg-primary text-primary-foreground hover:bg-primary/90"
                   }`}
                 >
-                  {sending ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
-                  ) : (
-                    <><Send className="w-4 h-4" /> {isFinalNotice ? "Send Final Notice" : "Send message"}</>
-                  )}
+                  <><Send className="w-4 h-4" /> {isFinalNotice ? "Send Final Notice" : "Send message"}</>
                 </button>
                 <button
                   onClick={() => {
@@ -729,8 +956,7 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
                       editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                     });
                   }}
-                  disabled={sending}
-                  className="w-full py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                  className="w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Edit draft
                 </button>
@@ -748,11 +974,12 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
           style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 8px) + 72px)" }}
         >
           <div
-            className={`w-full max-w-sm bg-card border border-border rounded-2xl shadow-lg px-4 py-3.5 flex items-center gap-3 cursor-pointer transition-all duration-500 ${
+            className={`w-full max-w-sm bg-card border border-border rounded-2xl px-4 py-3.5 flex items-center gap-3 cursor-pointer transition-all duration-500 ${
               sendStage === "exiting"
                 ? "opacity-0 translate-y-4"
                 : "animate-in slide-in-from-bottom-4 fade-in duration-300"
             }`}
+            style={{ boxShadow: "var(--shadow-card-lg)" }}
             onClick={() => {
               if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
               if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -760,18 +987,30 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
               hideTimerRef.current = setTimeout(() => setSendStage("idle"), 500);
             }}
           >
-            <div className="w-9 h-9 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
-              <CheckCircle className="w-[18px] h-[18px] text-green-500" />
-            </div>
+            {sendOutcome === "sent" ? (
+              <div className="w-9 h-9 rounded-xl bg-green-500/10 flex items-center justify-center shrink-0">
+                <CheckCircle className="w-[18px] h-[18px] text-green-500" />
+              </div>
+            ) : (
+              <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                <Loader2 className="w-[18px] h-[18px] text-primary animate-spin" />
+              </div>
+            )}
             <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-bold text-foreground">We're on it!</p>
+              <p className="text-[14px] font-bold text-foreground">{sendOutcome === "sent" ? "Sent" : "Sending…"}</p>
               <p className="text-[12px] text-muted-foreground leading-snug">
-                Follow-up sent to {invoice.client}.
+                {sendOutcome === "sent"
+                  ? `Follow-up sent to ${invoice.client}.`
+                  : `Sending follow-up to ${invoice.client}…`}
               </p>
             </div>
           </div>
         </div>,
         document.body
+      )}
+
+      {recoveryPending && !sheetIsOpen && (
+        <div className="fixed inset-0 z-[9998] bg-background" aria-hidden="true" />
       )}
     </div>
   );

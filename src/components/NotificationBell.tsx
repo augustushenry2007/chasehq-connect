@@ -39,13 +39,14 @@ export default function NotificationBell() {
         >
           <Bell className="w-5 h-5 text-foreground" />
           {unreadCount > 0 && (
-            <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
+            <span
+              aria-label={`${unreadCount} unread`}
+              className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background"
+            />
           )}
         </button>
       </SheetTrigger>
-      <SheetContent side="right" className="w-full sm:max-w-md">
+      <SheetContent side="right" className="w-full sm:max-w-md pt-[env(safe-area-inset-top,20px)]">
         <SheetHeader className="flex-row items-center justify-between space-y-0 pb-1">
           <div>
             <SheetTitle className="text-xl font-bold">Notifications</SheetTitle>

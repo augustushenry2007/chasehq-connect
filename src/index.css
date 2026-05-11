@@ -46,6 +46,22 @@
 
     --dark: 210 30% 18%;
     --dark-mid: 210 25% 25%;
+
+    --warm-50: 28 100% 97%;
+    --warm-100: 28 100% 93%;
+
+    --shadow-card: 0 1px 2px rgba(26,43,53,0.04), 0 8px 24px rgba(26,43,53,0.06);
+    --shadow-card-lg: 0 2px 4px rgba(26,43,53,0.05), 0 20px 40px rgba(26,43,53,0.10);
+  }
+}
+
+@layer components {
+  .card-elevated {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-top: 2px solid hsl(var(--primary) / 0.35);
+    box-shadow: var(--shadow-card);
+    border-radius: 1.5rem;
   }
 }
 

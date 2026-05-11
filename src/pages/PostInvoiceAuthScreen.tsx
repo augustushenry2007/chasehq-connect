@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Loader2 } from "lucide-react";
 import AuthForm from "@/components/auth/AuthForm";
 import { useApp } from "@/context/AppContext";
 import { useFlow } from "@/flow/FlowMachine";
@@ -36,6 +36,12 @@ export default function PostInvoiceAuthScreen() {
     if (dispatchedRef.current) return;
     if (!isAuthenticated || !profileReady || flushedInvoiceId === undefined) return;
     dispatchedRef.current = true;
+    // Release OAUTH_COMPLETED before dispatching: by now Supabase's session
+    // rotation is long past (we're past profile fetch + createInvoice HTTP
+    // round-trips), and FlowRouter's `inOAuth` gate would otherwise pin the
+    // route at /auth-after-invoice → OAuthOverlay can't dismiss → spinner
+    // stuck until OAuthOverlay's 90s safety net fires.
+    sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
     void refetchEntitlement();
     if (flushedInvoiceId) {
       send("INVOICE_CREATED", { invoiceId: flushedInvoiceId });
@@ -58,29 +64,55 @@ export default function PostInvoiceAuthScreen() {
     sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1" ||
     sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1"
   );
+  // Read sessionStorage on each signal so a failed OAuth (which clears both flags
+  // before dispatching the signal in oauth.ts) un-latches the spinner — otherwise
+  // the user is stuck on "Setting up your account…" with no way to retry. On the
+  // success path, oauth.ts only clears OAUTH_IN_PROGRESS *after* signInWithIdToken
+  // succeeded, so isAuthenticated is already true and the spinner condition stays
+  // satisfied via the isAuthenticated branch.
   useEffect(() => {
-    const handler = () => setOauthLatched(true);
+    const handler = () => {
+      const inProgress = sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1";
+      const completed = sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1";
+      setOauthLatched(inProgress || completed);
+    };
     window.addEventListener("chasehq:oauth-signal", handler);
     return () => window.removeEventListener("chasehq:oauth-signal", handler);
   }, []);
 
-  // Hard escape hatch: if the spinner is still showing after 15s without dispatching,
-  // something has stalled (network hang, profile fetch never resolved). Bail to "/" so
-  // the user is never permanently stuck. Real OAuth + profile fetch resolves in 2-5s.
+  // Belt-and-suspenders POST-AUTH escape hatch: if every downstream timeout
+  // (6s profile, 8s auth-ready, 10s flush) somehow fails simultaneously and the
+  // dispatch effect above never fires, eject from POST_INVOICE_AUTH via the FSM
+  // so the user isn't stuck. Critically: only start the timer once isAuthenticated
+  // becomes true. Earlier versions started the timer on `oauthLatched`, which
+  // includes the time the user spends interacting with the native iOS GIDSignIn
+  // modal (account picker + trust prompt — easily >15s). That fired the escape
+  // *during* the native flow, mis-routed the user to DASHBOARD_ACTIVE, and
+  // dropped the actual OAuth result into a state where AUTH_SUCCESS was rejected.
   useEffect(() => {
-    if (!isAuthenticated && !oauthLatched) return;
+    if (!isAuthenticated) return;
     const t = window.setTimeout(() => {
       if (dispatchedRef.current) return;
-      console.warn("[PostInvoiceAuthScreen] Spinner stuck >15s — escaping to /");
+      console.warn("[PostInvoiceAuthScreen] Spinner stuck >15s post-auth — escaping via AUTH_SUCCESS");
       sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
       sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
-      window.location.replace("/");
+      dispatchedRef.current = true;
+      send("AUTH_SUCCESS");
     }, 15000);
     return () => window.clearTimeout(t);
-  }, [isAuthenticated, oauthLatched]);
+  }, [isAuthenticated, send]);
 
+  // Visible spinner fallback. OAuthOverlay (z:9999) shields the very first frames
+  // when oauthLatched flips, but if the overlay dismisses before this screen
+  // unmounts (route transition still in flight), this spinner takes over so the
+  // user never sees a blank screen.
   if (!authReady || isAuthenticated || oauthLatched) {
-    return null; // OAuthOverlay (z:9999) is the sole visual shield during this period
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Setting up your account…</p>
+      </div>
+    );
   }
 
   return (
@@ -96,7 +128,7 @@ export default function PostInvoiceAuthScreen() {
           Your follow-up is ready.
         </h1>
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed mb-6">
-          Sign up to save your draft and start sending follow-ups. By continuing, you grant ChaseHQ permission to send emails from your Gmail address on your behalf. We never read your inbox. You can revoke access anytime in your Google account.
+          Sign up to save your draft and start sending follow-ups. ChaseHQ sends each message on your behalf and replies route straight back to your inbox.
         </p>
 
         <AuthForm

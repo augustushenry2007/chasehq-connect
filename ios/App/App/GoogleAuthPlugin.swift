@@ -114,7 +114,8 @@ public class GoogleAuthPlugin: CAPPlugin, CAPBridgedPlugin, @unchecked Sendable 
                     "refreshToken": user.refreshToken.tokenString,
                     "grantedScopes": user.grantedScopes ?? [],
                     "email": user.profile?.email ?? "",
-                    "name": user.profile?.name ?? ""
+                    "name": user.profile?.name ?? "",
+                    "serverAuthCode": result?.serverAuthCode ?? ""
                 ])
             }
         }

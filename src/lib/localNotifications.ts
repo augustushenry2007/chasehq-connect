@@ -2,7 +2,7 @@ import { LocalNotifications } from "@capacitor/local-notifications";
 import {
   buildNotificationTitle,
   buildNotificationBody,
-  computeStepWithEscalation,
+  computeStepDate,
   type ScheduleStep,
 } from "./scheduleDefaults";
 
@@ -49,8 +49,11 @@ export async function scheduleForInvoice(
     const now = Date.now();
     const notifications = steps
       .map((step, idx) => {
-        const { scheduledFor } = computeStepWithEscalation(invoice, step);
-        const fireAt = new Date(scheduledFor);
+        // Same anchor the DB rows use (computeStepDate in createScheduleForInvoice /
+        // ChaseSchedule.persist): due_date + offset_days @ 9am device-local. Keeping
+        // these in lockstep means the phone buzzes at the same instant the cron /
+        // in-app bell consider the step due.
+        const fireAt = new Date(computeStepDate(invoice.dueDateISO, step.offset_days));
         if (fireAt.getTime() <= now) return null;
         return {
           id: notifId(invoiceId, idx),
@@ -66,6 +69,61 @@ export async function scheduleForInvoice(
     }
   } catch (e) {
     console.warn("[localNotifications] scheduleForInvoice failed:", e);
+  }
+}
+
+// iOS keeps at most ~64 pending local notifications. Stay safely under it so we
+// never silently drop one — and so the cap is applied nearest-first.
+const RECONCILE_CAP = 60;
+
+type ReconcileRow = {
+  invoice_id: string;
+  schedule_step_index: number;
+  title: string;
+  body: string;
+  scheduled_for: string;
+};
+
+/**
+ * Re-arm any future notification row (passed in nearest-first) that isn't currently
+ * scheduled with the OS. Idempotent — uses the same stable notifId as scheduleForInvoice,
+ * so rows already armed are skipped. Used at native launch to repair OS notifications
+ * lost to a reinstall / notification purge / device restore (DB rows + in-app bell +
+ * email cron all survive that; only the OS schedule doesn't), and to backfill anything
+ * an earlier scheduleForInvoice dropped past the iOS limit. Never prompts for permission
+ * — a silent background reconcile shouldn't pop a dialog; if undetermined/denied there's
+ * nothing armed to reconcile anyway.
+ */
+export async function reconcilePendingLocalNotifications(rows: ReconcileRow[]): Promise<void> {
+  if (!isPushEnabled()) return;
+  try {
+    const { display } = await LocalNotifications.checkPermissions();
+    if (display !== "granted") return;
+    const { notifications: pending } = await LocalNotifications.getPending();
+    const pendingIds = new Set(pending.map((n) => n.id));
+    const slots = Math.max(0, RECONCILE_CAP - pendingIds.size);
+    if (slots === 0) return;
+    const now = Date.now();
+    const toArm: { id: number; title: string; body: string; schedule: { at: Date; allowWhileIdle: boolean }; extra: { invoice_id: string } }[] = [];
+    for (const r of rows) {
+      if (toArm.length >= slots) break;
+      const at = new Date(r.scheduled_for);
+      if (isNaN(at.getTime()) || at.getTime() <= now) continue;
+      const id = notifId(r.invoice_id, r.schedule_step_index);
+      if (pendingIds.has(id)) continue;
+      toArm.push({
+        id,
+        title: r.title,
+        body: r.body,
+        schedule: { at, allowWhileIdle: true },
+        extra: { invoice_id: r.invoice_id },
+      });
+    }
+    if (toArm.length > 0) {
+      await LocalNotifications.schedule({ notifications: toArm });
+    }
+  } catch (e) {
+    console.warn("[localNotifications] reconcilePendingLocalNotifications failed:", e);
   }
 }
 

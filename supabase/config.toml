@@ -3,6 +3,9 @@ project_id = "wsvdtwxzyskwpiyijpqg"
 [functions.gmail-oauth-callback]
 verify_jwt = false
 
+[functions.gmail-link-from-auth-code]
+verify_jwt = false
+
 [functions.gmail-oauth-start]
 verify_jwt = false
 
@@ -16,4 +19,36 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.dispatch-notifications]
+verify_jwt = false
+
+[functions.send-email]
+verify_jwt = false
+
+# These functions also gate themselves (they verify the user JWT internally via
+# the X-User-Token header or by forwarding Authorization to auth.getUser, because
+# Supabase's platform gateway rejects ES256 user JWTs). Deploys must keep
+# verify_jwt = false or the gateway 401s the request before the function runs.
+[functions.validate-apple-receipt]
+verify_jwt = false
+
+[functions.start-trial]
+verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = false
+
+[functions.disconnect-gmail]
+verify_jwt = false
+
+[functions.gmail-verify]
+verify_jwt = false
+
+[functions.smtp-send]
+verify_jwt = false
+
+[functions.smtp-verify]
+verify_jwt = false
+
+# DB-webhook callee — authenticates via a service-role bearer it checks itself.
+[functions.send-welcome-email]
 verify_jwt = false

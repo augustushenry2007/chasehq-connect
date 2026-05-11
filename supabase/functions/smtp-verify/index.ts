@@ -23,6 +23,57 @@ function isPrivateHostname(host: string): boolean {
   return false;
 }
 
+// Returns true if the IPv4/IPv6 string falls in a loopback / private / link-local /
+// CGNAT / metadata range. Best-effort: covers the ranges an SSRF attacker would target.
+function isPrivateIp(ip: string): boolean {
+  // IPv4-mapped IPv6 (::ffff:1.2.3.4) → check the embedded v4
+  const mapped = ip.match(/::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+  if (mapped) return isPrivateIp(mapped[1]);
+
+  if (ip.includes(":")) {
+    const lc = ip.toLowerCase();
+    if (lc === "::1" || lc === "::") return true;        // loopback / unspecified
+    if (lc.startsWith("fe80")) return true;              // link-local
+    if (lc.startsWith("fc") || lc.startsWith("fd")) return true; // unique-local (fc00::/7)
+    if (lc.startsWith("64:ff9b:")) return true;          // NAT64
+    return false;
+  }
+
+  const parts = ip.split(".").map((p) => parseInt(p, 10));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true; // malformed → reject
+  const [a, b] = parts;
+  if (a === 0 || a === 10 || a === 127) return true;                 // "this", private-10, loopback
+  if (a === 169 && b === 254) return true;                           // link-local / cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true;                  // private-172
+  if (a === 192 && b === 168) return true;                           // private-192
+  if (a === 100 && b >= 64 && b <= 127) return true;                 // CGNAT (100.64.0.0/10)
+  if (a === 192 && b === 0 && parts[2] === 0) return true;           // IETF protocol assignments
+  if (a === 198 && (b === 18 || b === 19)) return true;              // benchmarking
+  if (a >= 224) return true;                                        // multicast + reserved
+  return false;
+}
+
+// Resolve a hostname's A/AAAA records and reject if ANY answer is a private/loopback
+// IP. This is the resolved-IP check that the string blocklist above can't do — a
+// public domain whose record points at 10.x / 169.254.169.254 would otherwise slip
+// through. Best-effort (DNS can rebind between this check and denomailer's own
+// resolution), so it's defence in depth on top of the port + hostname-string limits.
+async function resolvesToPrivate(host: string): Promise<boolean> {
+  for (const kind of ["A", "AAAA"] as const) {
+    try {
+      const recs = await Deno.resolveDns(host, kind);
+      for (const r of recs) {
+        if (isPrivateIp(r)) return true;
+      }
+    } catch {
+      // NXDOMAIN / no AAAA / resolver error — fine, try the other record type.
+    }
+  }
+  // Zero answers (or only CNAME chains we didn't follow) → let denomailer surface
+  // the resolution result rather than hard-failing a possibly-valid host here.
+  return false;
+}
+
 function isValidEmail(s: unknown): s is string {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) && s.length <= 254;
 }
@@ -52,6 +103,9 @@ serve(async (req) => {
       return json({ error: "Invalid SMTP hostname" }, 400);
     }
     if (isPrivateHostname(host)) {
+      return json({ error: "SMTP host must be a public mail server" }, 400);
+    }
+    if (await resolvesToPrivate(host)) {
       return json({ error: "SMTP host must be a public mail server" }, 400);
     }
 

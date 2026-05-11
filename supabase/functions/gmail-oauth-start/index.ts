@@ -57,6 +57,7 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const requestedRedirect = typeof body?.redirectUri === "string" ? body.redirectUri : "";
+    const loginHint = typeof body?.loginHint === "string" && body.loginHint ? body.loginHint : undefined;
     // Reject any client-supplied redirectUri not on the server-side allowlist.
     // This prevents an attacker from steering the OAuth callback into an
     // arbitrary URL (open redirect) or third-party origin.
@@ -70,7 +71,7 @@ serve(async (req) => {
       stateSecret,
     );
 
-    const params = new URLSearchParams({
+    const paramObj: Record<string, string> = {
       client_id: clientId,
       redirect_uri: callbackUrl,
       response_type: "code",
@@ -78,7 +79,9 @@ serve(async (req) => {
       access_type: "offline",
       prompt: "consent",
       state,
-    });
+    };
+    if (loginHint) paramObj.login_hint = loginHint;
+    const params = new URLSearchParams(paramObj);
 
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
@@ -87,7 +90,7 @@ serve(async (req) => {
     });
   } catch (e) {
     logError("gmail-oauth-start error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
+    return new Response(JSON.stringify({ error: "Internal error" }), {
       status: 500, headers: { ...cors, "Content-Type": "application/json" },
     });
   }

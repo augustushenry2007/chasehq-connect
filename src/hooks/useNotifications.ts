@@ -12,7 +12,8 @@ import {
   type ScheduleStep,
   type SchedulePreset,
 } from "@/lib/scheduleDefaults";
-import { scheduleForInvoice } from "@/lib/localNotifications";
+import { scheduleForInvoice, cancelForInvoice } from "@/lib/localNotifications";
+import { analytics } from "@/integrations/analytics";
 
 export type NotificationRow = {
   id: string;
@@ -124,8 +125,14 @@ export function useNotifications() {
 }
 
 /**
- * Create the default schedule + notification rows for a freshly created invoice.
+ * Create (or re-create) the default schedule + notification rows for an invoice.
  * Best-effort: fails silently so invoice creation isn't blocked.
+ *
+ * Replace-not-append: any pre-existing schedule / pending notifications for this
+ * invoice are cleared first, so calling this twice for the same invoice (e.g. an
+ * invoice-create retry) doesn't leave orphan pending rows that the cron would
+ * double-deliver, and doesn't silently fail on the UNIQUE(invoice_id,
+ * schedule_step_index, type) constraint.
  *
  * Uses buildScheduleForLateness so back-dated invoices get a sensibly-bucketed
  * schedule rather than duplicate Final Notice steps from the old tone-floor logic.
@@ -134,7 +141,7 @@ export async function createScheduleForInvoice(
   userId: string,
   invoice: { id: string; client: string; amount: number; due_date: string; created_at?: string },
   preset?: SchedulePreset,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const tz = getUserTimezone();
     const chosenPreset = preset ?? ((localStorage.getItem(STORAGE_KEYS.SCHEDULE_PRESET) ?? "active") as SchedulePreset);
@@ -142,12 +149,17 @@ export async function createScheduleForInvoice(
       ? buildScheduleForLateness(invoice.due_date, new Date().toISOString(), chosenPreset)
       : getDefaultScheduleForInvoice(invoice.due_date, new Date().toISOString());
 
-    await supabase.from("followup_schedules").insert({
+    // Clear any prior pending notifications + OS notifications for this invoice
+    // before re-creating, so a re-run replaces rather than appends.
+    await supabase.from("notifications").delete().eq("invoice_id", invoice.id).eq("status", "pending");
+    await cancelForInvoice(invoice.id, Math.max(8, effectiveSteps.length));
+
+    await supabase.from("followup_schedules").upsert({
       invoice_id: invoice.id,
       user_id: userId,
       steps: effectiveSteps as unknown as never,
       timezone: tz,
-    });
+    }, { onConflict: "invoice_id" });
 
     const rows = effectiveSteps.map((step, idx) => ({
       user_id: userId,
@@ -166,9 +178,60 @@ export async function createScheduleForInvoice(
       createdAtISO: invoice.created_at ?? new Date().toISOString(),
     };
     await scheduleForInvoice(invoice.id, effectiveSteps, anchorInvoice, invoice.client, invoice.amount);
+    return true;
   } catch (e) {
+    // The invoice exists but has no follow-up schedule / notifications. Surface it
+    // so the failure is visible — useBackfillMissingSchedules will retry on next
+    // launch, and ChaseSchedule self-heals if the user opens the detail screen.
+    analytics.error("schedule_creation_failed", e instanceof Error ? e.message : String(e), { invoiceId: invoice.id });
     console.warn("Failed to create notification schedule:", e);
+    return false;
   }
+}
+
+type ReflowInvoice = { id: string; client: string; amount: number; due_date: string; created_at: string };
+
+// Invoices the "apply my default to existing invoices" action will touch: unpaid,
+// schedule not paused, and not yet started chasing (zero delivered/read notification
+// rows). Restricting to not-yet-started invoices also keeps createScheduleForInvoice's
+// delete-pending-then-reinsert-from-index-0 safe — no UNIQUE(invoice_id,
+// schedule_step_index, type) clash against already-delivered rows.
+async function getReflowEligibleInvoices(userId: string): Promise<ReflowInvoice[]> {
+  const { data: invoices, error } = await supabase
+    .from("invoices")
+    .select("id, client, amount, due_date, created_at, status")
+    .eq("user_id", userId)
+    .neq("status", "Paid");
+  if (error || !invoices?.length) return [];
+  const invoiceIds = invoices.map((i) => i.id);
+  const [{ data: scheds }, { data: started }] = await Promise.all([
+    supabase.from("followup_schedules").select("invoice_id, paused").in("invoice_id", invoiceIds),
+    supabase.from("notifications").select("invoice_id").in("invoice_id", invoiceIds).in("status", ["delivered", "read"]),
+  ]);
+  const pausedIds = new Set((scheds ?? []).filter((s) => s.paused).map((s) => s.invoice_id));
+  const startedIds = new Set((started ?? []).map((r) => r.invoice_id));
+  return invoices
+    .filter((i) => !pausedIds.has(i.id) && !startedIds.has(i.id))
+    .map((i) => ({ id: i.id, client: i.client, amount: Number(i.amount), due_date: i.due_date, created_at: i.created_at }));
+}
+
+export async function countReflowEligibleInvoices(userId: string): Promise<number> {
+  return (await getReflowEligibleInvoices(userId)).length;
+}
+
+/**
+ * Re-apply the user's current default follow-up schedule (preset or custom steps in
+ * localStorage) to every eligible existing invoice — recomputing followup_schedules,
+ * the pending notification rows, and the armed OS notifications. No preset arg is
+ * passed to createScheduleForInvoice on purpose, so it honors SCHEDULE_CUSTOM_STEPS
+ * if set, exactly as new-invoice creation does.
+ */
+export async function reflowDefaultScheduleToInvoices(userId: string): Promise<{ updated: number }> {
+  const eligible = await getReflowEligibleInvoices(userId);
+  for (const inv of eligible) {
+    await createScheduleForInvoice(userId, inv);
+  }
+  return { updated: eligible.length };
 }
 
 /**

@@ -24,7 +24,7 @@ export function ScreenHeader({ title, onBack, fallbackPath = "/dashboard", right
       >
         <ArrowLeft className="w-5 h-5" />
       </button>
-      {title && <h1 className="text-base font-semibold text-foreground">{title}</h1>}
+      {title && <h1 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{title}</h1>}
       <div className="ml-auto">{rightSlot}</div>
     </header>
   );

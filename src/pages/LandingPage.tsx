@@ -2,7 +2,6 @@ import { useLayoutEffect } from "react";
 import Hero from "./landing/Hero";
 import DreadVsRelief from "./landing/DreadVsRelief";
 import HowItWorks from "./landing/HowItWorks";
-import TrustStrip from "./landing/TrustStrip";
 import FinalCTA from "./landing/FinalCTA";
 import Footer from "./landing/Footer";
 import SiteNav from "@/components/SiteNav";
@@ -42,7 +41,6 @@ export default function LandingPage() {
         </div>
         <DreadVsRelief />
         <HowItWorks />
-        <TrustStrip />
         <FinalCTA />
       </main>
       <Footer />

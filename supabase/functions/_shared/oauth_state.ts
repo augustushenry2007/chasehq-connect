@@ -96,6 +96,7 @@ export async function verifyState(
 export const REDIRECT_ALLOWLIST = [
   "capacitor://localhost",
   "capacitor://localhost/",
+  "com.chasehq.app://gmail-oauth",
   "https://chasehq.app",
   "https://chasehq.app/",
   "https://chasehq.app/auth-after-invoice",

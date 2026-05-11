@@ -32,7 +32,7 @@ export function useDismissibleHint(key: HintKey): UseDismissibleHintResult {
       .from("profiles")
       .update({ dismissed_hints: updated })
       .eq("user_id", user.id);
-  }, [key, user, dismissedHints]);
+  }, [key, user?.id, dismissedHints]);
 
   return { shouldShow: !dismissed, dismiss };
 }

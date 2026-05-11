@@ -54,7 +54,7 @@ export default function TrialBanner() {
             {label}
           </p>
           <p className={`text-[11px] leading-relaxed ${urgent ? "text-amber-800 dark:text-amber-200" : "text-muted-foreground"}`}>
-            Keep follow-ups flowing for $19.99/month. Cancel anytime.
+            Keep follow-ups flowing for $9.99/month. Cancel anytime.
           </p>
         </div>
         <button

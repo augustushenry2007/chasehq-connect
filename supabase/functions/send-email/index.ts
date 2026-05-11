@@ -1,9 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 import { buildCors } from "../_shared/cors.ts";
 import { checkRateLimit, rateLimitedResponse } from "../_shared/rate_limit.ts";
+import { logError, logWarn } from "../_shared/log.ts";
+import { verifyWithRevenueCat } from "../_shared/revenuecat.ts";
+import { getValidGmailAccessToken } from "../_shared/gmail.ts";
 
 type Json = (body: unknown, status?: number) => Response;
 
@@ -47,8 +49,16 @@ async function verifySupabaseJWT(token: string, supabaseUrl: string): Promise<st
   }
 }
 
-// Per-user daily send cap.
 const DAILY_SEND_CAP = 50;
+
+function buildPlainHtml(text: string): string {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br />");
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body style="margin:0;padding:32px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;background:#ffffff;max-width:600px;">${escaped}</body></html>`;
+}
 
 serve(async (req) => {
   const cors = buildCors(req.headers.get("origin"));
@@ -61,18 +71,14 @@ serve(async (req) => {
     });
 
   try {
-    const { to, subject, message, invoiceId } = await req.json();
+    const { to, subject, message, invoiceId, tone, isAiGenerated } = await req.json();
     if (!to || !subject || !message) {
       return json({ error: "Missing to, subject, or message" }, 400);
     }
-    // Basic email shape check — defence in depth, client also validates.
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to))) {
       return json({ error: "Invalid recipient email" }, 400);
     }
 
-    // X-User-Token carries the real ES256 user JWT (the platform only checks Authorization,
-    // so we route around the broken ES256 platform validator by sending the anon key there
-    // and the user's token in this custom header).
     const userToken = req.headers.get("X-User-Token") ??
       req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
     if (!userToken) return json({ error: "Not authenticated" }, 401);
@@ -82,44 +88,124 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const token = userToken;
-    const userId = await verifySupabaseJWT(token, Deno.env.get("SUPABASE_URL")!);
+    const userId = await verifySupabaseJWT(userToken, Deno.env.get("SUPABASE_URL")!);
     if (!userId) return json({ error: "Invalid session" }, 401);
     const { data: { user }, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId);
     if (authError || !user) return json({ error: "Invalid session" }, 401);
 
-    // Defense-in-depth per-user/minute ceiling on top of the 50/day cap below.
-    // Cheap to apply, blocks burst abuse from a stolen JWT before the daily count catches up.
+    // Idempotency: a slow-but-successful send can exceed the client's 15s timeout,
+    // making the client report failure and the user re-tap Send — which would
+    // dispatch a *second* identical chase email. If we already wrote a followups
+    // row for this exact (invoice, subject, message) in the last few minutes, the
+    // email already went out — return success without sending or logging again.
+    // Best-effort: `followups` carries a user DELETE policy, so a tampered client
+    // could defeat this, but that just degrades to today's behaviour. We do this
+    // before the rate-limit / entitlement checks so a retry is a cheap no-op.
+    if (invoiceId) {
+      const dedupSince = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: recentDup, error: dedupErr } = await supabaseAdmin
+        .from("followups")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("invoice_id", String(invoiceId))
+        .eq("subject", String(subject))
+        .eq("message", String(message))
+        .gte("sent_at", dedupSince)
+        .limit(1);
+      if (!dedupErr && recentDup && recentDup.length > 0) {
+        logWarn("[send-email] deduplicated repeat send", { userId: user.id, invoiceId: String(invoiceId) });
+        return json({ success: true, via: "dedup", deduped: true });
+      }
+    }
+
     const rl = await checkRateLimit(supabaseAdmin, user.id, "send-email", 30);
     if (!rl.allowed) return rateLimitedResponse(cors);
 
-    const senderName: string =
-      user.user_metadata?.full_name ??
-      user.user_metadata?.name ??
-      "";
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, sender_type")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-    // === Subscription gate: entitled OR no followups sent yet (one free send) ===
+    const metaMeta = user.user_metadata as Record<string, unknown> | undefined;
+    const resolvedName = (
+      (typeof profile?.full_name === "string" && profile.full_name.trim())
+      || (typeof metaMeta?.full_name === "string" && (metaMeta.full_name as string).trim())
+      || (typeof metaMeta?.name === "string" && (metaMeta.name as string).trim())
+      || ""
+    ).toString().trim();
+    // Strip header-injection chars (\r \n) and quotes that would break the From line
+    const safeName = resolvedName.replace(/[<>"\r\n]/g, "").slice(0, 80);
+    let senderType = profile?.sender_type === "gmail" ? "gmail" : "resend";
+
     const { data: hasEnt, error: entErr } = await supabaseAdmin
       .rpc("has_active_entitlement", { _user_id: user.id });
     if (entErr) {
-      console.error("entitlement check error:", entErr);
+      logError("entitlement check error:", entErr);
       return json({ error: "subscription_required", message: "Could not verify subscription. Please try again." });
     }
 
     let canSend = !!hasEnt;
+
+    // Server-side RevenueCat fallback: has_active_entitlement reads only the
+    // `subscriptions` table. Right after a purchase, if validate-apple-receipt
+    // had a brief outage (its 3-retry sync exhausted), that row may not exist yet
+    // even though the user is genuinely entitled — the client trusts the RC SDK
+    // and shows canSend=true, so without this the user taps Send and gets a
+    // bogus subscription_required. The RC app-user-id is always this session's
+    // uid (Purchases.logIn is called before any purchase), so verifying for
+    // user.id is secure and scoped. On success, self-heal the subscriptions row.
     if (!canSend) {
-      const { count: followupsCount, error: countErr } = await supabaseAdmin
-        .from("followups")
+      const rcSecretKey = Deno.env.get("RC_SECRET_KEY");
+      if (rcSecretKey) {
+        try {
+          const rc = await verifyWithRevenueCat(user.id, rcSecretKey);
+          if (rc.ok) {
+            canSend = true;
+            const { error: healErr } = await supabaseAdmin.from("subscriptions").upsert({
+              user_id: user.id,
+              status: rc.status,
+              plan: "chasehq_pro_monthly",
+              trial_ends_at: rc.trialEndsAt,
+              current_period_end: rc.currentPeriodEnd,
+              apple_original_transaction_id: rc.originalTransactionId,
+              canceled_at: null,
+              last_event_at: new Date().toISOString(),
+            }, { onConflict: "user_id" });
+            if (healErr) logWarn("[send-email] RC fallback subscriptions self-heal failed:", healErr);
+            else logWarn("[send-email] entitlement granted via RC fallback; subscriptions row self-healed", { userId: user.id });
+          }
+        } catch (e) {
+          logWarn("[send-email] RC fallback verification threw:", e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+
+    if (!canSend) {
+      // "One free send, then subscribe." Count it from email_send_log — NOT
+      // followups — because `followups` carries a user DELETE RLS policy (clients
+      // legitimately clean it up when deleting an invoice), so a non-subscriber
+      // could otherwise reset the count and keep sending for free. email_send_log
+      // is service-role-write-only with no user delete policy, so it can't be tampered with.
+      const { count: priorSends, error: priorErr } = await supabaseAdmin
+        .from("email_send_log")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user.id);
-      if (!countErr) canSend = (followupsCount ?? 0) === 0;
+      if (priorErr) {
+        // Don't swallow this — if email_send_log is unreadable (e.g. the table
+        // is missing on this env, the schema-drift case 20260511050000 fixes),
+        // the free-send gate is unavailable. Stay fail-closed (canSend stays
+        // false), but make the reason visible instead of silently denying.
+        logError("[send-email] email_send_log read failed — free-send gate unavailable:", priorErr);
+      } else {
+        canSend = (priorSends ?? 0) === 0;
+      }
     }
 
     if (!canSend) {
       return json({ error: "subscription_required", message: "Your trial has ended. Subscribe to keep sending follow-ups." });
     }
 
-    // === Per-user daily rate limit ===
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { count: sendCount, error: countErr } = await supabaseAdmin
       .from("email_send_log")
@@ -127,7 +213,7 @@ serve(async (req) => {
       .eq("user_id", user.id)
       .gte("sent_at", since);
     if (countErr) {
-      console.error("rate-limit count error:", countErr);
+      logError("rate-limit count error:", countErr);
     } else if ((sendCount ?? 0) >= DAILY_SEND_CAP) {
       return json({
         error: "rate_limited",
@@ -135,172 +221,133 @@ serve(async (req) => {
       });
     }
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("sender_type")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    let via: "gmail" | "resend" = "resend";
 
-    let senderType: "gmail" | "smtp" | "none" = (profile?.sender_type as any) ?? "none";
+    if (senderType === "gmail") {
+      const gmailAuth = await getValidGmailAccessToken(supabaseAdmin, user.id);
+      if ("error" in gmailAuth) {
+        return json({ error: "gmail_reauth_required", message: "Your Gmail link needs reconnecting. Reconnect Gmail in Settings." }, 401);
+      }
+      const accessToken = gmailAuth.token;
+      const gmailEmail = gmailAuth.email;
 
-    if (senderType === "none") {
-      const { data: gm } = await supabaseAdmin.from("gmail_connections").select("user_id").eq("user_id", user.id).maybeSingle();
-      if (gm) senderType = "gmail";
-      else {
-        const { data: sm } = await supabaseAdmin.from("smtp_connections").select("user_id").eq("user_id", user.id).maybeSingle();
-        if (sm) senderType = "smtp";
+      // Build RFC-2822 message. Gmail enforces From = authenticated mailbox,
+      // so the address must match the connected mailbox — only the display name is ours to set.
+      const fromLine = safeName
+        ? `From: ${safeName} <${gmailEmail}>`
+        : `From: ${gmailEmail}`;
+      const headerLines: string[] = [];
+      if (invoiceId) headerLines.push(`X-Entity-Ref-ID: ${String(invoiceId)}`);
+
+      const subjectClean = String(subject).replace(/[\r\n]/g, " ");
+      const toClean = String(to).replace(/[\r\n]/g, "");
+      const rawMime = [
+        fromLine,
+        `To: ${toClean}`,
+        `Subject: ${subjectClean}`,
+        `Content-Type: text/plain; charset=utf-8`,
+        ...headerLines,
+        "",
+        message,
+      ].join("\r\n");
+      // base64url-encode UTF-8 — naive btoa fails on multibyte chars
+      const utf8Bytes = new TextEncoder().encode(rawMime);
+      let binary = "";
+      for (const byte of utf8Bytes) binary += String.fromCharCode(byte);
+      const base64 = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+      const gmailRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ raw: base64 }),
+      });
+      if (!gmailRes.ok) {
+        const body = await gmailRes.text();
+        logError("Gmail send error:", gmailRes.status, body.slice(0, 300));
+        if (gmailRes.status === 401 || gmailRes.status === 403) {
+          return json({ error: "gmail_reauth_required", message: "Your Gmail link expired. Reconnect Gmail in Settings." }, 401);
+        }
+        return json({ error: "send_failed", message: "We couldn't send this one. Your draft is safe — give it another try." }, 502);
+      }
+      via = "gmail";
+    } else {
+      const resendKey = Deno.env.get("RESEND_API_KEY");
+      if (!resendKey) {
+        logError("send-email: RESEND_API_KEY not configured");
+        return json({ error: "send_unavailable", message: "Sending is temporarily unavailable. Please try again shortly." }, 500);
+      }
+
+      // Resend cannot send from an arbitrary user@gmail.com — the From address
+      // must be on a verified domain. We use the user's real name as the
+      // display name (no "ChaseHQ" branding) and set Reply-To so client replies
+      // route to the user's actual inbox.
+      const fromHeader = safeName
+        ? `${safeName} <noreply@chasehq.app>`
+        : "noreply@chasehq.app";
+      const replyTo = user.email ?? undefined;
+
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
+        body: JSON.stringify({
+          from: fromHeader,
+          to: [to],
+          subject,
+          text: message,
+          html: buildPlainHtml(message),
+          reply_to: replyTo,
+          headers: invoiceId ? { "X-Entity-Ref-ID": String(invoiceId) } : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.text();
+        logError("send-email Resend error:", res.status, body.slice(0, 300));
+        return json({ error: "send_failed", message: "We couldn't send this one. Your draft is safe — give it another try." }, 502);
+      }
+      via = "resend";
+    }
+
+    const { error: sendLogErr } = await supabaseAdmin.from("email_send_log").insert({
+      user_id: user.id,
+      recipient: to,
+      invoice_id: invoiceId ?? null,
+    });
+    if (sendLogErr) {
+      // This is a money + audit record (the free-send tally is counted from it,
+      // and it's the canonical "we sent this") — losing it silently is bad.
+      logError("[send-email] email_send_log insert failed — free-send tally + delivery record lost:", sendLogErr);
+    }
+
+    // Record the follow-up in the timeline. This is the source of truth for
+    // "this step was sent" (ChaseSchedule reads it) and the UI's free-send badge
+    // (useEntitlement reads the count). Writing it here — server-side, immediately
+    // after the send, on the service-role client — closes the window where the old
+    // client-side recordFollowup could fail after the email already went out and
+    // leave the schedule showing the step un-sent. NOTE: the *authoritative*
+    // free-send gate above counts email_send_log, not this table, because clients
+    // can delete their own followups rows via RLS.
+    if (invoiceId) {
+      const followupRow = {
+        user_id: user.id,
+        invoice_id: String(invoiceId),
+        subject: String(subject),
+        message: String(message),
+        tone: typeof tone === "string" && tone.trim() ? tone.trim().slice(0, 40) : "Friendly",
+        is_ai_generated: isAiGenerated === true,
+        sent_at: new Date().toISOString(),
+      };
+      let { error: fErr } = await supabaseAdmin.from("followups").insert(followupRow);
+      if (fErr) {
+        logWarn("[send-email] followups insert failed, retrying:", fErr);
+        ({ error: fErr } = await supabaseAdmin.from("followups").insert(followupRow));
+        if (fErr) logWarn("[send-email] followups insert failed after retry:", fErr);
       }
     }
 
-    let result: Response;
-    if (senderType === "gmail") {
-      result = await sendViaGmail(supabaseAdmin, user.id, to, subject, message, senderName, json);
-    } else if (senderType === "smtp") {
-      result = await sendViaSmtp(supabaseAdmin, user.id, to, subject, message, json);
-    } else {
-      return json({ error: "no_mailbox", message: "No sending mailbox connected." });
-    }
-
-    // Log successful sends only (status 2xx).
-    if (result.status >= 200 && result.status < 300) {
-      await supabaseAdmin.from("email_send_log").insert({
-        user_id: user.id,
-        recipient: to,
-        invoice_id: invoiceId ?? null,
-      });
-    }
-    return result;
+    return json({ success: true, via });
   } catch (e) {
-    console.error("send-email error:", e);
-    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
+    logError("send-email error:", e);
+    return json({ error: "Internal error" }, 500);
   }
 });
-
-async function sendViaGmail(supabaseAdmin: any, userId: string, to: string, subject: string, message: string, senderName: string, json: Json) {
-  const { data: gmailConn, error: connError } = await supabaseAdmin
-    .from("gmail_connections")
-    .select("user_id, email, token_expires_at, access_token_secret_id, refresh_token_secret_id")
-    .eq("user_id", userId)
-    .single();
-
-  if (connError || !gmailConn) {
-    return json({ error: "no_mailbox", message: "Gmail not connected. Please connect Gmail in Settings." });
-  }
-
-  const { data: accessTokenRaw } = await supabaseAdmin
-    .rpc("vault_read_secret", { p_id: gmailConn.access_token_secret_id });
-  const { data: refreshTokenRaw } = await supabaseAdmin
-    .rpc("vault_read_secret", { p_id: gmailConn.refresh_token_secret_id });
-
-  let accessToken: string = accessTokenRaw ?? "";
-  const expiresAt = new Date(gmailConn.token_expires_at).getTime();
-  if (Date.now() > expiresAt - 5 * 60 * 1000) {
-    const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")!;
-    const clientSecret = Deno.env.get("GOOGLE_OAUTH_CLIENT_SECRET")!;
-    const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshTokenRaw ?? "",
-        grant_type: "refresh_token",
-      }),
-    });
-    const refreshData = await refreshRes.json();
-    if (!refreshRes.ok || !refreshData.access_token) {
-      console.error("Token refresh failed");
-      return json({ error: "no_mailbox", message: "Gmail token expired. Please reconnect Gmail in Settings." });
-    }
-    accessToken = refreshData.access_token;
-    const newExpiry = new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString();
-    await supabaseAdmin.rpc("vault_update_secret", {
-      p_id: gmailConn.access_token_secret_id,
-      p_value: accessToken,
-    });
-    await supabaseAdmin
-      .from("gmail_connections")
-      .update({ token_expires_at: newExpiry })
-      .eq("user_id", userId);
-  }
-
-  const emailLines = [
-    `To: ${to}`,
-    `From: ${senderName ? `${senderName} <${gmailConn.email}>` : gmailConn.email}`,
-    `Subject: ${subject}`,
-    `Content-Type: text/plain; charset=utf-8`,
-    "",
-    message,
-  ];
-  const rawEmail = emailLines.join("\r\n");
-  const encoder = new TextEncoder();
-  const data = encoder.encode(rawEmail);
-  // btoa(String.fromCharCode(...data)) overflows the call stack for large messages.
-  // Chunk the array to stay within argument limits.
-  let binary = "";
-  const CHUNK = 8192;
-  for (let i = 0; i < data.length; i += CHUNK) {
-    binary += String.fromCharCode(...data.subarray(i, i + CHUNK));
-  }
-  const base64 = btoa(binary)
-    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-
-  const gmailResponse = await fetch(
-    "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ raw: base64 }),
-    }
-  );
-
-  if (!gmailResponse.ok) {
-    const status = gmailResponse.status;
-    const errBody = await gmailResponse.json().catch(() => null);
-    console.error("Gmail API error:", status, JSON.stringify(errBody));
-    if (status === 401) {
-      return json({ error: "no_mailbox", message: "Gmail token expired. Please reconnect Gmail in Settings." });
-    }
-    return json({ error: "Failed to send email via Gmail", gmailStatus: status, gmailError: errBody }, 500);
-  }
-  const result = await gmailResponse.json();
-  return json({ success: true, messageId: result.id, via: "gmail" });
-}
-
-async function sendViaSmtp(supabaseAdmin: any, userId: string, to: string, subject: string, message: string, json: Json) {
-  const { data: conn, error } = await supabaseAdmin
-    .from("smtp_connections")
-    .select("from_email, from_name, smtp_host, smtp_port, smtp_username, smtp_password_secret_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error || !conn) {
-    return json({ error: "no_mailbox", message: "SMTP not connected. Please connect your email in Settings." });
-  }
-  const { data: smtpPassword } = await supabaseAdmin
-    .rpc("vault_read_secret", { p_id: conn.smtp_password_secret_id });
-  const client = new SMTPClient({
-    connection: {
-      hostname: conn.smtp_host,
-      port: conn.smtp_port,
-      tls: conn.smtp_port === 465,
-      auth: { username: conn.smtp_username, password: smtpPassword ?? "" },
-    },
-  });
-  try {
-    await client.send({
-      from: conn.from_name ? `${conn.from_name} <${conn.from_email}>` : conn.from_email,
-      to,
-      subject,
-      content: message,
-    });
-  } catch (err) {
-    await client.close().catch(() => {});
-    // Log only the error name/type, not the full message which may include credentials.
-    const safeName = err instanceof Error ? err.name : "UnknownSmtpError";
-    console.error("SMTP send error:", safeName);
-    return json({ error: "SMTP send failed" }, 500);
-  }
-  await client.close();
-  return json({ success: true, via: "smtp" });
-}
-

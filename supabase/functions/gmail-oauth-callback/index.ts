@@ -91,17 +91,17 @@ serve(async (req) => {
       return redirectSafe(state.redirectUri, false, "Failed to save connection");
     }
 
-    // Mark profile sender_type as gmail (overwrite 'none', preserve explicit 'smtp' choice)
+    // Upsert profiles.sender_type — works whether the profile row exists yet or not.
+    // For new Google sign-ups the profiles row may not exist when this callback runs
+    // (.update() would silently match 0 rows), so we use upsert instead.
     await supabase
       .from("profiles")
-      .update({ sender_type: "gmail" })
-      .eq("user_id", state.userId)
-      .in("sender_type", ["none", "gmail"]);
+      .upsert({ user_id: state.userId, sender_type: "gmail" }, { onConflict: "user_id" });
 
     return redirectSafe(state.redirectUri, true);
   } catch (e) {
     logError("gmail-oauth-callback error:", e);
-    return new Response(`Error: ${e instanceof Error ? e.message : "Unknown"}`, { status: 500 });
+    return new Response("Internal error", { status: 500 });
   }
 });
 

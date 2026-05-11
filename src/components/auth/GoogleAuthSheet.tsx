@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useFlow } from "@/flow/FlowMachine";
-import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/lib/oauth";
+import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/integrations/oauth";
 import { GoogleIcon } from "@/components/GoogleIcon";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 import type { FlowEvent } from "@/flow/transitions";
@@ -13,19 +13,19 @@ type Variant = "create_account" | "save_draft" | "send_invoice" | "resume_sessio
 const COPY: Record<Variant, { headline: string; subhead: string }> = {
   create_account: {
     headline: "Create your free account",
-    subhead: "ChaseHQ sends follow-ups from your Gmail address — you review every message before it goes.",
+    subhead: "ChaseHQ sends follow-ups for you — you review every message before it goes, and replies come straight back to you.",
   },
   save_draft: {
     headline: "Save your draft",
-    subhead: "Sign in to keep this draft. ChaseHQ sends follow-ups from your Gmail — never without your review.",
+    subhead: "Sign in to keep this draft. You review every message; replies route back to your inbox.",
   },
   send_invoice: {
     headline: "Sign in to send",
-    subhead: "ChaseHQ sends from your Gmail. We never read your inbox — only send what you've reviewed.",
+    subhead: "ChaseHQ sends follow-ups for you. You review every message; replies come back to your inbox.",
   },
   resume_session: {
     headline: "Welcome back",
-    subhead: "Pick up where you left off. ChaseHQ sends follow-ups from your Gmail — you review every send.",
+    subhead: "Pick up where you left off. You review every follow-up before it goes.",
   },
   sign_in: {
     headline: "Welcome back",
@@ -34,7 +34,7 @@ const COPY: Record<Variant, { headline: string; subhead: string }> = {
 };
 
 const DISCLAIMER =
-  "By continuing, you grant ChaseHQ permission to send emails from your Gmail address on your behalf. We never read your inbox. You can revoke access anytime in your Google account.";
+  "By continuing, you create a ChaseHQ account using your Google sign-in. ChaseHQ sends follow-ups on your behalf — you review every message and replies come back to your inbox.";
 
 interface GoogleAuthSheetProps {
   open: boolean;
@@ -67,19 +67,30 @@ export function GoogleAuthSheet({
     setLoading(true);
     if (flowEvent) send(flowEvent);
     const intent = isSignInVariant ? "signIn" : "signUp";
+    if (sendAfterAuth) {
+      sessionStorage.setItem(STORAGE_KEYS.SEND_AFTER_AUTH, sendAfterAuth);
+    }
+    const blocker = document.getElementById("oauth-blocker") as HTMLElement | null;
+    if (blocker) blocker.style.display = "block";
     onClose();
-    if (sendAfterAuth) sessionStorage.setItem(STORAGE_KEYS.SEND_AFTER_AUTH, sendAfterAuth);
     const { error } = await startGoogleOAuth(window.location.origin + redirectPath, intent);
     if (error) {
+      if (blocker) blocker.style.display = "none";
       if (error.code === OAUTH_USER_CANCELED) {
-        if (sendAfterAuth) sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
+        if (sendAfterAuth) {
+          sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
+        }
         setLoading(false);
         return;
       }
       toast.error("Sign-in didn't go through. Give it another try.");
-      if (sendAfterAuth) sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
+      if (sendAfterAuth) {
+        sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
+      }
       setLoading(false);
     }
+    // On success, OAuthOverlay owns the blocker hide — it dismisses only after
+    // auth+profile+navigation have all settled, so the destination route has painted.
   }
 
   return (

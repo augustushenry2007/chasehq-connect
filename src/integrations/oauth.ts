@@ -36,10 +36,29 @@ export async function startGoogleOAuth(
       const result = await GoogleAuth.signIn();
       window.dispatchEvent(new Event("chasehq:oauth-signal")); // re-assert overlay after dialog closes
 
-      const { data: sessionData, error: idError } = await supabase.auth.signInWithIdToken({
+      // Bound signInWithIdToken with an explicit 15s timeout. iOS WKWebView's fetch
+      // transport has no built-in timeout — without this race, a flaky network silently
+      // hangs the auth flow forever, which previously cascaded into PostInvoiceAuthScreen's
+      // 15s escape-hatch reload (and the user landing back on AuthForm).
+      const idTokenSignIn = supabase.auth.signInWithIdToken({
         provider: "google",
         token: result.idToken,
       });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("signInWithIdToken timed out after 15s")),
+          15000,
+        ),
+      );
+      let sessionData: Awaited<ReturnType<typeof supabase.auth.signInWithIdToken>>["data"] = { session: null, user: null };
+      let idError: Error | null = null;
+      try {
+        const r = await Promise.race([idTokenSignIn, timeoutPromise]);
+        sessionData = r.data;
+        idError = r.error;
+      } catch (e) {
+        idError = e instanceof Error ? e : new Error("Sign-in failed");
+      }
       if (idError || !sessionData.session) {
         sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
         sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
@@ -48,36 +67,34 @@ export async function startGoogleOAuth(
         return { error: idError ?? new Error("Sign-in failed") };
       }
 
-      // signInWithIdToken does not populate session.provider_token, so AppContext's
-      // SIGNED_IN gmail-upsert silently no-ops. Persist tokens here BEFORE navigating
-      // — downstream screens (paywall, send) need this row present.
-      const expiresAt = result.accessTokenExpiresAt
-        || new Date(Date.now() + 55 * 60 * 1000).toISOString();
-      const { error: gmailError } = await supabase.from("gmail_connections").upsert({
-        user_id: sessionData.session.user.id,
-        email: sessionData.session.user.email ?? result.email,
-        access_token: result.accessToken,
-        refresh_token: result.refreshToken,
-        token_expires_at: expiresAt,
-      }, { onConflict: "user_id" });
-      if (gmailError) {
-        console.error("[startGoogleOAuth native] gmail_connections upsert failed:", gmailError);
-      }
-
+      // Auth complete — release the splash gate immediately.
       sessionStorage.setItem(STORAGE_KEYS.OAUTH_COMPLETED, "1");
-      // Keep OAUTH_IN_PROGRESS="1" through pushState so OAuthOverlay cannot dismiss
-      // while pathname is still /guest-draft (before the URL update lands).
-      let targetPath = "/auth-after-invoice";
-      try {
-        const u = new URL(redirectTo);
-        targetPath = u.pathname + u.search;
-      } catch {
-        if (redirectTo.startsWith("/")) targetPath = redirectTo;
-      }
-      window.history.pushState({}, "", targetPath);
-      window.dispatchEvent(new PopStateEvent("popstate"));
       sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
       window.dispatchEvent(new Event("chasehq:oauth-signal"));
+
+      // Gmail link is a side-effect that does not gate app access.
+      // Fire-and-forget: failure falls back to Settings → Reconnect Gmail.
+      if (result.serverAuthCode) {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+        const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+        fetch(`${supabaseUrl}/functions/v1/gmail-link-from-auth-code`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${sessionData.session.access_token}`,
+            "apikey": apikey,
+          },
+          body: JSON.stringify({ serverAuthCode: result.serverAuthCode }),
+        })
+          .then(async (linkRes) => {
+            if (!linkRes.ok) {
+              const body = await linkRes.json().catch(() => ({}));
+              console.error("[startGoogleOAuth] gmail-link-from-auth-code failed:", linkRes.status, body);
+            }
+          })
+          .catch((e) => console.error("[startGoogleOAuth] Gmail link failed:", e));
+      }
+
       return { error: null };
     } catch (e: unknown) {
       sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
@@ -96,8 +113,7 @@ export async function startGoogleOAuth(
       provider: "google",
       options: {
         redirectTo,
-        scopes: "openid email profile https://www.googleapis.com/auth/gmail.send",
-        queryParams: { access_type: "offline", prompt: "consent" },
+        scopes: "openid email profile",
       },
     });
 

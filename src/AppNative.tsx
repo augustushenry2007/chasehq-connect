@@ -3,6 +3,7 @@ import posthog from "posthog-js";
 import { Capacitor } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
+import { toast } from "sonner";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProvider } from "@/context/AppContext";
@@ -11,6 +12,8 @@ import { FlowBootstrap } from "@/flow/FlowBootstrap";
 import { FlowRouter } from "@/flow/FlowRouter";
 import { supabase } from "@/integrations/supabase/client";
 import { attachNotificationTapHandler } from "@/lib/localNotifications";
+import { useReconcileLocalNotifications } from "@/hooks/useReconcileLocalNotifications";
+import { useBackfillMissingSchedules } from "@/hooks/useBackfillMissingSchedules";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 import RootRedirect from "./pages/RootRedirect";
 import AuthScreen from "./pages/AuthScreen";
@@ -42,15 +45,34 @@ if (!import.meta.env.DEV) {
 if (Capacitor.isNativePlatform()) {
   attachNotificationTapHandler();
 
+  // Broadcast app foreground/resume so hooks can re-run launch-time reconciliation
+  // (OS local notifications can be purged by iOS while the app sits backgrounded
+  // for days — see useReconcileLocalNotifications).
+  CapApp.addListener("appStateChange", ({ isActive }) => {
+    if (isActive) window.dispatchEvent(new Event("chasehq:app-resumed"));
+  });
+
   CapApp.addListener("appUrlOpen", async ({ url }) => {
+    // Gmail OAuth callback — fired when SFSafariViewController returns to the app.
+    if (url.startsWith("com.chasehq.app://gmail-oauth")) {
+      try { await Browser.close(); } catch { /* already closed */ }
+      const qIdx = url.indexOf("?");
+      const params = qIdx >= 0 ? new URLSearchParams(url.slice(qIdx + 1)) : new URLSearchParams();
+      if (params.get("gmail_connected") === "true") {
+        window.dispatchEvent(new CustomEvent("chasehq:gmail-connected"));
+      } else {
+        const err = params.get("gmail_error") ?? "Unknown error";
+        window.dispatchEvent(new CustomEvent<string>("chasehq:gmail-error", { detail: err }));
+      }
+      return;
+    }
+
     if (!url.startsWith("com.chasehq.app://auth-after-invoice")) return;
 
     const hashIdx = url.indexOf("#");
     const params = hashIdx >= 0 ? new URLSearchParams(url.slice(hashIdx + 1)) : null;
     const access_token = params?.get("access_token") ?? null;
     const refresh_token = params?.get("refresh_token") ?? null;
-    const provider_token = params?.get("provider_token") ?? null;
-    const provider_refresh_token = params?.get("provider_refresh_token") ?? null;
 
     if (access_token && refresh_token) {
       // Signal BEFORE Browser.close() — the WKWebView runs JS in the background
@@ -65,19 +87,21 @@ if (Capacitor.isNativePlatform()) {
     try { await Browser.close(); } catch { /* no-op if already closed */ }
 
     if (access_token && refresh_token) {
-      const { data: sessionData } = await supabase.auth.setSession({ access_token, refresh_token });
-      // setSession does not carry provider_token through to the SIGNED_IN event, so
-      // the AppContext upsert never fires on native iOS. Persist Gmail tokens here,
-      // before navigating, so useSendingMailbox finds the row on its first fetch.
-      if (sessionData.session && provider_token && provider_refresh_token) {
-        const expiresAt = new Date(Date.now() + 55 * 60 * 1000).toISOString();
-        await supabase.from("gmail_connections").upsert({
-          user_id: sessionData.session.user.id,
-          email: sessionData.session.user.email,
-          access_token: provider_token,
-          refresh_token: provider_refresh_token,
-          token_expires_at: expiresAt,
-        }, { onConflict: "user_id" });
+      try {
+        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (error) throw error;
+      } catch (e) {
+        // setSession failed (network blip at the OAuth-return moment). Roll back the
+        // optimistic "completed" signal so OAuthOverlay dismisses to the auth form
+        // immediately instead of hanging on the 90s safety net.
+        console.error("[OAuth] setSession failed after callback:", e);
+        sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
+        sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
+        window.dispatchEvent(new Event("chasehq:oauth-signal"));
+        window.history.pushState({}, "", "/auth-after-invoice");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        toast.error("Sign-in didn't go through. Give it another try.");
+        return;
       }
     }
 
@@ -98,6 +122,12 @@ if (Capacitor.isNativePlatform()) {
   });
 }
 
+function NativeReconciler() {
+  useReconcileLocalNotifications();
+  useBackfillMissingSchedules();
+  return null;
+}
+
 const AppNative = () => (
   <AppProvider>
     <TooltipProvider>
@@ -107,6 +137,7 @@ const AppNative = () => (
           <FlowBootstrap />
           <FlowRouter />
           <OAuthOverlay />
+          <NativeReconciler />
           <ErrorBoundary>
             <Routes>
               <Route path="/" element={<RootRedirect />} />

@@ -116,14 +116,7 @@ export function FlowBootstrap() {
       return;
     }
 
-    // Authenticated + onboarded but tour not yet seen → send to feature tour.
-    if (!tourCompleted) {
-      if (import.meta.env.DEV) console.log("[FLOW BOOT] Onboarded but tour not completed → FEATURE_TOUR");
-      send("DECIDE_SKIP");
-      return;
-    }
-
-    // Authenticated + onboarded + tour done.
+    // Authenticated + onboarded → resume.
     // OAuth sign-in wipes sessionStorage, so treat it as a resume.
     if (postOAuth) {
       if (import.meta.env.DEV) console.log("[FLOW BOOT] Post-OAuth, onboarded → BOOT_AUTHED_RESUMING");
@@ -139,7 +132,7 @@ export function FlowBootstrap() {
     }
     if (import.meta.env.DEV) console.log("[FLOW BOOT] Authenticated + onboarded →", firstRun ? "BOOT_AUTHED_FIRST_RUN" : "BOOT_AUTHED_RESUMING");
     send(firstRun ? "BOOT_AUTHED_FIRST_RUN" : "BOOT_AUTHED_RESUMING");
-  }, [authReady, profileReady, isAuthenticated, hasCompletedOnboarding, tourCompleted, user, state, send]);
+  }, [authReady, profileReady, isAuthenticated, hasCompletedOnboarding, user?.id, state, send]);
 
   // React to auth changes after boot (sign-out and post-boot sign-in).
   useEffect(() => {
@@ -149,6 +142,19 @@ export function FlowBootstrap() {
       return;
     }
     if (lastAuthRef.current === true && isAuthenticated === false) {
+      const userInitiated = sessionStorage.getItem(STORAGE_KEYS.USER_INITIATED_SIGN_OUT) === "1";
+      const oauthCompleted = sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1";
+      // Supabase rotates the session briefly post-OAuth (SIGNED_OUT with session=null,
+      // then SIGNED_IN). OAUTH_COMPLETED stays set for 30s after OAuthOverlay dismisses,
+      // covering this window. Treat a transient unauth as the rotation, not a real
+      // sign-out — otherwise FlowMachine fires SIGN_OUT → LANDING → /welcome flash.
+      // Do NOT update lastAuthRef so when SIGNED_IN re-asserts the effect no-ops.
+      // Exception: a deliberate signOut() within that 30s window sets
+      // USER_INITIATED_SIGN_OUT, which must win over the rotation suppression.
+      if (oauthCompleted && !userInitiated) {
+        return;
+      }
+      sessionStorage.removeItem(STORAGE_KEYS.USER_INITIATED_SIGN_OUT);
       send("SIGN_OUT");
       lastAuthRef.current = isAuthenticated;
       return;
@@ -167,14 +173,12 @@ export function FlowBootstrap() {
       }
       if (!hasCompletedOnboarding) {
         send("START");           // LANDING → ONBOARDING
-      } else if (!tourCompleted) {
-        send("DECIDE_SKIP");     // LANDING → FEATURE_TOUR
       } else {
         send("AUTH_SUCCESS");    // LANDING → DASHBOARD_ACTIVE
       }
     }
     lastAuthRef.current = isAuthenticated;
-  }, [authReady, isAuthenticated, profileReady, hasCompletedOnboarding, tourCompleted, send, state]);
+  }, [authReady, isAuthenticated, profileReady, hasCompletedOnboarding, send, state]);
 
   // Once invoices are known, refine dashboard state.
   useEffect(() => {

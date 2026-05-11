@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/lib/oauth";
+import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/integrations/oauth";
 import { GoogleIcon } from "@/components/GoogleIcon";
-import { analytics } from "@/lib/analytics";
+import { analytics } from "@/integrations/analytics";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 

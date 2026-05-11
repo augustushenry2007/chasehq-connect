@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { Loader2 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
+import { AuthHydratingSplash } from "@/components/AuthHydratingSplash";
 import { isGuestOnboarded } from "@/lib/localInvoice";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 
@@ -52,7 +52,7 @@ export default function RequireOnboarding() {
       sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
       sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
       setOauthLatched(false);
-    }, 12000);
+    }, 90000);
     return () => window.clearTimeout(t);
   }, [oauthLatched]);
 
@@ -71,16 +71,19 @@ export default function RequireOnboarding() {
     || sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1"
   );
   if (oauthInFlight) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background">
-        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Signing you in…</p>
-      </div>
-    );
+    return <AuthHydratingSplash />;
   }
 
   const guestOk = !isAuthenticated && isGuestOnboarded();
-  if (!isAuthenticated && !guestOk) return <Navigate to="/welcome" replace />;
+  if (!isAuthenticated && !guestOk) {
+    // Brief Supabase session rotation can flip isAuthenticated false right after
+    // OAuth completes. While OAUTH_COMPLETED is still set, hold a neutral splash
+    // instead of bouncing to /welcome — prevents a flash of WelcomeScreen.
+    if (sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1") {
+      return <AuthHydratingSplash />;
+    }
+    return <Navigate to="/welcome" replace />;
+  }
 
   // Wait for profile to load before making onboarding decisions — avoids redirecting
   // to /onboarding while hasCompletedOnboarding is still false from the async profile fetch.
@@ -92,6 +95,8 @@ export default function RequireOnboarding() {
     );
   }
 
-  if (isAuthenticated && !hasCompletedOnboarding) return <Navigate to="/onboarding" replace />;
+  if (isAuthenticated && !hasCompletedOnboarding) {
+    return <Navigate to="/onboarding" replace />;
+  }
   return <Outlet key={location.pathname} />;
 }

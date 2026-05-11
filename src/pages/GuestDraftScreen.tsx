@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { flushSync } from "react-dom";
 import {
   ArrowLeft, RefreshCw, Send, Loader2, Info, Shuffle, Sparkles, CalendarIcon,
 } from "lucide-react";
@@ -7,7 +8,7 @@ import { useFlow } from "@/flow/FlowMachine";
 import { savePending, markGuestOnboarded } from "@/lib/localInvoice";
 import MockIAPSheet from "@/components/onboarding/MockIAPSheet";
 import { GoogleAuthSheet } from "@/components/auth/GoogleAuthSheet";
-import { generateFollowup } from "@/hooks/useSupabaseData";
+import { generateFollowupStream } from "@/hooks/useSupabaseData";
 import { useActionGate } from "@/hooks/useActionGate";
 import { getDefaultDraft, getTemplateDraft, TEMPLATE_COUNT, type Tone } from "@/components/invoice/DraftTemplates";
 import type { Invoice } from "@/lib/data";
@@ -15,6 +16,8 @@ import { formatDate } from "@/lib/data";
 import { differenceInDays, format } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { STORAGE_KEYS } from "@/lib/storageKeys";
+import { useApp } from "@/context/AppContext";
 
 const TONES: Tone[] = ["Friendly", "Firm", "Urgent", "Final Notice"];
 const FIELDS_KEY = "guest_draft_fields_v1";
@@ -70,6 +73,28 @@ function saveFields(client: string, amount: string, dueDate: string, clientEmail
 export default function GuestDraftScreen() {
   const { send } = useFlow();
   const gate = useActionGate();
+  const { user } = useApp();
+
+  // Mirror PostInvoiceAuthScreen's latch: while OAuth is in flight or has just
+  // completed, return null so the OAuthOverlay (z:9999) is the only thing
+  // painting. Without this, iOS WKWebView can flash this form's content for a
+  // frame between the native consent modal dismissing and React's next commit.
+  const [oauthLatched, setOauthLatched] = useState(() =>
+    typeof window !== "undefined" && (
+      sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1" ||
+      sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1"
+    )
+  );
+  useEffect(() => {
+    const handler = () => {
+      const inFlight =
+        sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1" ||
+        sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1";
+      flushSync(() => setOauthLatched(inFlight));
+    };
+    window.addEventListener("chasehq:oauth-signal", handler);
+    return () => window.removeEventListener("chasehq:oauth-signal", handler);
+  }, []);
 
   const saved = loadSavedFields();
   const [client, setClient] = useState(saved.client);
@@ -157,25 +182,44 @@ export default function GuestDraftScreen() {
     }
     setIsGenerating(true);
     setGenerationError(false);
+    const previousDraft = isAiGenerated ? currentDraft : undefined;
+    // Clear the editor so the skeleton (gated on `isGenerating && !currentDraft`)
+    // shows on Regenerate too, then streams in the new draft.
+    setCurrentSubject("");
+    setCurrentDraft("");
+
+    let streamedMessage = "";
+    let errored = false;
+
     try {
-      const result = await generateFollowup(invoice, tone, isAiGenerated ? currentDraft : undefined);
-      if (result) {
-        setCurrentDraft(result.message);
-        setCurrentSubject(result.subject);
-        setIsAiGenerated(true);
-        setGenerationError(false);
-        setTimeout(() => draftRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
-      } else {
-        // Fall back to next template variant rather than showing an error state
-        const nextIndex = (templateIndex + 1) % TEMPLATE_COUNT;
-        const t = getTemplateDraft(invoice, tone, nextIndex, "[Your Name]");
-        setCurrentSubject(t.subject);
-        setCurrentDraft(t.message);
-        setTemplateIndex(nextIndex);
-        setGenerationError(true);
-      }
+      await generateFollowupStream(
+        invoice, tone, previousDraft, undefined, undefined,
+        {
+          onSubject: (s) => setCurrentSubject(s),
+          onMessageDelta: (delta) => {
+            streamedMessage += delta;
+            setCurrentDraft(streamedMessage);
+          },
+          onDone: () => { /* finalization handled below */ },
+          onError: () => { errored = true; },
+        },
+      );
     } catch {
+      errored = true;
+    }
+
+    if (errored) {
+      const nextIndex = (templateIndex + 1) % TEMPLATE_COUNT;
+      const t = getTemplateDraft(invoice, tone, nextIndex, "[Your Name]");
+      setCurrentSubject(t.subject);
+      setCurrentDraft(t.message);
+      setTemplateIndex(nextIndex);
       setGenerationError(true);
+      setIsAiGenerated(false);
+    } else {
+      setIsAiGenerated(true);
+      setGenerationError(false);
+      setTimeout(() => draftRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
     }
     setIsGenerating(false);
   }
@@ -222,6 +266,15 @@ export default function GuestDraftScreen() {
 
 
   const isFinalNotice = tone === "Final Notice";
+
+  if (oauthLatched || !!user) {
+    return (
+      <div className="fixed inset-0 z-[9998] bg-background flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Signing you in…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex flex-col bg-background animate-page-enter">
@@ -396,7 +449,9 @@ export default function GuestDraftScreen() {
               </div>
 
               {/* Message body */}
-              {isGenerating ? (
+              {/* Skeleton until the first streamed byte lands; once `currentDraft`
+                  is non-empty the live-streamed text takes over. */}
+              {isGenerating && !currentDraft ? (
                 <div className="space-y-2 py-3">
                   <div className="h-3.5 bg-muted rounded-md animate-pulse w-full" />
                   <div className="h-3.5 bg-muted rounded-md animate-pulse w-5/6" />

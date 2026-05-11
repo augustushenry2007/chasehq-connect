@@ -4,7 +4,8 @@ import { CreditCard, ExternalLink, RefreshCw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useEntitlement } from "@/hooks/useEntitlement";
-import { openManageSubscriptions, restorePurchases } from "@/lib/iap";
+import { openManageSubscriptions, restorePurchases } from "@/integrations/iap";
+import { analytics } from "@/integrations/analytics";
 import { ScreenHeader } from "@/components/ScreenHeader";
 
 const STATUS_LABEL: Record<string, { label: string; tone: "ok" | "warn" | "muted" }> = {
@@ -47,10 +48,13 @@ export default function BillingScreen() {
     });
     setRestoring(false);
     if (error || (data as any)?.error) {
-      toast.error((data as any)?.error || "No active subscription found on this account.");
+      const errMsg = (data as any)?.error || "No active subscription found on this account.";
+      toast.error(errMsg);
+      analytics.error("restore_failed", errMsg, { source: "billing_screen" });
       return;
     }
     toast.success("You're all set — welcome back.");
+    analytics.track("purchase_restored", { plan: result.productId ?? "chasehq_pro_monthly", source: "billing_screen" });
     await ent.refetch();
   }
 
@@ -58,13 +62,24 @@ export default function BillingScreen() {
     <div className="h-screen bg-background overflow-y-auto overscroll-contain">
       <ScreenHeader fallbackPath="/settings" />
       <div className="max-w-md mx-auto px-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
-        <h1 className="text-xl font-bold text-foreground mb-1">Billing</h1>
-        <p className="text-xs text-muted-foreground mb-5">Manage your ChaseHQ subscription.</p>
+        <p className="text-xs uppercase tracking-[0.12em] font-semibold text-primary mb-1">Subscription</p>
+        <h1 className="text-[clamp(24px,6vw,32px)] font-bold text-foreground tracking-[-0.03em] mb-1">Billing</h1>
+        <p className="text-[13px] text-muted-foreground leading-[1.5] mb-5">Manage your ChaseHQ subscription.</p>
 
         {/* Status card */}
-        <div className="bg-card border border-border rounded-2xl p-4 mb-4">
+        <div
+          className="bg-card border border-border rounded-2xl p-4 mb-4 shadow-[var(--shadow-card)]"
+          style={{
+            borderTop:
+              meta.tone === "ok"
+                ? "2px solid hsl(var(--primary) / 0.35)"
+                : meta.tone === "warn"
+                ? "2px solid hsl(28 90% 60% / 0.40)"
+                : "2px solid hsl(var(--border))",
+          }}
+        >
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${meta.tone === "ok" ? "bg-accent/60" : "bg-accent"}`}>
               <CreditCard className="w-5 h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
@@ -74,7 +89,7 @@ export default function BillingScreen() {
                   {meta.label}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">$19.99 / month</p>
+              <p className="text-[13px] text-muted-foreground mt-0.5">$9.99 / month</p>
             </div>
           </div>
 
@@ -104,25 +119,25 @@ export default function BillingScreen() {
         {/* Actions */}
         <button
           onClick={openManageSubscriptions}
-          className="w-full flex items-center justify-between bg-card border border-border rounded-xl px-4 py-3 mb-2 hover:border-primary/40 transition-colors"
+          className="w-full flex items-center justify-between bg-card border border-border rounded-2xl px-4 py-3 mb-2 hover:border-primary/40 transition-colors shadow-[var(--shadow-card)]"
         >
           <div className="text-left">
             <p className="text-sm font-medium text-foreground">Manage subscription</p>
             <p className="text-[11px] text-muted-foreground">Change plan, payment, or cancel</p>
           </div>
-          <ExternalLink className="w-4 h-4 text-muted-foreground" />
+          <ExternalLink className="w-4 h-4 text-primary/50" />
         </button>
 
         <button
           onClick={handleRestore}
           disabled={restoring}
-          className="w-full flex items-center justify-between bg-card border border-border rounded-xl px-4 py-3 hover:border-primary/40 transition-colors disabled:opacity-50"
+          className="w-full flex items-center justify-between bg-card border border-border rounded-2xl px-4 py-3 hover:border-primary/40 transition-colors disabled:opacity-50 shadow-[var(--shadow-card)]"
         >
           <div className="text-left">
             <p className="text-sm font-medium text-foreground">Restore purchases</p>
             <p className="text-[11px] text-muted-foreground">If you've subscribed on another device</p>
           </div>
-          {restoring ? <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /> : <RefreshCw className="w-4 h-4 text-muted-foreground" />}
+          {restoring ? <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /> : <RefreshCw className="w-4 h-4 text-primary/50" />}
         </button>
 
         <p className="text-[11px] text-muted-foreground mt-5 leading-relaxed">

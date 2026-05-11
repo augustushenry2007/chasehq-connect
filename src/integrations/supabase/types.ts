@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      dispatch_health: {
+        Row: {
+          id: number
+          last_counts: Json | null
+          last_error: string | null
+          last_ok_at: string | null
+          last_run_at: string | null
+        }
+        Insert: {
+          id?: number
+          last_counts?: Json | null
+          last_error?: string | null
+          last_ok_at?: string | null
+          last_run_at?: string | null
+        }
+        Update: {
+          id?: number
+          last_counts?: Json | null
+          last_error?: string | null
+          last_ok_at?: string | null
+          last_run_at?: string | null
+        }
+        Relationships: []
+      }
       email_send_log: {
         Row: {
           id: string
@@ -211,33 +235,42 @@ export type Database = {
       notification_preferences: {
         Row: {
           created_at: string
+          default_tone: string | null
           email_enabled: boolean
           enabled: boolean
           push_enabled: boolean
           quiet_hours_end: number
           quiet_hours_start: number
+          schedule_preset: string | null
+          schedule_steps: Json | null
           timezone: string
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          default_tone?: string | null
           email_enabled?: boolean
           enabled?: boolean
           push_enabled?: boolean
           quiet_hours_end?: number
           quiet_hours_start?: number
+          schedule_preset?: string | null
+          schedule_steps?: Json | null
           timezone?: string
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          default_tone?: string | null
           email_enabled?: boolean
           enabled?: boolean
           push_enabled?: boolean
           quiet_hours_end?: number
           quiet_hours_start?: number
+          schedule_preset?: string | null
+          schedule_steps?: Json | null
           timezone?: string
           updated_at?: string
           user_id?: string
@@ -250,6 +283,8 @@ export type Database = {
           body: string
           created_at: string
           delivered_at: string | null
+          email_attempts: number
+          email_sent_at: string | null
           id: string
           invoice_id: string
           read_at: string | null
@@ -266,6 +301,8 @@ export type Database = {
           body: string
           created_at?: string
           delivered_at?: string | null
+          email_attempts?: number
+          email_sent_at?: string | null
           id?: string
           invoice_id: string
           read_at?: string | null
@@ -282,6 +319,8 @@ export type Database = {
           body?: string
           created_at?: string
           delivered_at?: string | null
+          email_attempts?: number
+          email_sent_at?: string | null
           id?: string
           invoice_id?: string
           read_at?: string | null

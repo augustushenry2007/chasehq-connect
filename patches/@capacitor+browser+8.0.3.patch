@@ -1,0 +1,114 @@
+diff --git a/node_modules/@capacitor/browser/.swiftpm/xcode/xcuserdata/augustushenry.xcuserdatad/xcschemes/xcschememanagement.plist b/node_modules/@capacitor/browser/.swiftpm/xcode/xcuserdata/augustushenry.xcuserdatad/xcschemes/xcschememanagement.plist
+new file mode 100644
+index 0000000..c7d7fe3
+--- /dev/null
++++ b/node_modules/@capacitor/browser/.swiftpm/xcode/xcuserdata/augustushenry.xcuserdatad/xcschemes/xcschememanagement.plist
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>SchemeUserState</key>
++	<dict>
++		<key>CapacitorBrowser.xcscheme_^#shared#^_</key>
++		<dict>
++			<key>orderHint</key>
++			<integer>3</integer>
++		</dict>
++	</dict>
++</dict>
++</plist>
+diff --git a/node_modules/@capacitor/browser/ios/Sources/BrowserPlugin/BrowserPlugin.swift b/node_modules/@capacitor/browser/ios/Sources/BrowserPlugin/BrowserPlugin.swift
+index 83a5ba5..f1748ae 100644
+--- a/node_modules/@capacitor/browser/ios/Sources/BrowserPlugin/BrowserPlugin.swift
++++ b/node_modules/@capacitor/browser/ios/Sources/BrowserPlugin/BrowserPlugin.swift
+@@ -13,24 +13,26 @@ public class CAPBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
+ 
+     @objc func open(_ call: CAPPluginCall) {
+         // validate the URL
+-        guard let urlString = call.getString("url"), let url = URL(string: urlString) else {
+-            call.reject("Must provide a valid URL to open")
++        let urlString = call.getString("url", "")
++        guard !urlString.isEmpty, let url = URL(string: urlString) else {
++            call.unimplemented("Must provide a valid URL to open")
+             return
+         }
+         // extract the optional parameters
+         var color: UIColor?
+-        if let toolbarColor = call.getString("toolbarColor") {
+-            color = UIColor.capacitor.color(fromHex: toolbarColor)
++        let toolbarColor = call.getString("toolbarColor", "")
++        if !toolbarColor.isEmpty {
++            color = Self.parseHexColor(toolbarColor)
+         }
+-        let style = self.presentationStyle(for: call.getString("presentationStyle"))
++        let style = self.presentationStyle(for: call.getString("presentationStyle", ""))
+         // prepare for display
+         guard implementation.prepare(for: url, withTint: color, modalPresentation: style), let viewController = implementation.viewController else {
+-            call.reject("Unable to display URL")
++            call.unimplemented("Unable to display URL")
+             return
+         }
+         implementation.browserEventDidOccur = { [weak self] (event) in
+             if event == .finished {
+-                self?.bridge?.viewController?.dismiss(animated: true, completion: {
++                Self.rootViewController()?.dismiss(animated: true, completion: {
+                     self?.notifyListeners(event.listenerEvent, data: nil)
+                 })
+             } else {
+@@ -40,13 +42,15 @@ public class CAPBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
+         // display
+         DispatchQueue.main.async { [weak self] in
+             if style == .popover {
+-                if let width = call.getInt("width"), let height = call.getInt("height") {
++                if call.hasOption("width"), call.hasOption("height") {
++                    let width = call.getInt("width", 0)
++                    let height = call.getInt("height", 0)
+                     self?.setCenteredPopover(viewController, size: CGSize.init(width: width, height: height))
+                 } else {
+                     self?.setCenteredPopover(viewController)
+                 }
+             }
+-            self?.bridge?.viewController?.present(viewController, animated: true, completion: {
++            Self.rootViewController()?.present(viewController, animated: true, completion: {
+                 call.resolve()
+             })
+         }
+@@ -55,12 +59,12 @@ public class CAPBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
+     @objc func close(_ call: CAPPluginCall) {
+         DispatchQueue.main.async { [weak self] in
+             if self?.implementation.viewController != nil {
+-                self?.bridge?.viewController?.dismiss(animated: true) {
++                Self.rootViewController()?.dismiss(animated: true) {
+                     call.resolve()
+                     self?.implementation.cleanup()
+                 }
+             } else {
+-                call.reject("No active window to close!")
++                call.unimplemented("No active window to close!")
+             }
+         }
+     }
+@@ -71,6 +75,22 @@ public class CAPBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
+         }
+         return .fullScreen
+     }
++
++    private static func rootViewController() -> UIViewController? {
++        UIApplication.shared.connectedScenes
++            .compactMap { $0 as? UIWindowScene }
++            .flatMap { $0.windows }
++            .first(where: { $0.isKeyWindow })?
++            .rootViewController
++    }
++
++    private static func parseHexColor(_ hex: String) -> UIColor? {
++        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
++        if s.hasPrefix("#") { s.removeFirst() }
++        if s.count == 6 { s = "FF" + s }
++        guard s.count == 8, let value = UInt32(s, radix: 16) else { return nil }
++        return UIColor.capacitor.color(argb: value)
++    }
+ }
+ 
+ private extension BrowserEvent {

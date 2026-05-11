@@ -1,6 +1,5 @@
 import AppStoreBadge from "./AppStoreBadge";
 import HeroPhoneDemo from "./HeroPhoneDemo";
-import phoneFrame from "@/assets/phone-mockup.png";
 
 export default function Hero() {
   return (
@@ -30,26 +29,43 @@ export default function Hero() {
             </div>
           </div>
 
-          {/* Device mockup */}
+          {/* Device mockup — pure CSS iPhone-15-Pro frame */}
           <div className="reveal flex justify-center lg:justify-end">
             <div className="relative flex justify-center">
               {/* Glow */}
               <div className="absolute inset-[8%_12%] bg-gradient-radial from-accent/60 to-transparent blur-[60px] rounded-full" />
-              {/* Phone */}
+
               <style>{`@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
+
+              {/* Outer titanium frame */}
               <div
-                className="relative w-[388px] z-10"
-                style={{ aspectRatio: "365 / 750", animation: "floaty 4s ease-in-out infinite", filter: "drop-shadow(0 60px 80px rgba(0,0,0,0.30)) drop-shadow(0 20px 40px rgba(0,0,0,0.20))" }}
+                className="relative w-[360px] h-[740px] rounded-[58px] z-10"
+                style={{
+                  background: "linear-gradient(160deg,#2a2a2c 0%,#0e0e10 55%,#1a1a1c 100%)",
+                  padding: "12px",
+                  boxShadow:
+                    "0 80px 160px rgba(0,0,0,0.55), 0 30px 60px rgba(0,0,0,0.35), 0 0 0 1.5px rgba(255,255,255,0.10), inset 0 0 0 1px rgba(255,255,255,0.05)",
+                  animation: "floaty 4s ease-in-out infinite",
+                }}
                 aria-label="ChaseHQ iPhone app demo showing the follow-up workflow"
                 role="img"
               >
-                {/* Screen content sits in the PNG's transparent screen cutout */}
-                <div
-                  className="absolute bg-[#F7F9FA] overflow-hidden flex flex-col"
-                  style={{ left: "4.38%", right: "4.38%", top: "7.33%", bottom: "1.87%", borderRadius: "11.5%/5.4%" }}
-                >
-                  {/* Status bar — pushed below the PNG's painted-in Dynamic Island */}
-                  <div className="flex justify-between items-center px-8 pt-2 pb-1 text-[13px] font-semibold text-[#1A2B35] shrink-0">
+                {/* Side buttons */}
+                <div style={{ position: "absolute", left: -3, top: 120, width: 3, height: 26, borderRadius: "2px 0 0 2px", background: "linear-gradient(to right,#3a3a3c,#1f1f21)" }} />
+                <div style={{ position: "absolute", left: -3, top: 178, width: 3, height: 54, borderRadius: "2px 0 0 2px", background: "linear-gradient(to right,#3a3a3c,#1f1f21)" }} />
+                <div style={{ position: "absolute", left: -3, top: 244, width: 3, height: 54, borderRadius: "2px 0 0 2px", background: "linear-gradient(to right,#3a3a3c,#1f1f21)" }} />
+                <div style={{ position: "absolute", right: -3, top: 220, width: 3, height: 84, borderRadius: "0 2px 2px 0", background: "linear-gradient(to left,#3a3a3c,#1f1f21)" }} />
+
+                {/* Inner screen */}
+                <div className="relative w-full h-full bg-[#F7F9FA] rounded-[46px] overflow-hidden flex flex-col">
+                  {/* Dynamic Island — single, clean, centered */}
+                  <div
+                    className="absolute top-[10px] left-1/2 -translate-x-1/2 w-[110px] h-[32px] bg-black rounded-full z-20"
+                    aria-hidden="true"
+                  />
+
+                  {/* Status bar */}
+                  <div className="flex justify-between items-center px-7 pt-[14px] pb-1 text-[13px] font-semibold text-[#1A2B35] shrink-0 relative z-10">
                     <span>9:41</span>
                     <span className="inline-flex gap-1 items-center">
                       <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><path d="M1 7.5C3 5 5.5 4 8 4s5 1 7 3.5L14 9c-1.5-2-3.5-3-6-3s-4.5 1-6 3L1 7.5z" fill="#1A2B35"/></svg>
@@ -58,37 +74,16 @@ export default function Hero() {
                     </span>
                   </div>
 
-                  {/* Animated demo screens */}
+                  {/* Demo screens */}
                   <div className="flex-1 overflow-hidden">
                     <HeroPhoneDemo />
                   </div>
+
                   {/* Home indicator */}
                   <div className="shrink-0 flex justify-center py-2">
                     <div className="w-[100px] h-[4px] bg-[#1A2B35]/30 rounded-full" />
                   </div>
                 </div>
-
-                {/* Frame PNG sits on top — provides bezel, side buttons */}
-                <img
-                  src={phoneFrame}
-                  alt=""
-                  aria-hidden="true"
-                  className="absolute inset-0 w-full h-full pointer-events-none select-none"
-                  draggable={false}
-                />
-                {/* Modern Dynamic Island — masks the PNG's painted-in iPhone-13-era notch */}
-                <div
-                  className="absolute bg-black pointer-events-none"
-                  style={{
-                    left: "34%",
-                    right: "34%",
-                    top: "2.6%",
-                    height: "4.9%",
-                    borderRadius: "999px",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.4)",
-                  }}
-                  aria-hidden="true"
-                />
               </div>
             </div>
           </div>

@@ -1,8 +1,9 @@
 import { Purchases } from "@revenuecat/purchases-capacitor";
 import { supabase } from "@/integrations/supabase/client";
 import { validateAppleReceipt } from "@/hooks/useSupabaseData";
+import { analytics } from "@/integrations/analytics";
 
-export const PRODUCT_ID = "chasehq_pro_monthly";
+const PRODUCT_ID = "chasehq_pro_monthly";
 
 // RevenueCat entitlement identifier — must match the key you set in the RC dashboard.
 // dashboard.revenuecat.com → Your project → Entitlements
@@ -10,7 +11,7 @@ const ENTITLEMENT_ID = "ChaseHQ Pro";
 
 // Get this from: dashboard.revenuecat.com → Your project → API keys → Apple App Store
 // It looks like: appl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-export const RC_APPLE_API_KEY = "appl_PQBujDvCrrvsywIbvmgnjrKvYFp";
+const RC_APPLE_API_KEY = "appl_PQBujDvCrrvsywIbvmgnjrKvYFp";
 
 // Use the global injected by Capacitor native shell instead of importing the
 // package at build time. This prevents the Capacitor bridge from initialising
@@ -55,17 +56,23 @@ export async function getActiveEntitlement(): Promise<ActiveEntitlement | null> 
   }
 }
 
+// Posts the purchase to validate-apple-receipt (which writes the `subscriptions`
+// row the entitlement gate reads), retrying a few times to ride out a brief
+// outage. Returns true if the row was written, false if every attempt failed —
+// the caller surfaces that to the user (the device's RevenueCat state is still
+// the source of truth Apple verified, so useEntitlement falls back to it).
 export async function syncSubscriptionToSupabase(
   receipt: string,
   productId: string,
   mock: boolean,
-  opts?: { onSynced?: () => void; isTrialing?: boolean; expiresAt?: string | null },
-): Promise<void> {
-  const { onSynced, isTrialing, expiresAt } = opts ?? {};
+  opts?: { onSynced?: () => void; onFailed?: () => void; isTrialing?: boolean; expiresAt?: string | null },
+): Promise<boolean> {
+  const { onSynced, onFailed, isTrialing, expiresAt } = opts ?? {};
   const clientEntitlement = (isTrialing !== undefined || expiresAt !== undefined)
     ? { isTrialing, expiresAt }
     : undefined;
   const delays = [1000, 3000, 8000];
+  let lastError = "unknown";
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, delays[attempt - 1]));
@@ -74,13 +81,19 @@ export async function syncSubscriptionToSupabase(
       const result = await validateAppleReceipt(receipt, productId, mock, false, clientEntitlement);
       if (result.ok) {
         onSynced?.();
-        return;
+        return true;
       }
+      lastError = result.error ?? "validate returned !ok";
       console.warn(`[iap] sync attempt ${attempt + 1} failed:`, result.error);
     } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
       console.warn(`[iap] sync attempt ${attempt + 1} threw:`, e);
     }
   }
+  console.error("[iap] syncSubscriptionToSupabase exhausted all retries:", lastError);
+  analytics.error("subscription_sync_failed", lastError, { productId, mock });
+  onFailed?.();
+  return false;
 }
 
 let rcConfigured = false;

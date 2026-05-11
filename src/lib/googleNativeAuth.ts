@@ -8,6 +8,7 @@ export interface GoogleAuthSignInResult {
   grantedScopes: string[];
   email: string;
   name: string;
+  serverAuthCode: string;
 }
 
 export interface GoogleAuthPlugin {

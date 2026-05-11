@@ -4,6 +4,7 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 import { buildCors } from "../_shared/cors.ts";
 import { checkRateLimit, rateLimitedResponse } from "../_shared/rate_limit.ts";
+import { logError } from "../_shared/log.ts";
 
 serve(async (req) => {
   const cors = buildCors(req.headers.get("origin"));
@@ -54,7 +55,7 @@ serve(async (req) => {
     const { data: smtpPassword, error: vaultErr } = await supabaseAdmin
       .rpc("vault_read_secret", { p_id: conn.smtp_password_secret_id });
     if (vaultErr || !smtpPassword) {
-      console.error("smtp-send vault read error:", vaultErr);
+      logError("smtp-send vault read error:", vaultErr);
       return json({ error: "Failed to retrieve SMTP credentials" }, 500);
     }
 
@@ -80,8 +81,8 @@ serve(async (req) => {
 
     return json({ success: true });
   } catch (e) {
-    console.error("smtp-send error:", e);
-    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
+    logError("smtp-send error:", e);
+    return json({ error: "Internal error" }, 500);
   }
 });
 

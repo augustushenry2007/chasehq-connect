@@ -45,7 +45,7 @@ export function useSendingMailbox() {
     if (resolved === "none" && (gmail || smtpRow)) resolved = gmail ? "gmail" : "smtp";
     setActiveSenderState(resolved);
     setLoading(false);
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
     refetch();
@@ -65,7 +65,7 @@ export function useSendingMailbox() {
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user, refetch]);
+  }, [user?.id, refetch]);
 
   const setActiveSender = useCallback(async (next: SenderType) => {
     if (!user) return;
@@ -74,7 +74,7 @@ export function useSendingMailbox() {
       .from("profiles")
       .update({ sender_type: next })
       .eq("user_id", user.id);
-  }, [user]);
+  }, [user?.id]);
 
   return {
     loading,

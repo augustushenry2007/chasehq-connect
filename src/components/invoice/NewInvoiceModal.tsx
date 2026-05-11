@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useApp } from "@/context/AppContext";
 import { createInvoice } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { newInvoiceSchema } from "@/lib/validation";
 import { differenceInDays, parseISO } from "date-fns";
 import { getStartingTone } from "@/lib/scheduleDefaults";
+import { formatDate, type Invoice as FrontendInvoice } from "@/lib/data";
 
 function toAsciiDigits(s: string): string {
   return s.replace(/[०-९০-৯٠-٩۰-۹]/g, (ch) => {
@@ -57,7 +58,7 @@ export default function NewInvoiceModal({
   onClose: () => void;
   onCreated: (invoiceId?: string) => void;
 }) {
-  const { user, isAuthenticated } = useApp();
+  const { user, isAuthenticated, isDemo, invoices, addDemoInvoice } = useApp();
   const [client, setClient] = useState(draftCache.client);
   const [email, setEmail] = useState(draftCache.email);
   const [description, setDescription] = useState(draftCache.description);
@@ -66,6 +67,10 @@ export default function NewInvoiceModal({
   const [invoiceIdInput, setInvoiceIdInput] = useState(draftCache.invoiceId);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  // Synchronous double-submit guard — `creating` state lags a frame, so a fast
+  // double-tap on touch could otherwise fire handleCreate twice and create two
+  // invoices that share the same auto-generated number.
+  const creatingRef = useRef(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Mirror local state into the module-level cache so it persists across remounts.
@@ -106,7 +111,7 @@ export default function NewInvoiceModal({
   }
 
   async function handleCreate() {
-    if (creating) return; // double-submit guard
+    if (creatingRef.current) return; // double-submit guard
     setErrorMsg(null);
 
     // zod-validate before doing anything (prevents bad data hitting DB / email).
@@ -124,8 +129,40 @@ export default function NewInvoiceModal({
     }
     const v = parsed.data;
 
+    creatingRef.current = true;
     setCreating(true);
     try {
+      // Demo mode: add the invoice to in-memory state without hitting Supabase.
+      if (isDemo) {
+        const maxN = invoices.reduce((m, r) => {
+          const n = parseInt(r.id.slice(4), 10);
+          return Number.isFinite(n) && n > m ? n : m;
+        }, 0);
+        const invoiceNumber = invoiceIdInput.trim() || `INV-${String(maxN + 1).padStart(3, "0")}`;
+        const newInv: FrontendInvoice = {
+          id: invoiceNumber,
+          dbId: crypto.randomUUID(),
+          client: v.client,
+          clientEmail: v.clientEmail,
+          description: v.description,
+          amount: v.amount,
+          dueDate: formatDate(v.dueDate),
+          dueDateISO: v.dueDate,
+          createdAtISO: new Date().toISOString(),
+          status: "Upcoming",
+          daysPastDue: 0,
+          sentFrom: "",
+          paymentDetails: "",
+        };
+        addDemoInvoice?.(newInv);
+        await new Promise((r) => setTimeout(r, 600));
+        toast.success(`Invoice ${invoiceNumber} is in — we'll handle the follow-ups.`);
+        resetDraft();
+        setErrorMsg(null);
+        onClose();
+        return;
+      }
+
       // Guest path: persist locally and let the parent advance the flow.
       if (!isAuthenticated) {
         savePending({
@@ -176,6 +213,7 @@ export default function NewInvoiceModal({
       setErrorMsg("We couldn't save that invoice. Try once more.");
       toast.error("We couldn't save that invoice. Try once more.");
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
   }
@@ -187,13 +225,13 @@ export default function NewInvoiceModal({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 overflow-y-auto animate-fade-in" onClick={onClose}>
-      <div className="bg-background w-full max-w-lg rounded-2xl p-5 my-auto max-h-[90vh] overflow-auto shadow-xl animate-page-enter" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center px-4 pt-4 pb-[80px] overflow-y-auto animate-fade-in" onClick={onClose}>
+      <div className="bg-background w-full max-w-lg rounded-3xl p-6 my-auto max-h-[90vh] overflow-auto animate-page-enter" style={{ boxShadow: "var(--shadow-card-lg)" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-bold text-foreground">New Invoice</h2>
-          <button onClick={onClose}><X className="w-5 h-5 text-muted-foreground" /></button>
+          <h2 className="text-xl font-bold text-foreground tracking-[-0.02em]">New Invoice</h2>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-muted transition-colors"><X className="w-5 h-5 text-muted-foreground" /></button>
         </div>
-        <div className="flex flex-col gap-3.5">
+        <div className="flex flex-col gap-4">
           {textFields.map((f) => (
             <div key={f.label}>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">{f.label}</label>
@@ -312,7 +350,7 @@ export default function NewInvoiceModal({
           <button
             onClick={handleCreate}
             disabled={!canSubmit}
-            className="mt-2 w-full bg-primary text-primary-foreground py-3 rounded-xl font-semibold text-sm disabled:opacity-50 transition-all duration-200 ease-out active:scale-[0.97]"
+            className="mt-2 w-full bg-primary text-primary-foreground py-3 rounded-2xl font-semibold text-sm disabled:opacity-50 transition-all duration-200 ease-out active:scale-[0.97] shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)]"
           >
             {creating ? "Creating…" : "Create Invoice"}
           </button>

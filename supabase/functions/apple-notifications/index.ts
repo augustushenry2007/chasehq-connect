@@ -173,7 +173,7 @@ serve(async (req) => {
     return json({ ok: true });
   } catch (e) {
     logError("apple-notifications error:", e);
-    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
+    return json({ error: "Internal error" }, 500);
   }
 });
 

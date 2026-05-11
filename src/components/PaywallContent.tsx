@@ -4,7 +4,8 @@ import { Check, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import MockIAPSheet from "@/components/onboarding/MockIAPSheet";
-import { purchaseSubscription, restorePurchases, isNativePlatform, syncSubscriptionToSupabase } from "@/lib/iap";
+import { purchaseSubscription, restorePurchases, isNativePlatform, syncSubscriptionToSupabase } from "@/integrations/iap";
+import { analytics } from "@/integrations/analytics";
 
 interface Props {
   onClose: () => void;
@@ -20,9 +21,9 @@ export default function PaywallContent({ onClose }: Props) {
   const ctaLabel = isActive
     ? "You're subscribed"
     : isTrialing
-    ? "Subscribe — $19.99/month"
+    ? "Subscribe — $9.99/month"
     : hasStartedTrial
-    ? "Subscribe — $19.99/month"
+    ? "Subscribe — $9.99/month"
     : "Start Your 14-Day Trial";
 
   async function runPurchaseFlow() {
@@ -33,14 +34,15 @@ export default function PaywallContent({ onClose }: Props) {
       if (!result.canceled) {
         console.error("[paywall] purchase result", result);
         toast.error(result.error);
+        analytics.error("purchase_failed", result.error ?? "unknown", { productId: "chasehq_pro_monthly" });
       }
       return;
     }
 
     if (!result.entitled) {
-      setBusy(null);
-      toast.error("The purchase didn't grant access yet. Try Restore Purchases in a moment.");
-      return;
+      // RC entitlement not immediately active in sandbox — log it but proceed.
+      // Supabase sync verifies via RC API server-side and is the source of truth.
+      analytics.error("purchase_warning", "not_entitled_after_purchase", { productId: "chasehq_pro_monthly" });
     }
 
     void syncSubscriptionToSupabase(result.receipt!, result.productId ?? "chasehq_pro_monthly", result.mock ?? false, {
@@ -48,7 +50,14 @@ export default function PaywallContent({ onClose }: Props) {
     });
 
     setBusy(null);
-    toast.success("You're subscribed — thank you!");
+    const isTrialing = result.isTrialing ?? !result.entitled;
+    if (isTrialing) {
+      analytics.trialStarted(result.productId ?? "chasehq_pro_monthly");
+      toast.success("Your 14-day free trial has started!");
+    } else {
+      analytics.subscriptionCreated(result.productId ?? "chasehq_pro_monthly", "monthly");
+      toast.success("You're subscribed — thank you!");
+    }
     onClose();
   }
 
@@ -72,6 +81,7 @@ export default function PaywallContent({ onClose }: Props) {
       setBusy(null);
       console.error("[paywall] restore result", result);
       toast.error(result.error);
+      analytics.error("restore_failed", result.error ?? "unknown", { productId: "chasehq_pro_monthly" });
       return;
     }
 
@@ -81,6 +91,7 @@ export default function PaywallContent({ onClose }: Props) {
 
     setBusy(null);
     toast.success("You're all set — welcome back.");
+    analytics.track("purchase_restored", { plan: result.productId ?? "chasehq_pro_monthly" });
   }
 
   function primaryAction() {
@@ -103,7 +114,7 @@ export default function PaywallContent({ onClose }: Props) {
 
         <div className="mt-8 bg-card border border-border rounded-2xl p-5">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-3xl font-bold text-foreground">$19.99</span>
+            <span className="text-3xl font-bold text-foreground">$9.99</span>
             <span className="text-sm text-muted-foreground">/month</span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">

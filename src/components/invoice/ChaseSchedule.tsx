@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/context/AppContext";
 import { CoachHint } from "@/components/onboarding/CoachHint";
@@ -13,6 +13,7 @@ import {
   type SchedulePreset,
 } from "@/lib/scheduleDefaults";
 import { scheduleForInvoice, cancelForInvoice } from "@/lib/localNotifications";
+import { createScheduleForInvoice } from "@/hooks/useNotifications";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 import type { Invoice } from "@/lib/data";
 import { Check, ChevronDown, Loader2, Pause, Play, RotateCcw } from "lucide-react";
@@ -145,20 +146,25 @@ function StepRow({
       <div className="flex-1 min-w-0">
         {editMode && status !== "sent" ? (
           <div className="flex items-center gap-1.5 flex-wrap">
-            <select
-              value={step.tone}
-              onChange={(e) => onToneChange(e.target.value as ScheduleStep["tone"])}
-              className="text-xs font-medium bg-muted border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+            <button
+              type="button"
+              onClick={() => {
+                const next = TONE_OPTIONS[(TONE_OPTIONS.indexOf(step.tone) + 1) % TONE_OPTIONS.length];
+                onToneChange(next);
+              }}
+              className="flex items-center gap-1 text-xs font-medium bg-muted border border-border rounded-md px-2.5 py-1 text-foreground hover:border-primary/40 transition-colors"
             >
-              {TONE_OPTIONS.map((t) => <option key={t}>{t}</option>)}
-            </select>
+              {step.tone} <ChevronDown className="w-3 h-3 opacity-50" />
+            </button>
             <span className="text-xs text-muted-foreground">+</span>
             <input
-              type="number"
-              min={1}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               value={step.offset_days}
-              onChange={(e) => onOffsetChange(Math.max(1, parseInt(e.target.value) || 1))}
+              onChange={(e) => onOffsetChange(Math.max(1, parseInt(e.target.value.replace(/\D/g, "")) || 1))}
               onBlur={onOffsetBlur}
+              onKeyDown={(e) => e.stopPropagation()}
               className="w-14 px-2 py-1 text-xs font-bold text-primary bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
             <span className="text-xs text-muted-foreground">days after due</span>
@@ -250,17 +256,60 @@ export default function ChaseSchedule({
   const [scheduleOpen, setScheduleOpen] = useState(true);
   const [presetOverrideNote, setPresetOverrideNote] = useState<string | null>(null);
 
+  // True once the user has changed anything in this view — guards against a slow
+  // initial fetch resolving after an edit and clobbering it with stale data.
+  const userTouchedRef = useRef(false);
+  // Serializes persist() runs so two overlapping multi-statement saves can't
+  // interleave (run B canceling run A's freshly-inserted notification rows, then
+  // the two followup_schedules upserts landing in arbitrary order).
+  const persistChainRef = useRef<Promise<unknown>>(Promise.resolve());
+
   useEffect(() => {
+    userTouchedRef.current = false;
+    if (invoice.dbId === "guest") {
+      setSteps(buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), currentPreset));
+      setSent([]);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     Promise.all([
       supabase.from("followup_schedules").select("steps, paused").eq("invoice_id", invoice.dbId).maybeSingle(),
       supabase.from("followups").select("id, sent_at, tone, subject").eq("invoice_id", invoice.dbId).order("sent_at", { ascending: true }),
     ]).then(([sched, followups]) => {
-      if (cancelled) return;
+      if (cancelled || userTouchedRef.current) return;
       if (sched.data) {
         const stored = (sched.data.steps as unknown as ScheduleStep[]);
         setSteps(stored?.length ? stored : buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), currentPreset));
         setPaused(sched.data.paused);
+      } else if (user?.id) {
+        // No followup_schedules row: createScheduleForInvoice failed silently at
+        // invoice creation (a network blip), leaving this invoice with no DB rows,
+        // no in-app bell entries, and no armed OS notifications. Repair it now —
+        // write the rows + arm notifications, then read back the persisted steps so
+        // the timeline reflects what's actually backing it instead of a fake-armed
+        // placeholder schedule.
+        setSteps(buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), currentPreset));
+        createScheduleForInvoice(user.id, {
+          id: invoice.dbId,
+          client: invoice.client,
+          amount: invoice.amount,
+          due_date: invoice.dueDateISO,
+          created_at: invoice.createdAtISO,
+        }).then(async () => {
+          if (cancelled || userTouchedRef.current) return;
+          const { data } = await supabase
+            .from("followup_schedules")
+            .select("steps, paused")
+            .eq("invoice_id", invoice.dbId)
+            .maybeSingle();
+          if (cancelled || userTouchedRef.current || !data) return;
+          const stored = data.steps as unknown as ScheduleStep[] | undefined;
+          if (stored?.length) {
+            setSteps(stored);
+            setPaused(data.paused);
+          }
+        });
       } else {
         setSteps(buildScheduleForLateness(invoice.dueDateISO, new Date().toISOString(), currentPreset));
       }
@@ -270,34 +319,53 @@ export default function ChaseSchedule({
     return () => { cancelled = true; };
   }, [invoice.dbId, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function persist(nextSteps: ScheduleStep[], nextPaused: boolean, silent = false, message?: string) {
-    if (!user?.id) return;
-    setSaving(true);
-    await supabase.from("followup_schedules").upsert(
-      { invoice_id: invoice.dbId, user_id: user.id, steps: nextSteps as unknown as never, timezone: getUserTimezone(), paused: nextPaused },
-      { onConflict: "invoice_id" },
-    );
-    await supabase.from("notifications").update({ status: "canceled" }).eq("invoice_id", invoice.dbId).eq("status", "pending");
-    if (!nextPaused) {
-      const rows = nextSteps.map((step, idx) => ({
-        user_id: user.id!,
-        invoice_id: invoice.dbId,
-        schedule_step_index: idx,
-        type: step.type,
-        title: buildNotificationTitle(step.type, invoice.client, invoice.amount),
-        body: buildNotificationBody(step.type, invoice.client),
-        scheduled_for: computeStepDate(invoice.dueDateISO, step.offset_days),
-        status: "pending" as const,
-      }));
-      if (rows.length) await supabase.from("notifications").insert(rows);
-    }
-    const anchorInvoice = { dueDateISO: invoice.dueDateISO, createdAtISO: invoice.createdAtISO };
-    await cancelForInvoice(invoice.dbId);
-    if (!nextPaused) {
-      await scheduleForInvoice(invoice.dbId, nextSteps, anchorInvoice, invoice.client, invoice.amount);
-    }
-    setSaving(false);
-    if (!silent) toast.success(message ?? "Schedule saved.");
+  function persist(nextSteps: ScheduleStep[], nextPaused: boolean, silent = false, message?: string): Promise<void> {
+    if (!user?.id) return Promise.resolve();
+    const userId = user.id;
+    userTouchedRef.current = true;
+    const run = async () => {
+      setSaving(true);
+      let ok = true;
+      try {
+        await supabase.from("followup_schedules").upsert(
+          { invoice_id: invoice.dbId, user_id: userId, steps: nextSteps as unknown as never, timezone: getUserTimezone(), paused: nextPaused },
+          { onConflict: "invoice_id" },
+        );
+        await supabase.from("notifications").delete().eq("invoice_id", invoice.dbId).eq("status", "pending");
+        if (!nextPaused) {
+          const rows = nextSteps.map((step, idx) => ({
+            user_id: userId,
+            invoice_id: invoice.dbId,
+            schedule_step_index: idx,
+            type: step.type,
+            title: buildNotificationTitle(step.type, invoice.client, invoice.amount),
+            body: buildNotificationBody(step.type, invoice.client),
+            scheduled_for: computeStepDate(invoice.dueDateISO, step.offset_days),
+            status: "pending" as const,
+          }));
+          if (rows.length) await supabase.from("notifications").insert(rows);
+        }
+        const anchorInvoice = { dueDateISO: invoice.dueDateISO, createdAtISO: invoice.createdAtISO };
+        await cancelForInvoice(invoice.dbId, Math.max(8, nextSteps.length));
+        if (!nextPaused) {
+          await scheduleForInvoice(invoice.dbId, nextSteps, anchorInvoice, invoice.client, invoice.amount);
+        }
+      } catch (e) {
+        ok = false;
+        console.error("[ChaseSchedule] persist failed:", e);
+      } finally {
+        setSaving(false);
+      }
+      if (!silent) {
+        if (ok) toast.success(message ?? "Schedule saved.");
+        else toast.error("Couldn't save the schedule — give it another try.");
+      }
+    };
+    // Chain so two overlapping persists don't interleave; run() never throws, so
+    // the chain (and the promise returned to callers) never rejects.
+    const next = persistChainRef.current.then(run, run);
+    persistChainRef.current = next;
+    return next;
   }
 
   function flashSaved() {
@@ -399,7 +467,7 @@ export default function ChaseSchedule({
 
   if (loading) {
     return (
-      <div className="mt-4 bg-card border border-border rounded-2xl overflow-hidden">
+      <div className="mt-4 bg-card border border-border rounded-2xl overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <div className="h-4 w-28 bg-muted rounded animate-pulse" />
           <div className="h-6 w-40 bg-muted rounded-full animate-pulse" />
@@ -421,7 +489,7 @@ export default function ChaseSchedule({
   }
 
   return (
-    <div className="mt-4 bg-card border border-border rounded-2xl overflow-hidden">
+    <div className="mt-4 bg-card border border-border rounded-2xl overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
       {/* Collapsible header */}
       <CoachHint
         hintKey="chase_schedule"
@@ -433,7 +501,7 @@ export default function ChaseSchedule({
           onClick={() => setScheduleOpen((o) => !o)}
           className="w-full flex items-center justify-between px-4 py-3"
         >
-          <span className="text-sm font-semibold text-foreground">Chase Schedule</span>
+          <span className="text-[15px] font-semibold text-foreground">Chase Schedule</span>
           <ChevronDown
             className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${scheduleOpen ? "rotate-180" : ""}`}
           />

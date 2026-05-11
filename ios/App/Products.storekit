@@ -81,7 +81,7 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "19.99",
+          "displayPrice" : "9.99",
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "871A7794",
@@ -92,8 +92,8 @@
           },
           "localizations" : [
             {
-              "description" : "",
-              "displayName" : "",
+              "description" : "Unlimited AI-drafted follow-ups, cancel anytime",
+              "displayName" : "ChaseHQ Pro Monthly",
               "locale" : "en_US"
             }
           ],

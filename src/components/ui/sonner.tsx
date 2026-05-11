@@ -15,11 +15,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
       mobileOffset="calc(env(safe-area-inset-top, 0px) + 16px)"
       toastOptions={{
         classNames: {
-          toast:
-            "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",
-          description: "group-[.toast]:text-muted-foreground",
-          actionButton: "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
-          cancelButton: "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
+          toast: "bg-card border border-border rounded-2xl shadow-[var(--shadow-card-lg)] text-foreground",
+          title: "text-[14px] font-semibold text-foreground",
+          description: "text-[13px] text-muted-foreground",
+          success: "border-emerald-200 dark:border-emerald-800",
+          error: "border-destructive/30",
+          actionButton: "bg-primary text-primary-foreground text-xs font-semibold rounded-lg px-3 py-1",
+          cancelButton: "bg-muted text-muted-foreground text-xs rounded-lg px-3 py-1",
         },
       }}
       {...props}

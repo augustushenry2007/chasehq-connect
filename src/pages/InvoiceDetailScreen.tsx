@@ -5,14 +5,13 @@ import { cancelForInvoice } from "@/lib/localNotifications";
 import { getInvoiceById, formatUSD, formatDate, type Invoice, type InvoiceStatus } from "@/lib/data";
 import { FileX } from "lucide-react";
 import type { ScheduleStep } from "@/lib/scheduleDefaults";
-import { getStartingTone } from "@/lib/scheduleDefaults";
 import { readPending, type PendingInvoice } from "@/lib/localInvoice";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 import { StatusBadge } from "@/components/StatusBadge";
-import { CheckCircle2, ChevronDown, MessageSquare, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, Trash2 } from "lucide-react";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { toast } from "sonner";
-import { analytics } from "@/lib/analytics";
+import { analytics } from "@/integrations/analytics";
 import ChaseSchedule from "@/components/invoice/ChaseSchedule";
 import AIDraftComposer from "@/components/invoice/AIDraftComposer";
 import { useApp } from "@/context/AppContext";
@@ -90,6 +89,8 @@ export default function InvoiceDetailScreen() {
           },
         },
       });
+    } else {
+      toast.error("Couldn't mark as paid. Try again.");
     }
     setMarkingPaid(false);
   }
@@ -119,19 +120,13 @@ export default function InvoiceDetailScreen() {
     }
   }
 
-  const startingTone = useMemo(() => {
-    if (!invoice) return undefined;
-    const dpd = Math.max(0, Math.floor((Date.now() - new Date(invoice.dueDateISO).getTime()) / 86_400_000));
-    return dpd > 0 ? getStartingTone(invoice.dueDateISO) : undefined;
-  }, [invoice?.dueDateISO]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const [showNewModal, setShowNewModal] = useState(false);
 
   if (!isGuestPreview && !invoicesLoading && !invoice) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8 text-center">
-        <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center">
-          <FileX className="w-7 h-7 text-muted-foreground" />
+        <div className="w-14 h-14 rounded-2xl bg-[hsl(var(--warm-50))] flex items-center justify-center shadow-[var(--shadow-card)]">
+          <FileX className="w-7 h-7 text-primary" />
         </div>
         <div>
           <p className="text-lg font-bold text-foreground">We can't find this invoice</p>
@@ -157,7 +152,17 @@ export default function InvoiceDetailScreen() {
     );
   }
 
-  if (!invoice) return null;
+  if (!invoice) {
+    if (invoicesLoading) {
+      return (
+        <div className="h-screen bg-background flex items-center justify-center">
+          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        </div>
+      );
+    }
+    navigate(-1);
+    return null;
+  }
 
   const daysPastDue = Math.max(0, Math.floor((Date.now() - new Date(invoice.dueDateISO).getTime()) / 86_400_000));
 
@@ -171,8 +176,8 @@ export default function InvoiceDetailScreen() {
   ];
 
   return (
-    <div className="h-screen overflow-y-auto bg-background pb-24 animate-page-enter">
-      <div className="sticky top-0 z-10 bg-background flex items-center justify-between pr-3">
+    <div className="h-screen overflow-y-auto bg-background pb-24">
+      <div className="sticky top-0 z-10 bg-background border-b border-border/40 flex items-center justify-between pr-3">
         <ScreenHeader
           title="Back to Follow-ups"
           fallbackPath="/invoices"
@@ -214,26 +219,14 @@ export default function InvoiceDetailScreen() {
         {/* Header */}
         <div className="flex items-start justify-between mt-2">
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold text-foreground truncate capitalize">{invoice.client}</h1>
-            <p className="text-sm text-muted-foreground truncate">{invoice.description}</p>
+            <h1 className="text-[clamp(22px,5.5vw,28px)] font-bold text-foreground truncate capitalize tracking-[-0.02em]">{invoice.client}</h1>
+            <p className="text-sm text-muted-foreground truncate mt-0.5 leading-[1.4]">{invoice.description}</p>
           </div>
           <div className="text-right shrink-0 ml-3">
-            <p className="text-xl font-bold text-foreground">{formatUSD(invoice.amount)}</p>
+            <p className="text-[clamp(22px,5.5vw,28px)] font-bold text-foreground tracking-[-0.02em]">{formatUSD(invoice.amount)}</p>
             <div className="mt-1.5"><StatusBadge status={invoice.status} /></div>
           </div>
         </div>
-
-        {/* Client reply */}
-        {invoice.clientReply && (
-          <div className="mt-4 bg-primary/5 border border-primary/20 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <MessageSquare className="w-3.5 h-3.5 text-primary" />
-              <span className="text-xs font-semibold text-primary">Client replied · {invoice.clientReply.receivedAt}</span>
-            </div>
-            <p className="text-sm text-foreground italic">"{invoice.clientReply.snippet}"</p>
-            <p className="text-xs text-muted-foreground mt-1">From: {invoice.clientReply.senderEmail}</p>
-          </div>
-        )}
 
         {/* Chase Schedule */}
         {isAuthenticated && invoice.status !== "Paid" && (
@@ -241,7 +234,7 @@ export default function InvoiceDetailScreen() {
         )}
 
         {/* Details */}
-        <div className="mt-4 bg-card border border-border rounded-2xl overflow-hidden">
+        <div className="mt-4 bg-card border border-border rounded-2xl overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
           <button onClick={() => setDetailsOpen(!detailsOpen)} className="w-full flex items-center justify-between px-4 py-3">
             <span className="text-sm font-semibold text-foreground">Invoice Details</span>
             <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${detailsOpen ? "rotate-180" : ""}`} />
@@ -264,7 +257,7 @@ export default function InvoiceDetailScreen() {
             <AIDraftComposer
               invoice={invoice}
               onSent={() => setScheduleRefreshKey((k) => k + 1)}
-              defaultTone={activeTone ?? startingTone}
+              defaultTone={activeTone ?? undefined}
             />
           </div>
         )}
