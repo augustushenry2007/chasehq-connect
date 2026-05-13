@@ -17,8 +17,9 @@ export default function TermsOfUse() {
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">1. Acceptance</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
               By creating an account or using ChaseHQ (the "Service"), you agree to these Terms
-              of Use. If you do not agree, do not use the Service. The Service is intended for
-              use by individuals and businesses located in the United States.
+              of Use. If you do not agree, do not use the Service. The Service is available
+              worldwide to individuals and businesses, subject to availability in your country's
+              Apple App Store.
             </p>
           </section>
 
@@ -50,7 +51,7 @@ export default function TermsOfUse() {
               <li>Send harassing, threatening, or unlawful content.</li>
               <li>Impersonate another person or entity.</li>
               <li>Reverse engineer, scrape, or attempt to disrupt the Service.</li>
-              <li>Use the Service in violation of the CAN-SPAM Act or other U.S. laws.</li>
+              <li>Use the Service in violation of any applicable anti-spam, email-marketing, or consumer-protection laws in your jurisdiction (including CAN-SPAM in the U.S., CASL in Canada, the GDPR/ePrivacy rules in the EU/UK, and similar laws elsewhere).</li>
             </ul>
           </section>
 
@@ -66,9 +67,10 @@ export default function TermsOfUse() {
             </p>
             <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
               You remain solely responsible for the content of every follow-up you author and
-              send through ChaseHQ, including compliance with applicable email and consumer
-              protection laws (such as the CAN-SPAM Act). We may suspend sending from your
-              account if we detect abuse or repeated bounces.
+              send through ChaseHQ, including compliance with applicable email, anti-spam, and
+              consumer-protection laws in your jurisdiction (such as the CAN-SPAM Act in the
+              U.S., CASL in Canada, and GDPR/ePrivacy in the EU/UK). We may suspend sending from
+              your account if we detect abuse or repeated bounces.
             </p>
           </section>
 
@@ -156,9 +158,12 @@ export default function TermsOfUse() {
           <section>
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">13. Governing Law &amp; Venue</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
-              These Terms are governed by the laws of the Republic of India. Any dispute arising
-              out of or related to the Service shall be subject to the exclusive jurisdiction of
-              the competent courts of Bhopal, Madhya Pradesh, India.
+              These Terms are governed by the laws of the Republic of India, without prejudice
+              to any mandatory consumer-protection rights you have under the law of your country
+              of residence. Any dispute arising out of or related to the Service shall be subject
+              to the exclusive jurisdiction of the competent courts of Bhopal, Madhya Pradesh,
+              India, except where mandatory local law gives you the right to bring proceedings
+              in your country of residence.
             </p>
           </section>
 

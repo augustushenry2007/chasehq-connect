@@ -16,6 +16,7 @@ import type { UserProfile } from "@/lib/userProfile/types";
 import { readLocalUserProfile, clearLocalUserProfile, clearDemoUserProfile, readProfileCache, writeProfileCache } from "@/lib/userProfile/storage";
 import { toTitleCase } from "@/lib/textCase";
 import { analytics } from "@/integrations/analytics";
+import { FLOW_STORAGE_KEY } from "@/flow/states";
 import { toast } from "sonner";
 
 type DbInvoice = Tables<"invoices">;
@@ -118,7 +119,13 @@ function AppProviderDemo({ children }: { children: ReactNode }) {
     userProfile,
     refreshUserProfile,
     signIn: () => {},
-    signOut: () => { clearDemoUserProfile(); localStorage.removeItem("chasehq_demo_mode"); clearGuestOnboarded(); window.location.reload(); },
+    signOut: () => {
+      clearDemoUserProfile();
+      localStorage.removeItem("chasehq_demo_mode");
+      localStorage.removeItem(FLOW_STORAGE_KEY);
+      clearGuestOnboarded();
+      window.location.reload();
+    },
     completeOnboarding: async () => { setIsAuthenticated(true); setHasCompletedOnboarding(true); },
     restartOnboarding: async () => {}, updateOnboardingStep: async () => {},
     updateNotifications: () => {}, updateDisplayName: async () => {},

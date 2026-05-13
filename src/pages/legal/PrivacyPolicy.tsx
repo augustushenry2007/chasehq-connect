@@ -17,7 +17,7 @@ export default function PrivacyPolicy() {
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">1. Who we are</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
               ChaseHQ ("we", "us") provides invoice follow-up software to freelancers and small
-              businesses in the United States. This policy explains what information we collect,
+              businesses worldwide. This policy explains what information we collect,
               how we use it, and the rights you have.
             </p>
           </section>
@@ -87,10 +87,21 @@ export default function PrivacyPolicy() {
               <li>Export a copy of your data from <span className="text-foreground font-medium">Settings → Data controls</span>.</li>
             </ul>
             <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
-              California residents have additional rights under the CCPA/CPRA, including the
-              right to know, delete, and opt out of the sale or sharing of personal information.
-              We do not sell or share personal information as those terms are defined under the
-              CCPA.
+              If you are a California resident, you have additional rights under the CCPA/CPRA,
+              including the right to know, delete, and opt out of the sale or sharing of personal
+              information. We do not sell or share personal information as those terms are
+              defined under the CCPA.
+            </p>
+            <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
+              If you are located in the European Economic Area or the United Kingdom, you have
+              rights under the GDPR (and UK GDPR), including the right to access, rectify, erase,
+              restrict or object to processing, data portability, and to lodge a complaint with
+              your local supervisory authority. You can exercise these rights from within the
+              app (Settings → Data controls) or by contacting{" "}
+              <a href="mailto:support@chasehq.app" className="text-primary underline">
+                support@chasehq.app
+              </a>
+              .
             </p>
           </section>
 
@@ -147,9 +158,12 @@ export default function PrivacyPolicy() {
           <section>
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">11. Governing Law &amp; Contact</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
-              This policy is governed by the laws of the Republic of India. Disputes shall be
-              subject to the exclusive jurisdiction of the competent courts of Bhopal, Madhya
-              Pradesh, India. Questions or requests can be sent to{" "}
+              This policy is governed by the laws of the Republic of India, without prejudice to
+              any mandatory consumer-protection rights you have under the law of your country of
+              residence. Disputes shall be subject to the exclusive jurisdiction of the competent
+              courts of Bhopal, Madhya Pradesh, India, except where mandatory local law gives you
+              the right to bring proceedings in your country of residence. Questions or requests
+              can be sent to{" "}
               <a href="mailto:support@chasehq.app" className="text-primary underline">
                 support@chasehq.app
               </a>

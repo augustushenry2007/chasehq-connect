@@ -26,6 +26,12 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
     if (authError || !user) return json({ error: "Invalid session" }, 401);
 
+    // The App Review reviewer account is seeded by reviewer-signin and must
+    // persist across reviews — refuse to delete it from inside the app.
+    if (user.email?.toLowerCase() === "appreview@chasehq.app") {
+      return json({ error: "This account cannot be deleted." }, 403);
+    }
+
     const admin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!

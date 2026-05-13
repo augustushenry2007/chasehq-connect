@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useApp } from "@/context/AppContext";
 import { supabase } from "@/integrations/supabase/client";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { FLOW_STORAGE_KEY } from "@/flow/states";
 import appLogo from "@/assets/app-logo.png";
 
 function useDemoTap() {
@@ -15,7 +16,11 @@ function useDemoTap() {
     last.current = now;
     if (++count.current >= 7) {
       count.current = 0;
-      localStorage.setItem("chasehq_demo_mode", localStorage.getItem("chasehq_demo_mode") === "1" ? "0" : "1");
+      const next = localStorage.getItem("chasehq_demo_mode") === "1" ? "0" : "1";
+      localStorage.setItem("chasehq_demo_mode", next);
+      // Force next boot to start at APP_LAUNCH so FlowBootstrap's demo branch fires;
+      // otherwise the persisted LANDING state shortcuts straight back to /welcome.
+      localStorage.removeItem(FLOW_STORAGE_KEY);
       window.location.reload();
     }
   };
@@ -23,6 +28,8 @@ function useDemoTap() {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESEND_COOLDOWN_SEC = 60;
+const REVIEWER_EMAIL = "appreview@chasehq.app";
+const REVIEWER_CODE = "123456";
 
 export default function WelcomeScreen() {
   const { isAuthenticated } = useApp();
@@ -51,6 +58,12 @@ export default function WelcomeScreen() {
     if (!EMAIL_RE.test(trimmed)) {
       toast.error("That doesn't look like a valid email address.");
       return false;
+    }
+    // App Review reviewer account: bypass the real OTP send (mailbox isn't
+    // reachable). The fixed code is verified server-side in reviewer-signin.
+    if (trimmed === REVIEWER_EMAIL) {
+      setResendCountdown(RESEND_COOLDOWN_SEC);
+      return true;
     }
     setSending(true);
     try {
@@ -89,8 +102,35 @@ export default function WelcomeScreen() {
     if (verifying) return;
     setVerifying(true);
     try {
+      const trimmedEmail = email.trim().toLowerCase();
+
+      // App Review path: the reviewer-signin function trades the fixed code
+      // for a magic-link token_hash that establishes a real session.
+      if (trimmedEmail === REVIEWER_EMAIL && token === REVIEWER_CODE) {
+        const { data, error: fnError } = await supabase.functions.invoke<{ token_hash: string }>(
+          "reviewer-signin",
+          { body: { email: trimmedEmail, code: token } },
+        );
+        if (fnError || !data?.token_hash) {
+          toast.error("That code didn't work. Try again.");
+          setCode("");
+          setVerifying(false);
+          return;
+        }
+        const { error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: data.token_hash,
+          type: "magiclink",
+        });
+        if (verifyError) {
+          toast.error(verifyError.message || "Sign-in failed. Try again.");
+          setCode("");
+          setVerifying(false);
+        }
+        return;
+      }
+
       const { error } = await supabase.auth.verifyOtp({
-        email: email.trim().toLowerCase(),
+        email: trimmedEmail,
         token,
         type: "email",
       });
@@ -123,7 +163,12 @@ export default function WelcomeScreen() {
         <img
           src={appLogo}
           alt="ChaseHQ logo"
-          className="w-20 h-20 rounded-2xl mb-4 animate-fade-in shadow-sm"
+          role="button"
+          aria-label="ChaseHQ logo"
+          // cursor-pointer + role=button is what makes iOS WKWebView deliver
+          // click events reliably to non-interactive <img> elements — without
+          // these, the 7-tap demo-mode gesture silently drops taps.
+          className="w-20 h-20 rounded-2xl mb-4 animate-fade-in shadow-sm cursor-pointer"
           style={{ animationDelay: "0ms", animationFillMode: "both" }}
           onClick={handleDemoTap}
         />

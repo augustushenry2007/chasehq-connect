@@ -34,7 +34,7 @@ export function FlowBootstrap() {
     if (state !== FlowState.APP_LAUNCH) {
       // Already mid-flow from a persisted state. If user is signed out, force LANDING.
       if (!isAuthenticated) {
-        if (import.meta.env.DEV) console.log("[FLOW BOOT] Persisted state with no session → SIGN_OUT");
+        if (import.meta.env.DEV) console.log("[FLOW BOOT] Persisted state with no session → SIGN_OUT (state was", state, ")");
         send("SIGN_OUT");
         return;
       }
@@ -48,7 +48,14 @@ export function FlowBootstrap() {
     }
 
     if (!isAuthenticated) {
-      if (import.meta.env.DEV) console.log("[FLOW BOOT] No session → BOOT_NO_SESSION");
+      const isDemo = typeof window !== "undefined"
+        && localStorage.getItem("chasehq_demo_mode") === "1";
+      if (isDemo) {
+        if (import.meta.env.DEV) console.log("[FLOW BOOT] Demo flag set → ONBOARDING (mock-data path)");
+        send("BOOT_AUTHED_FRESH_SIGNUP");
+        return;
+      }
+      if (import.meta.env.DEV) console.log("[FLOW BOOT] No session → BOOT_NO_SESSION (demo flag was", localStorage.getItem("chasehq_demo_mode"), ")");
       send("BOOT_NO_SESSION");
       return;
     }
