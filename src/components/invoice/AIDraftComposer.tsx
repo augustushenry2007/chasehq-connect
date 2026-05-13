@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { RefreshCw, Send, Loader2, AlertCircle, Info, Check, CheckCircle, Shuffle, ChevronDown } from "lucide-react";
+import { RefreshCw, Send, Loader2, AlertCircle, Info, CheckCircle, Shuffle, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
 import { generateFollowupStream, sendFollowupEmail } from "@/hooks/useSupabaseData";
@@ -8,15 +8,9 @@ import { advanceScheduleAfterSend } from "@/hooks/useNotifications";
 import { getDefaultDraft, getTemplateDraft, TEMPLATE_COUNT, type Tone } from "./DraftTemplates";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { useActionGate } from "@/hooks/useActionGate";
-import { useGmailConnection } from "@/hooks/useGmailConnection";
 import { useApp } from "@/context/AppContext";
-import { useFlow } from "@/flow/FlowMachine";
 import { supabase } from "@/integrations/supabase/client";
-import { startGoogleOAuth, OAUTH_USER_CANCELED } from "@/integrations/oauth";
-import { isNativePlatform, restorePurchases, syncSubscriptionToSupabase } from "@/integrations/iap";
-import { readPending } from "@/lib/localInvoice";
-import { STORAGE_KEYS } from "@/lib/storageKeys";
-import { GoogleIcon } from "@/components/GoogleIcon";
+import { restorePurchases, syncSubscriptionToSupabase } from "@/integrations/iap";
 import { CoachHint } from "@/components/onboarding/CoachHint";
 import {
   AlertDialog,
@@ -46,16 +40,13 @@ function formatAgo(ms: number): string {
   return `${hours} hour${hours === 1 ? "" : "s"} ago`;
 }
 
-type SendSheetState = "closed" | "signed_out" | "needs_gmail" | "needs_trial" | "ready";
+type SendSheetState = "closed" | "needs_trial" | "ready";
 
 export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invoice: Invoice; onSent?: () => void; defaultTone?: Tone }) {
   const { user, notifications, fullName, userProfile, isDemo } = useApp();
-  const { send: flowSend } = useFlow();
   const entitlement = useEntitlement();
-  const { canSend, trialEndsAt, refetch: refetchEntitlement, isTrialing, isActive, isPastDue, hasFreeSend, followupsSent } = entitlement;
+  const { trialEndsAt, refetch: refetchEntitlement, hasFreeSend } = entitlement;
   const gate = useActionGate();
-  const gmailConn = useGmailConnection();
-  const [gmailConnecting, setGmailConnecting] = useState(false);
 
   const [tone, setTone] = useState<Tone>((defaultTone ?? notifications.defaultTone) as Tone);
   const [currentSubject, setCurrentSubject] = useState("");
@@ -70,7 +61,6 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
   const [isAiGenerated, setIsAiGenerated] = useState(false);
   const [templateIndex, setTemplateIndex] = useState(0);
   const [pendingTone, setPendingTone] = useState<Tone | null>(null);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [lastSentAt, setLastSentAt] = useState<Date | null>(null);
 
   // Send Sheet — single state machine that replaces all auth/paywall/confirm modals
@@ -127,56 +117,6 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
     setTemplateIndex(0);
     userEditedRef.current = false;
   }, [tone, invoice]);
-
-  // Resume the correct sheet state after Google OAuth.
-  // Routes immediately once the gate settles — no refetch dance needed because
-  // useEntitlement's count ?? 0 coercion already gives the right answer.
-  useEffect(() => {
-    if (!user) return;
-    const intent = sessionStorage.getItem(STORAGE_KEYS.SEND_AFTER_AUTH) as "send" | "generate" | null;
-    if (!intent) return;
-    if (gate.state === "loading") return;
-
-    sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
-
-    if (import.meta.env.DEV) {
-      console.log("[POST_OAUTH_RESUME]", {
-        intent, gateState: gate.state, canExecute: gate.canExecute,
-        hasFreeSend: entitlement.hasFreeSend, t: performance.now(),
-      });
-    }
-
-    if (gate.canExecute) {
-      if (intent === "generate") {
-        void handleGenerate();
-        // Generate path: no sheet, two-rAF is enough.
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          window.dispatchEvent(new Event("chasehq:oauth-signal"));
-        }));
-        return;
-      }
-      setSendSheet("ready");
-      setBodyExpanded(false);
-    } else {
-      setSendSheetIntent(intent);
-      setIapError(null);
-      setSendSheet("needs_trial");
-    }
-    // Wait 400ms before signalling overlay dismissal — enough for React to commit
-    // setSendSheet (0-32ms) and animate-slide-in-up to complete (260ms), with buffer.
-    window.setTimeout(() => {
-      window.dispatchEvent(new Event("chasehq:oauth-signal"));
-    }, 400);
-  }, [user?.id, gate.state, gate.canExecute]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When Gmail consent completes while the needs_gmail sheet is open, auto-advance.
-  useEffect(() => {
-    if (gmailConn.gmail.connected && sendSheet === "needs_gmail") {
-      setGmailConnecting(false);
-      setSendSheet("ready");
-      setBodyExpanded(false);
-    }
-  }, [gmailConn.gmail.connected, sendSheet]);
 
   function handleCycleTemplate() {
     const nextIndex = (templateIndex + 1) % TEMPLATE_COUNT;
@@ -278,17 +218,13 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
   function openSendSheet(intent: "send" | "generate") {
     setSendSheetIntent(intent);
     setIapError(null);
-    if (!user || gate.panelVariant === "guest") {
-      setSendSheet("signed_out");
-    } else {
-      if (import.meta.env.DEV) {
-        console.log("[NEEDS_TRIAL via openSendSheet]", {
-          gateState: gate.state, canExecute: gate.canExecute,
-          hasFreeSend: entitlement.hasFreeSend, panelVariant: gate.panelVariant,
-        });
-      }
-      setSendSheet("needs_trial");
+    if (import.meta.env.DEV) {
+      console.log("[NEEDS_TRIAL via openSendSheet]", {
+        gateState: gate.state, canExecute: gate.canExecute,
+        hasFreeSend: entitlement.hasFreeSend, panelVariant: gate.panelVariant,
+      });
     }
+    setSendSheet("needs_trial");
   }
 
   function handleSendClick() {
@@ -296,37 +232,13 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
     // if the user taps again before noteFollowupSent() commits (2–5s window).
     if (sendInFlight()) return;
 
-    if (gate.state === "loading" || entitlement.loading || gmailConn.loading) return;
+    if (gate.state === "loading" || entitlement.loading) return;
     if (!entitlement.canSend) {
       openSendSheet("send");
       return;
     }
-    // If user signed in with Google but hasn't granted gmail.send yet,
-    // surface the consent step before letting them send via the fallback.
-    if (gmailConn.signedInWithGoogle && gmailConn.needsSendPermission) {
-      setSendSheetIntent("send");
-      setIapError(null);
-      setSendSheet("needs_gmail");
-      return;
-    }
     setSendSheet("ready");
     setBodyExpanded(false);
-  }
-
-  async function handleConnectGmail() {
-    if (gmailConnecting) return;
-    setGmailConnecting(true);
-    try {
-      const { error } = await gmailConn.connectGmail();
-      if (error) {
-        toast.error(error || "Couldn't open Gmail consent. Try again.");
-        setGmailConnecting(false);
-      }
-      // On success the page redirects to Google — no further state to set.
-    } catch {
-      toast.error("Couldn't open Gmail consent. Try again.");
-      setGmailConnecting(false);
-    }
   }
 
   function startSentToastDismissTimer() {
@@ -424,14 +336,6 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
           setSendSheet("needs_trial");
           return;
         }
-        if (result.reason === "gmail_not_connected" || result.reason === "gmail_reauth_required") {
-          // Backend says profile.sender_type=gmail but no/expired tokens — refetch
-          // and show the consent step so the user can re-grant permission.
-          toast.error(result.message || "Your Gmail link needs reconnecting. Open Settings to fix it.");
-          gmailConn.refetch();
-          setSendSheet("needs_gmail");
-          return;
-        }
         if (result.reason === "rate_limited") {
           toast.error(result.message || "You've hit today's send limit. We'll be ready again tomorrow.");
         } else {
@@ -457,29 +361,6 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
       toast.error("We couldn't send this one. Your draft is safe — give it another try.");
     } finally {
       inFlightSendUsers.delete(uid);
-    }
-  }
-
-  async function handleGoogleSignIn() {
-    if (googleLoading) return;
-    setGoogleLoading(true);
-    sessionStorage.setItem(STORAGE_KEYS.SEND_AFTER_AUTH, sendSheetIntent);
-    try {
-      flowSend("REQUEST_POST_INVOICE_AUTH");
-      const pi = readPending();
-      const piSuffix = pi ? "?pi=" + encodeURIComponent(JSON.stringify(pi)) : "";
-      const { error } = await startGoogleOAuth(window.location.origin + "/auth-after-invoice" + piSuffix);
-      if (error) {
-        if (error.code !== OAUTH_USER_CANCELED) {
-          toast.error("Sign-in didn't go through. Give it another try.");
-        }
-        sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
-        setGoogleLoading(false);
-      }
-    } catch {
-      sessionStorage.removeItem(STORAGE_KEYS.SEND_AFTER_AUTH);
-      toast.error("Sign-in didn't go through. Give it another try.");
-      setGoogleLoading(false);
     }
   }
 
@@ -572,11 +453,6 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
       setIapError("Restore didn't go through. Give it another try.");
     }
   }
-
-  const recoveryPending =
-    typeof window !== "undefined" &&
-    sessionStorage.getItem(STORAGE_KEYS.SEND_AFTER_AUTH) !== null;
-  const sheetIsOpen = sendSheet !== "closed";
 
   return (
     <div className="mt-4 bg-card border border-border rounded-3xl p-4" style={{ boxShadow: "var(--shadow-card)" }} ref={draftRef}>
@@ -752,12 +628,12 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Send Sheet — single bottom sheet that handles auth, trial, and send confirmation */}
+      {/* Send Sheet — single bottom sheet that handles trial paywall and send confirmation */}
       {sendSheet !== "closed" && createPortal(
         <div
           data-oauth-sheet
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 animate-fade-in"
-          onClick={() => { if (!iapLoading && !googleLoading) setSendSheet("closed"); }}
+          onClick={() => { if (!iapLoading) setSendSheet("closed"); }}
         >
           <div
             data-oauth-sheet-card
@@ -765,71 +641,6 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto w-10 h-1 rounded-full bg-border mt-3 mb-1" />
-
-            {/* State: SIGNED_OUT */}
-            {sendSheet === "signed_out" && (
-              <div className="px-6 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
-                <h2 className="text-lg font-bold text-foreground mb-1">Sign in to continue</h2>
-                <p className="text-sm text-muted-foreground mb-5">
-                  {sendSheetIntent === "generate"
-                    ? "Create your account to generate AI drafts. ChaseHQ sends follow-ups for you — you review every message."
-                    : `Create your account to send to ${invoice.clientEmail || invoice.client}. ChaseHQ sends follow-ups for you — you review every message and replies come back to your inbox.`}
-                </p>
-                <button
-                  onClick={handleGoogleSignIn}
-                  disabled={googleLoading}
-                  className="w-full flex items-center justify-center gap-3 bg-card border border-border rounded-xl py-3.5 disabled:opacity-60 transition-all duration-200 ease-out active:scale-[0.97]"
-                >
-                  {googleLoading ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-foreground" />
-                  ) : (
-                    <>
-                      <GoogleIcon className="w-5 h-5" />
-                      <span className="text-sm font-medium text-foreground">Continue with Google</span>
-                    </>
-                  )}
-                </button>
-                <p className="text-xs text-muted-foreground text-center mt-3">Your draft is saved.</p>
-                <button
-                  onClick={() => setSendSheet("closed")}
-                  disabled={googleLoading}
-                  className="mt-3 w-full py-2.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-                >
-                  Maybe later
-                </button>
-              </div>
-            )}
-
-            {/* State: NEEDS_GMAIL — user signed in with Google but hasn't granted gmail.send yet */}
-            {sendSheet === "needs_gmail" && (
-              <div className="px-6 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
-                <h2 className="text-lg font-bold text-foreground mb-1">Send from your own Gmail</h2>
-                <p className="text-sm text-muted-foreground mb-5">
-                  Grant Gmail send permission so {invoice.client} sees the email come straight from your address — not from ChaseHQ. You stay in control: review every message, replies land in your inbox.
-                </p>
-                <button
-                  onClick={handleConnectGmail}
-                  disabled={gmailConnecting}
-                  className="w-full flex items-center justify-center gap-3 bg-card border border-border rounded-xl py-3.5 disabled:opacity-60 transition-all duration-200 ease-out active:scale-[0.97]"
-                >
-                  {gmailConnecting ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-foreground" />
-                  ) : (
-                    <>
-                      <GoogleIcon className="w-5 h-5" />
-                      <span className="text-sm font-medium text-foreground">Connect Gmail</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => setSendSheet("closed")}
-                  disabled={gmailConnecting}
-                  className="mt-3 w-full py-2.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-                >
-                  Maybe later
-                </button>
-              </div>
-            )}
 
             {/* State: NEEDS_TRIAL */}
             {sendSheet === "needs_trial" && (
@@ -845,7 +656,7 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
                 <div className="space-y-2 mb-4">
                   {[
                     "AI-drafted follow-ups in your tone",
-                    "Replies route straight back to you",
+                    "Replies go to your email inbox",
                     "Chase timeline & payment history",
                   ].map((f) => (
                     <div key={f} className="flex items-center gap-2.5">
@@ -1009,9 +820,6 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
         document.body
       )}
 
-      {recoveryPending && !sheetIsOpen && (
-        <div className="fixed inset-0 z-[9998] bg-background" aria-hidden="true" />
-      )}
     </div>
   );
 }

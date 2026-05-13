@@ -59,12 +59,6 @@
 				<string>com.chasehq.app</string>
 			</array>
 		</dict>
-		<dict>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>com.googleusercontent.apps.692266461097-03p7r5s0md8ovg9cii6iclm35ac0vdir</string>
-			</array>
-		</dict>
 	</array>
 </dict>
 </plist>

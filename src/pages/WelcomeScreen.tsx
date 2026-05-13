@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight } from "lucide-react";
-import { useFlow } from "@/flow/FlowMachine";
+import { ArrowRight, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useApp } from "@/context/AppContext";
-import { STORAGE_KEYS } from "@/lib/storageKeys";
-import { GoogleAuthSheet } from "@/components/auth/GoogleAuthSheet";
+import { supabase } from "@/integrations/supabase/client";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import appLogo from "@/assets/app-logo.png";
 
 function useDemoTap() {
@@ -21,75 +21,99 @@ function useDemoTap() {
   };
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const RESEND_COOLDOWN_SEC = 60;
+
 export default function WelcomeScreen() {
-  const { send: sendFlow } = useFlow();
   const { isAuthenticated } = useApp();
   const handleDemoTap = useDemoTap();
   const isDemoMode = localStorage.getItem("chasehq_demo_mode") === "1";
 
-  const [oauthLatched, setOauthLatched] = useState(() =>
-    typeof window !== "undefined" && (
-      sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1" ||
-      sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1"
-    )
-  );
-  const [signInOpen, setSignInOpen] = useState(false);
+  const [step, setStep] = useState<"email" | "otp">("email");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [sending, setSending] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
 
   useEffect(() => {
-    const handler = () => {
-      const inProgress = sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1";
-      const completed = sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1";
-      setOauthLatched(inProgress || completed);
-    };
-    window.addEventListener("chasehq:oauth-signal", handler);
-    return () => window.removeEventListener("chasehq:oauth-signal", handler);
-  }, []);
+    if (resendCountdown <= 0) return;
+    const id = window.setInterval(() => {
+      setResendCountdown((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [resendCountdown]);
 
-  useEffect(() => {
-    if (!oauthLatched) return;
-    const onVis = () => {
-      if (document.visibilityState !== "visible") return;
-      const inProgress = sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1";
-      const completed = sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1";
-      if (!inProgress && !completed) setOauthLatched(false);
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [oauthLatched]);
+  if (isAuthenticated) return null;
 
-  useEffect(() => {
-    if (!oauthLatched || isAuthenticated) return;
-    const t = window.setTimeout(() => {
-      sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
-      sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
-      sessionStorage.removeItem(STORAGE_KEYS.SIGN_IN_INTENT);
-      setOauthLatched(false);
-    }, 90000);
-    return () => window.clearTimeout(t);
-  }, [oauthLatched, isAuthenticated]);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      const inProgress = sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1";
-      const completed = sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1";
-      if (!inProgress && !completed) setOauthLatched(false);
+  async function requestCode(targetEmail: string): Promise<boolean> {
+    const trimmed = targetEmail.trim().toLowerCase();
+    if (!EMAIL_RE.test(trimmed)) {
+      toast.error("That doesn't look like a valid email address.");
+      return false;
     }
-  }, [isAuthenticated]);
+    setSending(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: trimmed,
+        options: { shouldCreateUser: true },
+      });
+      if (error) {
+        toast.error(error.message || "Couldn't send the code. Try again.");
+        return false;
+      }
+      setResendCountdown(RESEND_COOLDOWN_SEC);
+      return true;
+    } catch (e) {
+      toast.error("Network error. Check your connection and try again.");
+      return false;
+    } finally {
+      setSending(false);
+    }
+  }
 
-  // Synchronous read at render time. The React-state guard (oauthLatched) is
-  // updated by an event handler, which can lag a render behind the WKWebView
-  // resume after the native Google modal closes. Reading sessionStorage here
-  // means the durable flag wins on every render — no exposure window.
-  // Return null (not the splash) because OAuthOverlay is mounted above this
-  // route and renders the splash itself with z-[9999]. Stacking two splashes
-  // is wasteful; an empty bg-background paint is far better than the Welcome
-  // logo+CTA flashing if both guards somehow drop.
-  const inProgressNow = typeof window !== "undefined"
-    && sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1";
-  const completedNow = typeof window !== "undefined"
-    && sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1";
-  if (inProgressNow || completedNow || oauthLatched || isAuthenticated) {
-    return null;
+  async function handleContinue() {
+    const ok = await requestCode(email);
+    if (ok) {
+      setStep("otp");
+      setCode("");
+    }
+  }
+
+  async function handleResend() {
+    if (resendCountdown > 0 || sending) return;
+    await requestCode(email);
+  }
+
+  async function handleVerify(token: string) {
+    if (verifying) return;
+    setVerifying(true);
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token,
+        type: "email",
+      });
+      if (error) {
+        toast.error(error.message || "That code didn't work. Try again.");
+        setCode("");
+        setVerifying(false);
+        return;
+      }
+      // Success — AppContext.onAuthStateChange will pick up SIGNED_IN; FlowBootstrap
+      // routes us to onboarding (fresh signup) or dashboard (returning user).
+      // Leave verifying=true so the spinner sticks through the route transition.
+    } catch {
+      toast.error("Network error. Try again.");
+      setCode("");
+      setVerifying(false);
+    }
+  }
+
+  function handleEditEmail() {
+    setStep("email");
+    setCode("");
+    setResendCountdown(0);
   }
 
   return (
@@ -111,47 +135,133 @@ export default function WelcomeScreen() {
           ChaseHQ
         </p>
 
-        <h1
-          className="text-[clamp(28px,7vw,40px)] font-bold text-foreground tracking-[-0.03em] leading-[1.05] animate-fade-in"
-          style={{ animationDelay: "120ms", animationFillMode: "both" }}
-        >
-          Following up on payments<br />shouldn't feel this hard.
-        </h1>
-
-        <p
-          className="mt-4 text-[16px] leading-[1.55] text-muted-foreground max-w-sm animate-fade-in"
-          style={{ animationDelay: "320ms", animationFillMode: "both" }}
-        >
-          It does for most freelancers. You're not alone — and you're not wrong to dread it.
-        </p>
-
-        <div className="mt-10 w-full max-w-xs flex flex-col gap-2.5">
-          <button
-            onClick={() => sendFlow("START")}
-            className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] hover:bg-primary/90 animate-fade-in shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)]"
-            style={{ animationDelay: "520ms", animationFillMode: "both" }}
-          >
-            Stop Chasing. Start Getting Paid. <ArrowRight className="w-4 h-4" />
-          </button>
-
-          {!isDemoMode && (
-            <button
-              onClick={() => setSignInOpen(true)}
-              className="w-full py-3 rounded-xl border border-border bg-card text-sm font-semibold text-foreground transition-all duration-200 ease-out active:scale-[0.97] hover:bg-muted animate-fade-in"
-              style={{ animationDelay: "620ms", animationFillMode: "both" }}
+        {step === "email" ? (
+          <>
+            <h1
+              className="text-[clamp(28px,7vw,40px)] font-bold text-foreground tracking-[-0.03em] leading-[1.05] animate-fade-in"
+              style={{ animationDelay: "120ms", animationFillMode: "both" }}
             >
-              Already have an account? Sign in
-            </button>
-          )}
-        </div>
-      </div>
+              Stop chasing.<br />Start getting paid.
+            </h1>
 
-      <GoogleAuthSheet
-        open={signInOpen}
-        onClose={() => setSignInOpen(false)}
-        variant="sign_in"
-        redirectPath="/"
-      />
+            <p
+              className="mt-4 text-[16px] leading-[1.55] text-muted-foreground max-w-sm animate-fade-in"
+              style={{ animationDelay: "320ms", animationFillMode: "both" }}
+            >
+              Enter your email to get started. We'll send you a 6-digit code — no password needed.
+            </p>
+
+            <form
+              className="mt-8 w-full max-w-xs flex flex-col gap-2.5 animate-fade-in"
+              style={{ animationDelay: "520ms", animationFillMode: "both" }}
+              onSubmit={(e) => { e.preventDefault(); if (!sending) void handleContinue(); }}
+            >
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={sending}
+                className="w-full px-4 py-3.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring transition-all disabled:opacity-60"
+              />
+
+              <button
+                type="submit"
+                disabled={sending || !email.trim()}
+                className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-semibold text-sm transition-all duration-200 ease-out active:scale-[0.97] hover:bg-primary/90 disabled:opacity-60 shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)]"
+              >
+                {sending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>Continue <ArrowRight className="w-4 h-4" /></>
+                )}
+              </button>
+
+              {!isDemoMode && (
+                <p className="text-[11px] text-muted-foreground/80 mt-1 leading-snug">
+                  By continuing, you agree to our Terms and Privacy Policy.
+                </p>
+              )}
+            </form>
+          </>
+        ) : (
+          <>
+            <h1
+              className="text-[clamp(24px,6vw,32px)] font-bold text-foreground tracking-[-0.03em] leading-[1.1] animate-fade-in"
+              style={{ animationDelay: "0ms", animationFillMode: "both" }}
+            >
+              Check your email
+            </h1>
+
+            <p
+              className="mt-3 text-[15px] leading-[1.55] text-muted-foreground max-w-sm animate-fade-in"
+              style={{ animationDelay: "60ms", animationFillMode: "both" }}
+            >
+              We sent a 6-digit code to<br />
+              <span className="font-medium text-foreground">{email.trim().toLowerCase()}</span>
+            </p>
+
+            <div
+              className="mt-7 flex justify-center animate-fade-in"
+              style={{ animationDelay: "120ms", animationFillMode: "both" }}
+            >
+              <InputOTP
+                maxLength={6}
+                value={code}
+                onChange={(v) => {
+                  setCode(v);
+                  if (v.length === 6) void handleVerify(v);
+                }}
+                disabled={verifying}
+                autoFocus
+              >
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} className="w-12 h-14 text-lg" />
+                  <InputOTPSlot index={1} className="w-12 h-14 text-lg" />
+                  <InputOTPSlot index={2} className="w-12 h-14 text-lg" />
+                  <InputOTPSlot index={3} className="w-12 h-14 text-lg" />
+                  <InputOTPSlot index={4} className="w-12 h-14 text-lg" />
+                  <InputOTPSlot index={5} className="w-12 h-14 text-lg" />
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+
+            {verifying && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground animate-fade-in">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Verifying…
+              </div>
+            )}
+
+            <div
+              className="mt-8 w-full max-w-xs flex flex-col gap-2 animate-fade-in"
+              style={{ animationDelay: "180ms", animationFillMode: "both" }}
+            >
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resendCountdown > 0 || sending || verifying}
+                className="w-full py-2.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+              >
+                {sending ? "Sending…" : resendCountdown > 0 ? `Resend code in ${resendCountdown}s` : "Didn't get it? Resend code"}
+              </button>
+              <button
+                type="button"
+                onClick={handleEditEmail}
+                disabled={verifying}
+                className="w-full py-2 text-xs text-muted-foreground/80 hover:text-foreground disabled:opacity-50 transition-colors"
+              >
+                Wrong email? Edit
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

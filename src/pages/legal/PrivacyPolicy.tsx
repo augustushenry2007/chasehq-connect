@@ -36,14 +36,17 @@ export default function PrivacyPolicy() {
           <section>
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">3. How we send follow-ups</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
-              ChaseHQ sends follow-up emails on your behalf through our transactional email
-              provider. Each message is sent from <code className="text-xs bg-muted px-1 py-0.5 rounded">support@chasehq.app</code> with
-              your name in the From header (e.g. "Jane Smith via ChaseHQ"), and Reply-To set to
-              your account email so any replies route directly to your inbox.
+              When you connect a Gmail account, ChaseHQ sends follow-up emails directly through
+              your Gmail (using the <code className="text-xs bg-muted px-1 py-0.5 rounded">gmail.send</code> scope
+              you authorize). Each message is sent from your own Gmail address with your name
+              in the From header (e.g. "Jane Smith via ChaseHQ"), and Reply-To set to your
+              account email so any replies go directly to your email inbox.
             </p>
             <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
-              We do not access, read, or store the contents of your personal mailbox. ChaseHQ
-              only handles the follow-up messages you author and approve.
+              Replies from your clients arrive only in your external email inbox — ChaseHQ
+              never receives, reads, stores, or displays them. We do not access the contents
+              of your mailbox; ChaseHQ only handles the follow-up messages you author and
+              approve.
             </p>
           </section>
 

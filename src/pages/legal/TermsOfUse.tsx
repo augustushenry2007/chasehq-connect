@@ -57,10 +57,11 @@ export default function TermsOfUse() {
           <section>
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">5. Sending Follow-ups</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
-              ChaseHQ sends follow-up emails on your behalf through our transactional email
-              provider. Messages are sent from <code className="text-xs bg-muted px-1 py-0.5 rounded">support@chasehq.app</code> with
-              your name in the From header and Reply-To set to your account email, so replies
-              route back to your inbox.
+              When you connect a Gmail account, ChaseHQ sends follow-up emails through your
+              own Gmail. Messages are sent from your Gmail address with your name in the From
+              header and Reply-To set to your account email, so replies go directly to your
+              email inbox. ChaseHQ does not receive, read, store, or show those replies in
+              the app.
             </p>
             <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
               You remain solely responsible for the content of every follow-up sent from your

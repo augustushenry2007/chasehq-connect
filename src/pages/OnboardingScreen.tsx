@@ -171,12 +171,6 @@ export default function OnboardingScreen() {
     sessionStorage.removeItem(STORAGE_KEYS.EARLY_MIRROR_SELECTIONS);
   }, []);
 
-  useEffect(() => {
-    if (!isTestingMode() && isAuthenticated && profileReady && hasCompletedOnboarding) {
-      navigate("/dashboard", { replace: true });
-    }
-  }, [isAuthenticated, profileReady, hasCompletedOnboarding, navigate]);
-
   const initial = useMemo(() => loadState(), []);
 
   const initialStep = isAuthenticated && profileReady && onboardingStep > 0

@@ -559,12 +559,9 @@ export default function SettingsScreen() {
     if (!user || exporting) return;
     setExporting(true);
     try {
-      const provider = (user.app_metadata as any)?.provider;
-      const providers = (user.app_metadata as any)?.providers as string[] | undefined;
-      const signedInWithGoogle = provider === "google" || (providers?.includes("google") ?? false);
       const [
         followupsRes, profileRes, prefsRes, sendLogRes,
-        scheduleRes, subscriptionsRes, subEventsRes, gmailRes, smtpRes, notificationsRes,
+        scheduleRes, subscriptionsRes, subEventsRes, notificationsRes,
       ] = await Promise.all([
         supabase.from("followups").select("invoice_id, subject, tone, is_ai_generated, sent_at").eq("user_id", user.id),
         supabase.from("profiles").select("full_name, onboarding_completed").eq("user_id", user.id).maybeSingle(),
@@ -573,15 +570,13 @@ export default function SettingsScreen() {
         supabase.from("followup_schedules").select("invoice_id, steps, created_at, updated_at").eq("user_id", user.id),
         supabase.from("subscriptions").select("status, plan, trial_ends_at, current_period_end, created_at, updated_at").eq("user_id", user.id).maybeSingle(),
         supabase.from("subscription_events").select("event_type, payload, created_at").eq("user_id", user.id),
-        supabase.from("gmail_connections").select("email, created_at, updated_at, token_expires_at").eq("user_id", user.id).maybeSingle(),
-        supabase.from("smtp_connections").select("from_email, from_name, smtp_host, smtp_port, smtp_username, verified, created_at").eq("user_id", user.id).maybeSingle(),
         supabase.from("notifications").select("invoice_id, schedule_step_index, type, title, body, scheduled_for, status, delivered_at, read_at, created_at").eq("user_id", user.id),
       ]);
 
       // supabase-js doesn't reject on a query error — it returns { data: null, error }.
       // If ANY query failed, refuse to write a partial export that silently shows
       // those tables as null.
-      const results = [followupsRes, profileRes, prefsRes, sendLogRes, scheduleRes, subscriptionsRes, subEventsRes, gmailRes, smtpRes, notificationsRes];
+      const results = [followupsRes, profileRes, prefsRes, sendLogRes, scheduleRes, subscriptionsRes, subEventsRes, notificationsRes];
       if (results.some((r) => r.error)) {
         console.warn("[SettingsScreen] export query failed:", results.find((r) => r.error)?.error?.message);
         toast.error("We couldn't export everything just now — try again.");
@@ -594,7 +589,7 @@ export default function SettingsScreen() {
         requestedBy: user.email,
         account: {
           email: user.email,
-          authMethod: signedInWithGoogle ? "Google" : "Email",
+          authMethod: "Email",
           fullName: profileRes.data?.full_name ?? null,
           accountCreated: (user as any).created_at ?? null,
         },
@@ -606,8 +601,6 @@ export default function SettingsScreen() {
         notifications: notificationsRes.data ?? [],
         subscription: subscriptionsRes.data ?? null,
         subscriptionEvents: subEventsRes.data ?? [],
-        gmailConnection: gmailRes.data ?? null,
-        smtpConnection: smtpRes.data ?? null,
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -652,7 +645,7 @@ export default function SettingsScreen() {
     }
   }
 
-  const authMethod = "Google";
+  const authMethod = "Email";
 
 
 

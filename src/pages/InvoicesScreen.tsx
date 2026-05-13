@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { formatUSD, type Invoice } from "@/lib/data";
@@ -6,9 +6,6 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Search, Plus, X, ChevronRight, FileText, AlertCircle, RefreshCw, Loader2 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 import NotificationBell from "@/components/NotificationBell";
-import { useFlow } from "@/flow/FlowMachine";
-import { FlowState } from "@/flow/states";
-import { useApp } from "@/context/AppContext";
 type FilterTab = "all" | "overdue" | "upcoming" | "paid";
 
 function getFiltered(invoices: Invoice[], tab: FilterTab, query: string) {
@@ -45,9 +42,6 @@ export default function InvoicesScreen() {
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const invoiceCreatedRef = useRef(false);
-  const { state: flowState, send } = useFlow();
-  const { isAuthenticated } = useApp();
 
   const { invoices, loading, error, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
@@ -55,13 +49,6 @@ export default function InvoicesScreen() {
   // We couldn't load and have nothing cached to show — offer a retry rather than
   // a "you have no invoices" empty state that would mislead an existing user.
   const showLoadError = error && isEmptyWorkspace;
-
-  // Open the New Invoice modal whenever the flow says CREATE_INVOICE, OR via legacy ?new=1.
-  useEffect(() => {
-    if (flowState === FlowState.CREATE_INVOICE) {
-      setShowNew(true);
-    }
-  }, [flowState]);
 
   useEffect(() => {
     const filterParam = searchParams.get("filter");
@@ -79,26 +66,14 @@ export default function InvoicesScreen() {
   }, []);
 
   async function handleCreated(invoiceId?: string) {
-    invoiceCreatedRef.current = true;
-    if (!isAuthenticated) {
-      send("INVOICE_CREATED", { invoiceId: "guest" });
-      navigate("/invoice/guest", { replace: true });
-      return;
-    }
     if (invoiceId) {
       navigate(`/invoice/${invoiceId}`, { replace: true });
       refetch();
-    } else if (flowState === FlowState.CREATE_INVOICE) {
-      send("INVOICE_CREATED");
     }
   }
 
   function handleCloseModal() {
     setShowNew(false);
-    if (!invoiceCreatedRef.current && flowState === FlowState.CREATE_INVOICE) {
-      send("BACK_TO_DASHBOARD");
-    }
-    invoiceCreatedRef.current = false;
   }
 
   if (loading) {
@@ -143,7 +118,7 @@ export default function InvoicesScreen() {
           <p className="text-xs text-muted-foreground mt-0.5">Every follow-up, every client — in one place.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {isAuthenticated && <NotificationBell />}
+          <NotificationBell />
         </div>
       </div>
 

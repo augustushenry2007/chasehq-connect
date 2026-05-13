@@ -1,13 +1,8 @@
 export const STORAGE_KEYS = {
-  OAUTH_IN_PROGRESS: "oauth_in_progress",
-  OAUTH_COMPLETED: "oauth_completed",
-  USER_INITIATED_SIGN_OUT: "user_initiated_sign_out",
   ONBOARDING_STATE: "onboarding_state",
   ONBOARDING_DONE_SESSION: "onboarding_done_session",
   SCHEDULE_PRESET: "schedule_preset",
   SCHEDULE_CUSTOM_STEPS: "schedule_custom_steps",
-  SIGN_IN_INTENT: "sign_in_intent",
-  SEND_AFTER_AUTH: "send_after_auth",
   USER_PROFILE_WORK_TYPE: "user_profile_work_type",
   USER_PROFILE_INVOICE_SIZE: "user_profile_invoice_size",
   USER_PROFILE_CLIENT_LOAD: "user_profile_client_load",

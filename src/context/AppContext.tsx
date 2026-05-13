@@ -6,9 +6,8 @@ import type { Invoice as FrontendInvoice } from "@/lib/data";
 import { DEMO_INVOICES, DEMO_USER, DEMO_FULL_NAME } from "@/lib/demoData";
 import { formatDate } from "@/lib/data";
 import { isTestingMode, clearTestingState } from "@/lib/testingMode";
-import { readPending, clearPending, isGuestOnboarded, clearGuestOnboarded } from "@/lib/localInvoice";
+import { clearPending, clearGuestOnboarded } from "@/lib/localInvoice";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
-import { createInvoice } from "@/hooks/useSupabaseData";
 import { computeInvoiceStatus, computeDaysPastDue } from "@/lib/invoiceStatus";
 import { getUserTimezone } from "@/lib/scheduleDefaults";
 import { configureRC, logoutRC, isNativePlatform, syncSubscriptionToSupabase } from "@/integrations/iap";
@@ -66,7 +65,6 @@ interface AppContextType {
   invoicesLoading: boolean;
   invoicesError: boolean;
   refetchInvoices: () => Promise<void>;
-  flushedInvoiceId: string | null | undefined;
   isDemo: boolean;
   addDemoInvoice?: (inv: FrontendInvoice) => void;
   userProfile: UserProfile;
@@ -115,7 +113,7 @@ function AppProviderDemo({ children }: { children: ReactNode }) {
     dismissedHints: {}, onboardingStep: 6,
     notifications: { emailNotifications: true, autoChase: true, defaultTone: "Friendly" },
     invoices: demoInvoices, invoicesLoading: false, invoicesError: false,
-    refetchInvoices: async () => {}, flushedInvoiceId: null,
+    refetchInvoices: async () => {},
     addDemoInvoice,
     userProfile,
     refreshUserProfile,
@@ -221,16 +219,13 @@ function AppProviderReal({ children }: { children: ReactNode }) {
         const rawMetaName = (user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name || null;
         const metaName = rawMetaName ? toTitleCase(rawMetaName) : null;
         const testing = isTestingMode();
-        const guestOnboarded = isGuestOnboarded();
-        const hasPending = readPending() !== null;
-        const effectivelyOnboarded = guestOnboarded || hasPending;
         if (data) {
           const testingForceFresh = testing && !completedThisSessionRef.current;
           const dbDone = !!data.onboarding_completed;
           // Never let the fetch downgrade onboarding to "not done" if the user
           // finished it this session — the DB write may still be in flight or may
           // have failed transiently (completeOnboarding retries it in the background).
-          const resolvedDone = testingForceFresh ? false : (dbDone || effectivelyOnboarded || completedThisSessionRef.current);
+          const resolvedDone = testingForceFresh ? false : (dbDone || completedThisSessionRef.current);
           if (!dbDone && resolvedDone && !testingForceFresh) {
             try {
               await supabase.from("profiles")
@@ -245,7 +240,7 @@ function AppProviderReal({ children }: { children: ReactNode }) {
           setDismissedHints(((data as any).dismissed_hints as Record<string, boolean>) ?? {});
           const dbStep = typeof (data as any).onboarding_step === "number" ? (data as any).onboarding_step : 1;
           setOnboardingStep(dbStep);
-          if (import.meta.env.DEV) console.log("[AUTH] Profile loaded: onboarding_completed:", dbDone, "onboarding_step:", dbStep, "guestOnboarded:", guestOnboarded, "→ hasCompletedOnboarding:", resolvedDone);
+          if (import.meta.env.DEV) console.log("[AUTH] Profile loaded: onboarding_completed:", dbDone, "onboarding_step:", dbStep, "→ hasCompletedOnboarding:", resolvedDone);
           const resolvedName = (data as any).full_name || metaName || null;
           setFullName(resolvedName);
           if (!(data as any).full_name && metaName) {
@@ -260,34 +255,30 @@ function AppProviderReal({ children }: { children: ReactNode }) {
             tour_completed: !!(data as any).tour_completed,
             full_name: resolvedName,
           });
-          sessionStorage.removeItem(STORAGE_KEYS.SIGN_IN_INTENT);
         } else {
-          sessionStorage.removeItem(STORAGE_KEYS.SIGN_IN_INTENT);
-          // No profile in DB → treat as sign-up regardless of which CTA was clicked
-          // on /welcome. Both buttons lead to the same OnboardingScreen. A user who
-          // signed up via the post-invoice flow with a pending invoice is already
-          // effectively onboarded (handled below via effectivelyOnboarded).
-          const onboardedByGuestFlow = effectivelyOnboarded || completedThisSessionRef.current;
-          const initialStep = onboardedByGuestFlow ? 6 : 1;
+          // No profile in DB → new sign-up. Create row with onboarding not yet
+          // completed; user lands on OnboardingScreen next.
+          const onboardedBySession = completedThisSessionRef.current;
+          const initialStep = onboardedBySession ? 6 : 1;
           try {
             await supabase.from("profiles").insert({
               user_id: user.id,
-              onboarding_completed: onboardedByGuestFlow,
+              onboarding_completed: onboardedBySession,
               onboarding_step: initialStep,
               full_name: metaName,
             });
           } catch (err) {
             console.error("[AUTH] Failed to insert profile:", err);
           }
-          setHasCompletedOnboarding(onboardedByGuestFlow);
+          setHasCompletedOnboarding(onboardedBySession);
           setOnboardingStep(initialStep);
           setFullName(metaName);
           writeProfileCache(user.id, {
-            onboarding_completed: onboardedByGuestFlow,
+            onboarding_completed: onboardedBySession,
             tour_completed: false,
             full_name: metaName,
           });
-          if (import.meta.env.DEV) console.log("[AUTH] Profile created → hasCompletedOnboarding:", onboardedByGuestFlow, "onboarding_step:", initialStep);
+          if (import.meta.env.DEV) console.log("[AUTH] Profile created → hasCompletedOnboarding:", onboardedBySession, "onboarding_step:", initialStep);
         }
       } catch (err) {
         console.error("[AUTH] Profile load exception:", err);
@@ -475,83 +466,6 @@ function AppProviderReal({ children }: { children: ReactNode }) {
     return () => { supabase.removeChannel(channel); };
   }, [user?.id, authReady, refetchInvoices]);
 
-  // Flush any pending guest-drafted invoice to the user's account once authenticated.
-  const flushedRef = useRef<string | null>(null);
-  const [flushedInvoiceId, setFlushedInvoiceId] = useState<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (!user) return;
-    if (flushedRef.current === user.id) return;
-    const pending = readPending();
-    if (!pending) {
-      setFlushedInvoiceId(null);
-      return;
-    }
-    flushedRef.current = user.id;
-
-    let cancelled = false;
-    // Hard safety net: createInvoice / supabase-js's _acquireLock / WKWebView fetch
-    // can hang or throw on iOS Capacitor (transport-level errors don't return
-    // {error}, they reject). Without this, flushedInvoiceId stays undefined
-    // forever and PostInvoiceAuthScreen's dispatch effect never fires →
-    // user stuck on /auth-after-invoice. null means "decided, proceed".
-    const flushTimeoutId = window.setTimeout(() => {
-      if (cancelled) return;
-      console.warn("[FLUSH] Invoice flush timed out — unblocking PostInvoiceAuthScreen with AUTH_SUCCESS path");
-      setFlushedInvoiceId(null);
-    }, 10000);
-
-    (async () => {
-      try {
-        if (import.meta.env.DEV) console.log("[FLUSH] Starting invoice flush for", pending.client);
-        // onDuplicate:"returnExisting" — if a prior flush attempt was interrupted
-        // (createInvoice exceeded the 10s safety timeout / the app was closed)
-        // *after* the row was inserted server-side, this re-run would otherwise
-        // hit UNIQUE(user_id, invoice_number) and surface a confusing "Invoice ID
-        // already used" toast for an invoice that exists. Instead, return that row
-        // silently and proceed exactly as on the happy path. Idempotent re-flush.
-        const result = await createInvoice(user.id, {
-          client: pending.client,
-          clientEmail: pending.clientEmail,
-          description: pending.description,
-          amount: pending.amount,
-          dueDate: pending.dueDate,
-        }, "", { onDuplicate: "returnExisting" });
-        if (cancelled) return;
-        if (result.invoice) {
-          if (import.meta.env.DEV) console.log("[FLUSH] Invoice created:", result.invoice.invoice_number);
-          clearPending();
-          clearGuestOnboarded();
-          await refetchInvoices();
-          if (cancelled) return;
-          setFlushedInvoiceId(result.invoice.invoice_number);
-        } else {
-          if (import.meta.env.DEV) console.log("[FLUSH] createInvoice returned no invoice (error:", result.error, ")");
-          setFlushedInvoiceId(null);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        console.error("[FLUSH] Invoice flush threw — unblocking with AUTH_SUCCESS path:", err);
-        analytics.error("guest_invoice_flush_exception", err instanceof Error ? err.message : String(err), { userId: user.id });
-        setFlushedInvoiceId(null);
-      } finally {
-        window.clearTimeout(flushTimeoutId);
-        try {
-          const raw = localStorage.getItem("pending_draft_tone_v1");
-          const pendingTone = raw === "Polite" ? "Friendly" : raw as "Friendly" | "Firm" | null;
-          if (pendingTone && ["Friendly", "Firm"].includes(pendingTone)) {
-            setNotifications(prev => ({ ...prev, defaultTone: pendingTone }));
-          }
-          localStorage.removeItem("pending_draft_tone_v1");
-        } catch {}
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(flushTimeoutId);
-    };
-  }, [user?.id, refetchInvoices]);
-
   useEffect(() => {
     let authReadySet = false;
     const markAuthReady = (session: import("@supabase/supabase-js").Session | null) => {
@@ -571,12 +485,6 @@ function AppProviderReal({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       const newUserId = session?.user?.id ?? null;
-      // Mark OAuth completion but don't remove flag yet - FlowBootstrap needs it
-      if (event === "SIGNED_IN" && session?.user) {
-        if (import.meta.env.DEV) console.log("[AUTH] OAuth callback completed - user signed in");
-        sessionStorage.setItem(STORAGE_KEYS.OAUTH_COMPLETED, "1");
-        sessionStorage.removeItem(STORAGE_KEYS.USER_INITIATED_SIGN_OUT);
-      }
       // Testing mode: only wipe persisted state on a *fresh* sign-in (different user id),
       // not on silent token refreshes for the same user.
       if (
@@ -638,19 +546,10 @@ function AppProviderReal({ children }: { children: ReactNode }) {
     localStorage.removeItem("notifications");
     localStorage.removeItem(STORAGE_KEYS.ONBOARDING_DONE_SESSION);
     clearLocalUserProfile();
-    sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
-    sessionStorage.removeItem(STORAGE_KEYS.OAUTH_COMPLETED);
-    sessionStorage.removeItem(STORAGE_KEYS.SIGN_IN_INTENT);
-    // Tell FlowBootstrap this is a deliberate sign-out, not the brief Supabase
-    // session rotation that follows OAuth — otherwise the OAUTH_COMPLETED window
-    // would suppress the SIGN_OUT transition and strand the user on the dashboard.
-    try { sessionStorage.setItem(STORAGE_KEYS.USER_INITIATED_SIGN_OUT, "1"); } catch { /* storage unavailable */ }
     clearPending();
     clearGuestOnboarded();
     completedThisSessionRef.current = false;
     onboardingConfirmedRef.current = false;
-    flushedRef.current = null;
-    setFlushedInvoiceId(undefined);
     setIsAuthenticated(false);
     setUser(null);
     setProfileReady(false);
@@ -793,7 +692,7 @@ function AppProviderReal({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ isAuthenticated, authReady, profileReady, isDemo: false, user, fullName, hasCompletedOnboarding, tourCompleted, dismissedHints, onboardingStep, notifications, invoices, invoicesLoading, invoicesError, refetchInvoices, flushedInvoiceId, userProfile, refreshUserProfile, signIn, signOut, completeOnboarding, restartOnboarding, updateOnboardingStep, updateNotifications, updateDisplayName }}>
+    <AppContext.Provider value={{ isAuthenticated, authReady, profileReady, isDemo: false, user, fullName, hasCompletedOnboarding, tourCompleted, dismissedHints, onboardingStep, notifications, invoices, invoicesLoading, invoicesError, refetchInvoices, userProfile, refreshUserProfile, signIn, signOut, completeOnboarding, restartOnboarding, updateOnboardingStep, updateNotifications, updateDisplayName }}>
       {children}
     </AppContext.Provider>
   );

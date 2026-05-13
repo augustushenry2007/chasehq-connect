@@ -5,7 +5,6 @@ import { buildCors } from "../_shared/cors.ts";
 import { checkRateLimit, rateLimitedResponse } from "../_shared/rate_limit.ts";
 import { logError, logWarn } from "../_shared/log.ts";
 import { verifyWithRevenueCat } from "../_shared/revenuecat.ts";
-import { getValidGmailAccessToken } from "../_shared/gmail.ts";
 
 type Json = (body: unknown, status?: number) => Response;
 
@@ -58,6 +57,35 @@ function buildPlainHtml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/\n/g, "<br />");
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body style="margin:0;padding:32px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;background:#ffffff;max-width:600px;">${escaped}</body></html>`;
+}
+
+function formatCopyTimestamp(d: Date): string {
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function buildCopyHtml(originalText: string, clientEmail: string, sentAt: Date): string {
+  const escapedOriginal = originalText
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br />");
+  const escapedRecipient = clientEmail
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const ts = formatCopyTimestamp(sentAt);
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body style="margin:0;padding:32px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;background:#ffffff;max-width:600px;"><div style="margin:0 0 24px 0;padding:16px 20px;border:1px solid #e5e7eb;border-radius:12px;background:#f9fafb;font-size:13px;line-height:1.5;color:#374151;"><div style="font-weight:600;color:#111827;margin-bottom:6px;">📨 Copy for your records</div><div>You sent this to <strong>${escapedRecipient}</strong> on ${ts}.</div><div style="margin-top:6px;color:#6b7280;font-size:12px;">Your client received the message below — they did not see this banner.</div></div><div style="border-top:1px solid #e5e7eb;padding-top:20px;">${escapedOriginal}</div></body></html>`;
+}
+
+function buildCopyPlainText(originalText: string, clientEmail: string, sentAt: Date): string {
+  return `[Copy for your records]\nYou sent this to ${clientEmail} on ${formatCopyTimestamp(sentAt)}.\nYour client received the message below — they did not see this banner.\n\n---\n\n${originalText}`;
 }
 
 serve(async (req) => {
@@ -123,7 +151,7 @@ serve(async (req) => {
 
     const { data: profile } = await supabaseAdmin
       .from("profiles")
-      .select("full_name, sender_type")
+      .select("full_name")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -136,7 +164,6 @@ serve(async (req) => {
     ).toString().trim();
     // Strip header-injection chars (\r \n) and quotes that would break the From line
     const safeName = resolvedName.replace(/[<>"\r\n]/g, "").slice(0, 80);
-    let senderType = profile?.sender_type === "gmail" ? "gmail" : "resend";
 
     const { data: hasEnt, error: entErr } = await supabaseAdmin
       .rpc("has_active_entitlement", { _user_id: user.id });
@@ -221,91 +248,63 @@ serve(async (req) => {
       });
     }
 
-    let via: "gmail" | "resend" = "resend";
+    const resendKey = Deno.env.get("RESEND_API_KEY");
+    if (!resendKey) {
+      logError("send-email: RESEND_API_KEY not configured");
+      return json({ error: "send_unavailable", message: "Sending is temporarily unavailable. Please try again shortly." }, 500);
+    }
 
-    if (senderType === "gmail") {
-      const gmailAuth = await getValidGmailAccessToken(supabaseAdmin, user.id);
-      if ("error" in gmailAuth) {
-        return json({ error: "gmail_reauth_required", message: "Your Gmail link needs reconnecting. Reconnect Gmail in Settings." }, 401);
-      }
-      const accessToken = gmailAuth.token;
-      const gmailEmail = gmailAuth.email;
+    // Resend sends from ChaseHQ's verified domain. Display name carries the
+    // user's name + "via ChaseHQ" so recipients know it's their freelancer's
+    // outreach (not an automated chasehq.app email). Reply-To routes responses
+    // to the user's signup inbox.
+    const fromHeader = safeName
+      ? `${safeName} via ChaseHQ <noreply@chasehq.app>`
+      : "ChaseHQ <noreply@chasehq.app>";
+    const replyTo = user.email ?? undefined;
 
-      // Build RFC-2822 message. Gmail enforces From = authenticated mailbox,
-      // so the address must match the connected mailbox — only the display name is ours to set.
-      const fromLine = safeName
-        ? `From: ${safeName} <${gmailEmail}>`
-        : `From: ${gmailEmail}`;
-      const headerLines: string[] = [];
-      if (invoiceId) headerLines.push(`X-Entity-Ref-ID: ${String(invoiceId)}`);
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
+      body: JSON.stringify({
+        from: fromHeader,
+        to: [to],
+        subject,
+        text: message,
+        html: buildPlainHtml(message),
+        reply_to: replyTo,
+        headers: invoiceId ? { "X-Entity-Ref-ID": String(invoiceId) } : undefined,
+      }),
+    });
 
-      const subjectClean = String(subject).replace(/[\r\n]/g, " ");
-      const toClean = String(to).replace(/[\r\n]/g, "");
-      const rawMime = [
-        fromLine,
-        `To: ${toClean}`,
-        `Subject: ${subjectClean}`,
-        `Content-Type: text/plain; charset=utf-8`,
-        ...headerLines,
-        "",
-        message,
-      ].join("\r\n");
-      // base64url-encode UTF-8 — naive btoa fails on multibyte chars
-      const utf8Bytes = new TextEncoder().encode(rawMime);
-      let binary = "";
-      for (const byte of utf8Bytes) binary += String.fromCharCode(byte);
-      const base64 = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    if (!res.ok) {
+      const body = await res.text();
+      logError("send-email Resend error:", res.status, body.slice(0, 300));
+      return json({ error: "send_failed", message: "We couldn't send this one. Your draft is safe — give it another try." }, 502);
+    }
 
-      const gmailRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ raw: base64 }),
-      });
-      if (!gmailRes.ok) {
-        const body = await gmailRes.text();
-        logError("Gmail send error:", gmailRes.status, body.slice(0, 300));
-        if (gmailRes.status === 401 || gmailRes.status === 403) {
-          return json({ error: "gmail_reauth_required", message: "Your Gmail link expired. Reconnect Gmail in Settings." }, 401);
-        }
-        return json({ error: "send_failed", message: "We couldn't send this one. Your draft is safe — give it another try." }, 502);
-      }
-      via = "gmail";
-    } else {
-      const resendKey = Deno.env.get("RESEND_API_KEY");
-      if (!resendKey) {
-        logError("send-email: RESEND_API_KEY not configured");
-        return json({ error: "send_unavailable", message: "Sending is temporarily unavailable. Please try again shortly." }, 500);
-      }
-
-      // Resend cannot send from an arbitrary user@gmail.com — the From address
-      // must be on a verified domain. We use the user's real name as the
-      // display name (no "ChaseHQ" branding) and set Reply-To so client replies
-      // route to the user's actual inbox.
-      const fromHeader = safeName
-        ? `${safeName} <noreply@chasehq.app>`
-        : "noreply@chasehq.app";
-      const replyTo = user.email ?? undefined;
-
-      const res = await fetch("https://api.resend.com/emails", {
+    // Distinct "copy for your records" email to the sender. Separate envelope
+    // (no "via ChaseHQ" From, "Copy:" subject prefix, banner at top of body) so
+    // their inbox clearly shows this is a sent-archive, not a fresh outbound
+    // chase. Non-fatal on failure — the client email already went out and the
+    // in-app followups timeline is the source of truth.
+    if (user.email) {
+      const sentAt = new Date();
+      const copyRes = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
         body: JSON.stringify({
-          from: fromHeader,
-          to: [to],
-          subject,
-          text: message,
-          html: buildPlainHtml(message),
-          reply_to: replyTo,
-          headers: invoiceId ? { "X-Entity-Ref-ID": String(invoiceId) } : undefined,
+          from: "ChaseHQ <noreply@chasehq.app>",
+          to: [user.email],
+          subject: `Copy: ${subject}`,
+          text: buildCopyPlainText(message, to, sentAt),
+          html: buildCopyHtml(message, to, sentAt),
         }),
       });
-
-      if (!res.ok) {
-        const body = await res.text();
-        logError("send-email Resend error:", res.status, body.slice(0, 300));
-        return json({ error: "send_failed", message: "We couldn't send this one. Your draft is safe — give it another try." }, 502);
+      if (!copyRes.ok) {
+        const body = await copyRes.text();
+        logWarn("[send-email] user-copy Resend error (non-fatal):", copyRes.status, body.slice(0, 300));
       }
-      via = "resend";
     }
 
     const { error: sendLogErr } = await supabaseAdmin.from("email_send_log").insert({
@@ -345,7 +344,7 @@ serve(async (req) => {
       }
     }
 
-    return json({ success: true, via });
+    return json({ success: true, via: "resend" });
   } catch (e) {
     logError("send-email error:", e);
     return json({ error: "Internal error" }, 500);

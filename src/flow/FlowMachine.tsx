@@ -57,10 +57,18 @@ function loadPersisted(): FlowReducerState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as FlowReducerState;
     if (parsed?.state) {
-      // Reset flow if stuck in mid-flow states, force fresh boot
-      const staleStates = [FlowState.AUTH, FlowState.ONBOARDING];
-      if (staleStates.includes(parsed.state)) {
+      // Reset flow if stuck mid-onboarding, force fresh boot
+      if (parsed.state === FlowState.ONBOARDING) {
         if (import.meta.env.DEV) console.log("[FLOW] Clearing stale state:", parsed.state);
+        localStorage.removeItem(FLOW_STORAGE_KEY);
+        return null;
+      }
+      // Drop any persisted state that no longer exists in the state map (v2 removed
+      // AUTH, GUEST_DRAFT, POST_INVOICE_AUTH, CREATE_INVOICE). Otherwise the reducer
+      // resumes into an undefined transitions row and never advances.
+      const known = (Object.values(FlowState) as string[]).includes(parsed.state);
+      if (!known) {
+        if (import.meta.env.DEV) console.log("[FLOW] Clearing unknown persisted state:", parsed.state);
         localStorage.removeItem(FLOW_STORAGE_KEY);
         return null;
       }
