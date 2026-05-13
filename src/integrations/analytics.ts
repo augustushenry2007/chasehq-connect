@@ -10,12 +10,12 @@ export const analytics = {
   },
 
   // User lifecycle events
-  signUp: (email: string, method: "email" | "google" | "apple") => {
-    analytics.track("user_signed_up", { email, method });
+  signUp: (email: string) => {
+    analytics.track("user_signed_up", { email, method: "email" });
   },
 
-  signIn: (email: string, method: "email" | "google" | "apple") => {
-    analytics.track("user_signed_in", { email, method });
+  signIn: (email: string) => {
+    analytics.track("user_signed_in", { email, method: "email" });
   },
 
   onboardingCompleted: (feelings?: string[], worries?: string[], goals?: string[]) => {

@@ -1,3 +1,4 @@
+Initialising login role...
 export type Json =
   | string
   | number
@@ -12,8 +13,81 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
+      apple_notification_log: {
+        Row: {
+          notification_type: string | null
+          notification_uuid: string
+          original_transaction_id: string | null
+          processed_ok: boolean
+          received_at: string
+          subtype: string | null
+        }
+        Insert: {
+          notification_type?: string | null
+          notification_uuid: string
+          original_transaction_id?: string | null
+          processed_ok?: boolean
+          received_at?: string
+          subtype?: string | null
+        }
+        Update: {
+          notification_type?: string | null
+          notification_uuid?: string
+          original_transaction_id?: string | null
+          processed_ok?: boolean
+          received_at?: string
+          subtype?: string | null
+        }
+        Relationships: []
+      }
+      daily_quotas: {
+        Row: {
+          call_count: number
+          day: string
+          function_name: string
+          subject: string
+        }
+        Insert: {
+          call_count?: number
+          day: string
+          function_name: string
+          subject: string
+        }
+        Update: {
+          call_count?: number
+          day?: string
+          function_name?: string
+          subject?: string
+        }
+        Relationships: []
+      }
       dispatch_health: {
         Row: {
           id: number
@@ -139,36 +213,42 @@ export type Database = {
           },
         ]
       }
-      gmail_connections: {
+      gemini_usage: {
         Row: {
-          access_token: string
+          cost_estimate_usd: number | null
           created_at: string
-          email: string
+          function_name: string
           id: string
-          refresh_token: string
-          token_expires_at: string
-          updated_at: string
-          user_id: string
+          input_tokens: number | null
+          model: string
+          output_tokens: number | null
+          prompt_injection_attempts: number
+          subject: string
+          total_tokens: number | null
         }
         Insert: {
-          access_token: string
+          cost_estimate_usd?: number | null
           created_at?: string
-          email: string
+          function_name: string
           id?: string
-          refresh_token: string
-          token_expires_at: string
-          updated_at?: string
-          user_id: string
+          input_tokens?: number | null
+          model: string
+          output_tokens?: number | null
+          prompt_injection_attempts?: number
+          subject: string
+          total_tokens?: number | null
         }
         Update: {
-          access_token?: string
+          cost_estimate_usd?: number | null
           created_at?: string
-          email?: string
+          function_name?: string
           id?: string
-          refresh_token?: string
-          token_expires_at?: string
-          updated_at?: string
-          user_id?: string
+          input_tokens?: number | null
+          model?: string
+          output_tokens?: number | null
+          prompt_injection_attempts?: number
+          subject?: string
+          total_tokens?: number | null
         }
         Relationships: []
       }
@@ -337,81 +417,60 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
-          dismissed_hints: Record<string, boolean>
+          dismissed_hints: Json
           email_provider: string | null
           full_name: string | null
           id: string
           onboarding_completed: boolean
           onboarding_step: number | null
-          sender_type: string | null
           tour_completed: boolean
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
-          dismissed_hints?: Record<string, boolean>
+          dismissed_hints?: Json
           email_provider?: string | null
           full_name?: string | null
           id?: string
           onboarding_completed?: boolean
           onboarding_step?: number | null
-          sender_type?: string | null
           tour_completed?: boolean
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
-          dismissed_hints?: Record<string, boolean>
+          dismissed_hints?: Json
           email_provider?: string | null
           full_name?: string | null
           id?: string
           onboarding_completed?: boolean
           onboarding_step?: number | null
-          sender_type?: string | null
           tour_completed?: boolean
           updated_at?: string
           user_id?: string
         }
         Relationships: []
       }
-      smtp_connections: {
+      rate_limits: {
         Row: {
-          created_at: string
-          from_email: string
-          from_name: string | null
-          smtp_host: string
-          smtp_password: string
-          smtp_port: number
-          smtp_username: string
-          updated_at: string
-          user_id: string
-          verified: boolean
+          call_count: number
+          function_name: string
+          subject: string
+          window_start: string
         }
         Insert: {
-          created_at?: string
-          from_email: string
-          from_name?: string | null
-          smtp_host: string
-          smtp_password: string
-          smtp_port?: number
-          smtp_username: string
-          updated_at?: string
-          user_id: string
-          verified?: boolean
+          call_count?: number
+          function_name: string
+          subject: string
+          window_start: string
         }
         Update: {
-          created_at?: string
-          from_email?: string
-          from_name?: string | null
-          smtp_host?: string
-          smtp_password?: string
-          smtp_port?: number
-          smtp_username?: string
-          updated_at?: string
-          user_id?: string
-          verified?: boolean
+          call_count?: number
+          function_name?: string
+          subject?: string
+          window_start?: string
         }
         Relationships: []
       }
@@ -492,45 +551,33 @@ export type Database = {
       }
     }
     Views: {
-      smtp_connections_safe: {
-        Row: {
-          created_at: string | null
-          from_email: string | null
-          from_name: string | null
-          smtp_host: string | null
-          smtp_port: number | null
-          smtp_username: string | null
-          updated_at: string | null
-          user_id: string | null
-          verified: boolean | null
-        }
-        Insert: {
-          created_at?: string | null
-          from_email?: string | null
-          from_name?: string | null
-          smtp_host?: string | null
-          smtp_port?: number | null
-          smtp_username?: string | null
-          updated_at?: string | null
-          user_id?: string | null
-          verified?: boolean | null
-        }
-        Update: {
-          created_at?: string | null
-          from_email?: string | null
-          from_name?: string | null
-          smtp_host?: string | null
-          smtp_port?: number | null
-          smtp_username?: string | null
-          updated_at?: string | null
-          user_id?: string | null
-          verified?: boolean | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
       has_active_entitlement: { Args: { _user_id: string }; Returns: boolean }
+      increment_daily_quota: {
+        Args: { p_day: string; p_function_name: string; p_subject: string }
+        Returns: number
+      }
+      increment_rate_limit: {
+        Args: {
+          p_function_name: string
+          p_subject: string
+          p_window_start: string
+        }
+        Returns: number
+      }
+      pg_try_advisory_lock: { Args: { key: number }; Returns: boolean }
+      prune_apple_notification_log: { Args: never; Returns: undefined }
+      prune_daily_quotas: { Args: never; Returns: undefined }
+      prune_gemini_usage: { Args: never; Returns: undefined }
+      prune_rate_limits: { Args: never; Returns: undefined }
+      reconcile_invoice_status: { Args: never; Returns: undefined }
+      vault_read_secret: { Args: { p_id: string }; Returns: string }
+      vault_update_secret: {
+        Args: { p_id: string; p_value: string }
+        Returns: undefined
+      }
     }
     Enums: {
       invoice_status:
@@ -678,6 +725,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       invoice_status: ["Escalated", "Overdue", "Follow-up", "Upcoming", "Paid"],
@@ -700,3 +750,5 @@ export const Constants = {
     },
   },
 } as const
+A new version of Supabase CLI is available: v2.98.2 (currently installed v2.90.0)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli

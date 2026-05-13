@@ -10,7 +10,7 @@ export default function PrivacyPolicy() {
       <div className="max-w-2xl mx-auto px-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
 
         <h1 className="text-[28px] font-bold text-foreground tracking-[-0.02em] mb-1 pt-8">Privacy Policy</h1>
-        <p className="text-xs text-muted-foreground mb-8">Last updated: April 22, 2026</p>
+        <p className="text-xs text-muted-foreground mb-8">Last updated: May 13, 2026</p>
 
         <div className="space-y-6">
           <section>
@@ -25,7 +25,7 @@ export default function PrivacyPolicy() {
           <section>
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">2. Information we collect</h2>
             <ul className="text-[14px] text-muted-foreground leading-[1.6] list-disc pl-5 space-y-1">
-              <li><span className="text-foreground font-medium">Account info</span> — name, email address, and authentication method (Google).</li>
+              <li><span className="text-foreground font-medium">Account info</span> — name, email address, and authentication method (email one-time code).</li>
               <li><span className="text-foreground font-medium">Invoice data</span> — invoice numbers, client names, client emails, amounts, due dates, descriptions, and payment status that you enter.</li>
               <li><span className="text-foreground font-medium">Follow-up content</span> — drafts and sent messages generated for you and reviewed by you.</li>
               <li><span className="text-foreground font-medium">Onboarding answers</span> — the responses you provide during the welcome quiz.</li>
@@ -36,17 +36,18 @@ export default function PrivacyPolicy() {
           <section>
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">3. How we send follow-ups</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
-              When you connect a Gmail account, ChaseHQ sends follow-up emails directly through
-              your Gmail (using the <code className="text-xs bg-muted px-1 py-0.5 rounded">gmail.send</code> scope
-              you authorize). Each message is sent from your own Gmail address with your name
-              in the From header (e.g. "Jane Smith via ChaseHQ"), and Reply-To set to your
-              account email so any replies go directly to your email inbox.
+              ChaseHQ sends follow-up emails on your behalf from{" "}
+              <span className="text-foreground font-medium">noreply@chasehq.app</span> using a
+              dedicated transactional email provider (Resend). Each message is sent with your
+              display name in the From header (e.g. "Jane Smith via ChaseHQ") and{" "}
+              <span className="text-foreground font-medium">Reply-To set to the email address
+              on your ChaseHQ account</span>, so when a client clicks reply the message goes
+              directly to your inbox.
             </p>
             <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
-              Replies from your clients arrive only in your external email inbox — ChaseHQ
-              never receives, reads, stores, or displays them. We do not access the contents
-              of your mailbox; ChaseHQ only handles the follow-up messages you author and
-              approve.
+              ChaseHQ does not receive, read, store, display, or sync inbound replies, and we
+              do not access any of your email accounts. We only handle the follow-up messages
+              you author and approve inside the app.
             </p>
           </section>
 
@@ -84,7 +85,6 @@ export default function PrivacyPolicy() {
               <li>Correct your display name in Settings; correct invoice and client details from each invoice's detail page.</li>
               <li>Delete your account and all associated data permanently from Settings → Data controls.</li>
               <li>Export a copy of your data from <span className="text-foreground font-medium">Settings → Data controls</span>.</li>
-              <li>Disconnect Google email access at any time from your Google Account permissions page.</li>
             </ul>
             <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
               California residents have additional rights under the CCPA/CPRA, including the
@@ -98,8 +98,8 @@ export default function PrivacyPolicy() {
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">7. Data Retention &amp; Security</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
               We retain your data while your account is active. When you delete your account
-              from Settings → Data controls, your invoices, follow-ups, connected email
-              credentials, and profile are deleted immediately from our live systems. Database
+              from Settings → Data controls, your invoices, follow-ups, and profile are
+              deleted immediately from our live systems. Database
               backups maintained by our hosting provider may retain a copy for a limited period
               before automatic purging. We use
               TLS for data in transit. Data at rest is protected by infrastructure-level

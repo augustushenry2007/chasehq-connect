@@ -656,7 +656,7 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
                 <div className="space-y-2 mb-4">
                   {[
                     "AI-drafted follow-ups in your tone",
-                    "Replies go to your email inbox",
+                    "Sent under your name, with replies routed to you",
                     "Chase timeline & payment history",
                   ].map((f) => (
                     <div key={f} className="flex items-center gap-2.5">

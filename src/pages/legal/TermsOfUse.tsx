@@ -10,7 +10,7 @@ export default function TermsOfUse() {
       <div className="max-w-2xl mx-auto px-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
 
         <h1 className="text-[28px] font-bold text-foreground tracking-[-0.02em] mb-1 pt-8">Terms of Use</h1>
-        <p className="text-xs text-muted-foreground mb-8">Last updated: May 6, 2026</p>
+        <p className="text-xs text-muted-foreground mb-8">Last updated: May 13, 2026</p>
 
         <div className="space-y-6">
           <section>
@@ -57,16 +57,18 @@ export default function TermsOfUse() {
           <section>
             <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground mb-2 mt-1">5. Sending Follow-ups</h2>
             <p className="text-[14px] text-muted-foreground leading-[1.6]">
-              When you connect a Gmail account, ChaseHQ sends follow-up emails through your
-              own Gmail. Messages are sent from your Gmail address with your name in the From
-              header and Reply-To set to your account email, so replies go directly to your
-              email inbox. ChaseHQ does not receive, read, store, or show those replies in
-              the app.
+              ChaseHQ sends follow-up emails on your behalf from{" "}
+              <span className="text-foreground font-medium">noreply@chasehq.app</span> using a
+              dedicated transactional email provider. Each message carries your display name
+              in the From header and Reply-To set to the email address on your ChaseHQ
+              account, so when a client clicks reply the message reaches your inbox directly.
+              ChaseHQ does not receive, read, store, or display those replies inside the app.
             </p>
             <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
-              You remain solely responsible for the content of every follow-up sent from your
-              account, including compliance with applicable email and consumer protection laws.
-              ChaseHQ may suspend sending if it detects abuse or repeated bounces.
+              You remain solely responsible for the content of every follow-up you author and
+              send through ChaseHQ, including compliance with applicable email and consumer
+              protection laws (such as the CAN-SPAM Act). We may suspend sending from your
+              account if we detect abuse or repeated bounces.
             </p>
           </section>
 

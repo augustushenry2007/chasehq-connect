@@ -251,7 +251,7 @@ export async function generateFollowupStream(
 
 export type SendResult =
   | { ok: true }
-  | { ok: false; reason: "subscription_required" | "rate_limited" | "gmail_not_connected" | "gmail_reauth_required" | "error"; message?: string };
+  | { ok: false; reason: "subscription_required" | "rate_limited" | "error"; message?: string };
 
 export async function sendFollowupEmail(
   to: string,
@@ -294,12 +294,6 @@ export async function sendFollowupEmail(
       }
       if (data.error === "rate_limited") {
         return { ok: false, reason: "rate_limited", message: data.message };
-      }
-      if (data.error === "gmail_not_connected") {
-        return { ok: false, reason: "gmail_not_connected", message: data.message };
-      }
-      if (data.error === "gmail_reauth_required") {
-        return { ok: false, reason: "gmail_reauth_required", message: data.message };
       }
       return { ok: false, reason: "error", message: data.message || data.error };
     }

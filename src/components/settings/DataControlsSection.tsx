@@ -20,9 +20,6 @@ export function DataControlsSection() {
 
   async function handleExport() {
     if (!user) return;
-    const provider = (user.app_metadata as any)?.provider;
-    const providers = (user.app_metadata as any)?.providers as string[] | undefined;
-    const signedInWithGoogle = provider === "google" || (providers?.includes("google") ?? false);
     const [followupsRes, profileRes, prefsRes, sendLogRes] = await Promise.all([
       supabase.from("followups").select("invoice_id, subject, tone, is_ai_generated, sent_at").eq("user_id", user.id),
       supabase.from("profiles").select("full_name, onboarding_completed").eq("user_id", user.id).maybeSingle(),
@@ -35,7 +32,7 @@ export function DataControlsSection() {
       requestedBy: user.email,
       account: {
         email: user.email,
-        authMethod: signedInWithGoogle ? "Google" : "Email",
+        authMethod: "Email",
         fullName: profileRes.data?.full_name ?? null,
         accountCreated: (user as any).created_at ?? null,
       },
@@ -83,7 +80,7 @@ export function DataControlsSection() {
           <AlertTriangle className="w-4 h-4 text-destructive" />
           <div className="flex-1">
             <p className="text-sm font-semibold text-destructive">Delete my data</p>
-            <p className="text-xs text-muted-foreground">Permanently remove your invoices, follow-ups, and connections</p>
+            <p className="text-xs text-muted-foreground">Permanently remove your invoices, follow-ups, and account</p>
           </div>
         </button>
       </div>
