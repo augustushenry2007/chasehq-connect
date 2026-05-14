@@ -56,3 +56,11 @@ verify_jwt = false
 # Called unauthenticated (reviewer is not yet signed in when this is invoked).
 [functions.reviewer-signin]
 verify_jwt = false
+
+# Public unsubscribe endpoint — recipients (not signed-in users) click the
+# List-Unsubscribe URL or Resend webhook hits us with delivery events.
+[functions.unsubscribe]
+verify_jwt = false
+
+[functions.resend-webhooks]
+verify_jwt = false

@@ -52,7 +52,7 @@ export default function HowItWorks() {
             From "I really should send that follow-up…" to a paid invoice, without the part you hate.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_40px_1fr_40px_1fr] items-start gap-y-7">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_40px_1fr_40px_1fr] items-stretch gap-y-7">
           <StepCard n={STEPS[0].n} title={STEPS[0].title} body={STEPS[0].body} Icon={STEPS[0].Icon} />
           <div className="hidden md:flex items-center justify-center pt-20 text-primary/35">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

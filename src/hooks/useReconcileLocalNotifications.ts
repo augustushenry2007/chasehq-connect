@@ -40,23 +40,27 @@ export function useReconcileLocalNotifications(): void {
       .gt("scheduled_for", nowISO)
       .order("scheduled_for", { ascending: true })
       .limit(200);
-    if (error || !rows?.length) return;
+    if (error) return;
 
     // Skip invoices that are paid (the hourly cron hasn't canceled their rows
-    // yet) or whose follow-up schedule is paused.
+    // yet) or whose follow-up schedule is paused. Anything not in the eligible
+    // set will be canceled at the OS level by reconcilePendingLocalNotifications.
     const paidIds = new Set(invoicesNow.filter((i) => i.status === "Paid").map((i) => i.dbId));
-    const candidateInvoiceIds = [...new Set(rows.map((r) => r.invoice_id))].filter((id) => !paidIds.has(id));
-    if (!candidateInvoiceIds.length) return;
+    const invoiceIds = [...new Set((rows ?? []).map((r) => r.invoice_id))];
 
-    const { data: scheds } = await supabase
-      .from("followup_schedules")
-      .select("invoice_id, paused")
-      .in("invoice_id", candidateInvoiceIds);
-    const pausedIds = new Set((scheds ?? []).filter((s) => s.paused).map((s) => s.invoice_id));
+    let pausedIds = new Set<string>();
+    if (invoiceIds.length > 0) {
+      const { data: scheds } = await supabase
+        .from("followup_schedules")
+        .select("invoice_id, paused")
+        .in("invoice_id", invoiceIds);
+      pausedIds = new Set((scheds ?? []).filter((s) => s.paused).map((s) => s.invoice_id));
+    }
 
-    const eligible = rows.filter((r) => !paidIds.has(r.invoice_id) && !pausedIds.has(r.invoice_id));
-    if (!eligible.length) return;
+    const eligible = (rows ?? []).filter((r) => !paidIds.has(r.invoice_id) && !pausedIds.has(r.invoice_id));
 
+    // Always call: an empty eligible set still drives the cancellation pass for
+    // OS notifications stranded by paid/paused/canceled rows.
     await reconcilePendingLocalNotifications(eligible);
   }, [isAuthenticated, user?.id]);
 
@@ -77,5 +81,29 @@ export function useReconcileLocalNotifications(): void {
     };
     window.addEventListener("chasehq:app-resumed", onResume);
     return () => window.removeEventListener("chasehq:app-resumed", onResume);
+  }, [isAuthenticated, user?.id, runReconcile]);
+
+  // On realtime change to this user's notifications: another device paused /
+  // marked paid / edited a schedule, so OS state on THIS device is now stale.
+  // Coalesce bursts (rapid INSERT+UPDATE on the same row) with a short debounce.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    if (!isAuthenticated || !user?.id) return;
+    let timer: number | null = null;
+    const channel = supabase
+      .channel(`notifications-reconcile-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        () => {
+          if (timer !== null) clearTimeout(timer);
+          timer = window.setTimeout(() => { void runReconcile(); }, 1500);
+        },
+      )
+      .subscribe();
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+      void supabase.removeChannel(channel);
+    };
   }, [isAuthenticated, user?.id, runReconcile]);
 }

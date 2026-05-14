@@ -280,6 +280,14 @@ MANDATORY FIELDS — every email body MUST explicitly mention all of:
 
 If any field above is genuinely missing from the input, omit only that field gracefully — never write a placeholder like "$" or "[amount]" with no value.
 
+DELIVERABILITY — to keep the email out of Promotions/Spam:
+- Do NOT use ALL CAPS except for legitimate proper nouns (company names, acronyms like USA, EU). "FINAL NOTICE" in the subject is allowed only on Final Notice tone.
+- Use at most one exclamation mark in the entire body.
+- Avoid spam-trigger phrases: "Urgent!", "Act now", "Click here", "Risk-free", "100% guaranteed", "Limited time", "$$$", "Free money".
+- Do not repeat punctuation (no "!!!", "???", "..!").
+- Do not write all-caps words longer than 3 characters (e.g. "REALLY", "ASAP") — use normal case.
+- Keep the tone professional and calm regardless of the assigned tone — even Urgent or Final Notice should sound like a human, not a collection scam.
+
 TONE GUIDELINES for "${tone}":
 ${toneInstruction}${buildPersonalizationClause(userProfile, tone)}`;
 

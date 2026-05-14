@@ -85,14 +85,19 @@ type ReconcileRow = {
 };
 
 /**
- * Re-arm any future notification row (passed in nearest-first) that isn't currently
- * scheduled with the OS. Idempotent — uses the same stable notifId as scheduleForInvoice,
- * so rows already armed are skipped. Used at native launch to repair OS notifications
- * lost to a reinstall / notification purge / device restore (DB rows + in-app bell +
- * email cron all survive that; only the OS schedule doesn't), and to backfill anything
- * an earlier scheduleForInvoice dropped past the iOS limit. Never prompts for permission
- * — a silent background reconcile shouldn't pop a dialog; if undetermined/denied there's
- * nothing armed to reconcile anyway.
+ * Converge OS-scheduled notifications to the desired set (DB rows passed in).
+ * - Cancels OS notifications whose (invoice_id, step_idx) is no longer in the
+ *   desired set — fixes the multi-device divergence where Phone A pauses/pays
+ *   an invoice and Phone B's backgrounded OS would otherwise still fire ghost
+ *   reminders.
+ * - Arms desired rows missing from OS — repairs OS schedules lost to reinstall /
+ *   notification purge / device restore, and backfills anything earlier
+ *   scheduleForInvoice dropped past the iOS 64-pending cap.
+ *
+ * Idempotent (stable notifIds). Caller passes only rows that SHOULD remain
+ * armed (already filtered for paid/paused) — anything in OS not in that set is
+ * cancelled. Silent on undetermined/denied permission (no prompt from a
+ * background reconcile).
  */
 export async function reconcilePendingLocalNotifications(rows: ReconcileRow[]): Promise<void> {
   if (!isPushEnabled()) return;
@@ -100,17 +105,37 @@ export async function reconcilePendingLocalNotifications(rows: ReconcileRow[]): 
     const { display } = await LocalNotifications.checkPermissions();
     if (display !== "granted") return;
     const { notifications: pending } = await LocalNotifications.getPending();
-    const pendingIds = new Set(pending.map((n) => n.id));
-    const slots = Math.max(0, RECONCILE_CAP - pendingIds.size);
-    if (slots === 0) return;
     const now = Date.now();
+
+    const desiredIds = new Set<number>();
+    for (const r of rows) {
+      const at = new Date(r.scheduled_for);
+      if (isNaN(at.getTime()) || at.getTime() <= now) continue;
+      desiredIds.add(notifId(r.invoice_id, r.schedule_step_index));
+    }
+
+    // Cancel OS-scheduled notifications no longer desired. Only touch ones we
+    // armed (carry invoice_id in extra) — defensive against any future
+    // non-chase scheduling that lands in the same pending list.
+    const toCancel = pending
+      .filter((n) => !desiredIds.has(n.id) && !!(n.extra as { invoice_id?: string } | undefined)?.invoice_id)
+      .map((n) => ({ id: n.id }));
+    if (toCancel.length > 0) {
+      await LocalNotifications.cancel({ notifications: toCancel });
+    }
+
+    const canceledIds = new Set(toCancel.map((c) => c.id));
+    const remainingPendingIds = new Set(pending.map((n) => n.id).filter((id) => !canceledIds.has(id)));
+    const slots = Math.max(0, RECONCILE_CAP - remainingPendingIds.size);
+    if (slots === 0) return;
+
     const toArm: { id: number; title: string; body: string; schedule: { at: Date; allowWhileIdle: boolean }; extra: { invoice_id: string } }[] = [];
     for (const r of rows) {
       if (toArm.length >= slots) break;
       const at = new Date(r.scheduled_for);
       if (isNaN(at.getTime()) || at.getTime() <= now) continue;
       const id = notifId(r.invoice_id, r.schedule_step_index);
-      if (pendingIds.has(id)) continue;
+      if (remainingPendingIds.has(id)) continue;
       toArm.push({
         id,
         title: r.title,

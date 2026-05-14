@@ -16,6 +16,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
+import NotificationRationaleSheet from "@/components/NotificationRationaleSheet";
 import TrialBanner from "@/components/TrialBanner";
 import NotificationBell from "@/components/NotificationBell";
 import { displayNamePromptShownKey } from "@/lib/storageKeys";
@@ -115,6 +116,9 @@ export default function DashboardScreen() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden pt-[env(safe-area-inset-top,0px)] animate-page-enter">
+      {user?.email?.toLowerCase() !== "appreview@chasehq.app" && (
+        <NotificationRationaleSheet hasAnyInvoice={invoices.length > 0} />
+      )}
       <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24">
       <TrialBanner />
       {isAuthenticated && missedSteps.length > 0 && (

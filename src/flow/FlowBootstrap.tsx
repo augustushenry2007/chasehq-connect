@@ -114,5 +114,18 @@ export function FlowBootstrap() {
     }
   }, [invoices.length, invoicesLoading, state, send]);
 
+  // Recovery: if the profile row gets wiped mid-session (admin deletion, manual
+  // SQL, etc.), the user is stranded on whatever screen they were on with no
+  // route home. Detect post-boot `hasCompletedOnboarding` flipping false and
+  // reset to LANDING so they can re-onboard.
+  useEffect(() => {
+    if (!bootedRef.current) return;
+    if (!authReady || !isAuthenticated || !profileReady) return;
+    if (hasCompletedOnboarding) return;
+    if (state === FlowState.LANDING || state === FlowState.ONBOARDING || state === FlowState.FEATURE_TOUR) return;
+    if (import.meta.env.DEV) console.log("[FLOW] post-boot onboarding flag missing — RESET_TO_LANDING from", state);
+    send("RESET_TO_LANDING");
+  }, [authReady, isAuthenticated, profileReady, hasCompletedOnboarding, state, send]);
+
   return null;
 }

@@ -72,6 +72,14 @@ export default function TermsOfUse() {
               U.S., CASL in Canada, and GDPR/ePrivacy in the EU/UK). We may suspend sending from
               your account if we detect abuse or repeated bounces.
             </p>
+            <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
+              Every follow-up email includes a one-click unsubscribe link (in the
+              List-Unsubscribe header, surfaced by Gmail, Apple Mail, and Yahoo) and a
+              mailto:unsubscribe@chasehq.app address. Recipients who unsubscribe, mark a
+              message as spam, or whose address hard-bounces are added to our suppression
+              list and will not receive future ChaseHQ-routed emails from any sender — this
+              is enforced server-side and cannot be overridden from the app.
+            </p>
           </section>
 
           <section>

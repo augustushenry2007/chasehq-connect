@@ -321,30 +321,30 @@ export default function ChaseSchedule({
 
   function persist(nextSteps: ScheduleStep[], nextPaused: boolean, silent = false, message?: string): Promise<void> {
     if (!user?.id) return Promise.resolve();
-    const userId = user.id;
     userTouchedRef.current = true;
     const run = async () => {
       setSaving(true);
       let ok = true;
       try {
-        await supabase.from("followup_schedules").upsert(
-          { invoice_id: invoice.dbId, user_id: userId, steps: nextSteps as unknown as never, timezone: getUserTimezone(), paused: nextPaused },
-          { onConflict: "invoice_id" },
-        );
-        await supabase.from("notifications").delete().eq("invoice_id", invoice.dbId).eq("status", "pending");
-        if (!nextPaused) {
-          const rows = nextSteps.map((step, idx) => ({
-            user_id: userId,
-            invoice_id: invoice.dbId,
-            schedule_step_index: idx,
-            type: step.type,
-            title: buildNotificationTitle(step.type, invoice.client, invoice.amount),
-            body: buildNotificationBody(step.type, invoice.client),
-            scheduled_for: computeStepDate(invoice.dueDateISO, step.offset_days),
-            status: "pending" as const,
-          }));
-          if (rows.length) await supabase.from("notifications").insert(rows);
-        }
+        const notificationRows = nextPaused
+          ? []
+          : nextSteps.map((step, idx) => ({
+              schedule_step_index: idx,
+              type: step.type,
+              title: buildNotificationTitle(step.type, invoice.client, invoice.amount),
+              body: buildNotificationBody(step.type, invoice.client),
+              scheduled_for: computeStepDate(invoice.dueDateISO, step.offset_days),
+            }));
+        // Single transaction: schedule upsert + pending delete + new inserts.
+        // Old client-side three-step path could half-apply on a network drop.
+        const { error: rpcErr } = await supabase.rpc("persist_chase_schedule", {
+          p_invoice_id: invoice.dbId,
+          p_steps: nextSteps as unknown as never,
+          p_timezone: getUserTimezone(),
+          p_paused: nextPaused,
+          p_notifications: notificationRows as unknown as never,
+        });
+        if (rpcErr) throw rpcErr;
         const anchorInvoice = { dueDateISO: invoice.dueDateISO, createdAtISO: invoice.createdAtISO };
         await cancelForInvoice(invoice.dbId, Math.max(8, nextSteps.length));
         if (!nextPaused) {
@@ -516,7 +516,8 @@ export default function ChaseSchedule({
             <button
               key={p}
               onClick={() => handlePreset(p)}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-medium capitalize transition-colors ${
+              disabled={saving}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-medium capitalize transition-colors disabled:opacity-50 ${
                 currentPreset === p
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-muted-foreground hover:text-foreground"
@@ -626,7 +627,8 @@ export default function ChaseSchedule({
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
             <button
               onClick={togglePaused}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              disabled={saving}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
                 paused ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground hover:text-foreground"
               }`}
             >

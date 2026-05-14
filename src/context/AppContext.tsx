@@ -7,6 +7,7 @@ import { DEMO_INVOICES, DEMO_USER, DEMO_FULL_NAME } from "@/lib/demoData";
 import { formatDate } from "@/lib/data";
 import { isTestingMode, clearTestingState } from "@/lib/testingMode";
 import { clearPending, clearGuestOnboarded } from "@/lib/localInvoice";
+import { cancelAllPending } from "@/lib/localNotifications";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 import { computeInvoiceStatus, computeDaysPastDue } from "@/lib/invoiceStatus";
 import { getUserTimezone } from "@/lib/scheduleDefaults";
@@ -544,6 +545,7 @@ function AppProviderReal({ children }: { children: ReactNode }) {
     // Tear down all realtime channels *before* clearing auth state so a queued
     // postgres_changes event can't fire a refetch against a half-cleared session.
     try { await supabase.removeAllChannels(); } catch { /* best-effort */ }
+    try { await cancelAllPending(); } catch { /* best-effort */ }
     try { await logoutRC(); } catch {}
     try {
       await supabase.auth.signOut();

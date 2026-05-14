@@ -5,6 +5,8 @@ import { buildCors } from "../_shared/cors.ts";
 import { checkRateLimit, rateLimitedResponse } from "../_shared/rate_limit.ts";
 import { logError, logWarn } from "../_shared/log.ts";
 import { verifyWithRevenueCat } from "../_shared/revenuecat.ts";
+import { buildUnsubscribeHeaders } from "../_shared/unsubscribe.ts";
+import { isRecipientSuppressed } from "../_shared/suppression.ts";
 
 type Json = (body: unknown, status?: number) => Response;
 
@@ -106,6 +108,8 @@ serve(async (req) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to))) {
       return json({ error: "Invalid recipient email" }, 400);
     }
+
+    const recipient = String(to);
 
     const userToken = req.headers.get("X-User-Token") ??
       req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
@@ -248,10 +252,21 @@ serve(async (req) => {
       });
     }
 
-    const resendKey = Deno.env.get("RESEND_API_KEY");
+    const resendKey = Deno.env.get("RESEND_KEY_TRANSACTIONAL");
     if (!resendKey) {
-      logError("send-email: RESEND_API_KEY not configured");
+      logError("send-email: RESEND_KEY_TRANSACTIONAL not configured");
       return json({ error: "send_unavailable", message: "Sending is temporarily unavailable. Please try again shortly." }, 500);
+    }
+
+    // Don't try to deliver to a recipient that previously unsubscribed,
+    // hard-bounced, or marked us as spam — Resend will accept but downgrade
+    // our domain reputation, and the recipient asked us to stop. Surface a
+    // user-visible message so the freelancer knows why nothing was sent.
+    if (await isRecipientSuppressed(supabaseAdmin, recipient)) {
+      return json({
+        error: "recipient_suppressed",
+        message: "This recipient asked not to receive ChaseHQ emails. Reach out another way.",
+      });
     }
 
     // Resend sends from ChaseHQ's verified domain. Display name carries the
@@ -263,6 +278,7 @@ serve(async (req) => {
       : "ChaseHQ <noreply@chasehq.app>";
     const replyTo = user.email ?? undefined;
 
+    const unsubHeaders = await buildUnsubscribeHeaders(recipient);
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
@@ -273,7 +289,10 @@ serve(async (req) => {
         text: message,
         html: buildPlainHtml(message),
         reply_to: replyTo,
-        headers: invoiceId ? { "X-Entity-Ref-ID": String(invoiceId) } : undefined,
+        headers: {
+          ...unsubHeaders,
+          ...(invoiceId ? { "X-Entity-Ref-ID": String(invoiceId) } : {}),
+        },
       }),
     });
 
@@ -282,6 +301,8 @@ serve(async (req) => {
       logError("send-email Resend error:", res.status, body.slice(0, 300));
       return json({ error: "send_failed", message: "We couldn't send this one. Your draft is safe — give it another try." }, 502);
     }
+    const resendBody = await res.json().catch(() => ({}));
+    const resendMessageId = typeof resendBody?.id === "string" ? resendBody.id : null;
 
     // Distinct "copy for your records" email to the sender. Separate envelope
     // (no "via ChaseHQ" From, "Copy:" subject prefix, banner at top of body) so
@@ -299,6 +320,7 @@ serve(async (req) => {
           subject: `Copy: ${subject}`,
           text: buildCopyPlainText(message, to, sentAt),
           html: buildCopyHtml(message, to, sentAt),
+          headers: await buildUnsubscribeHeaders(user.email),
         }),
       });
       if (!copyRes.ok) {
@@ -311,6 +333,8 @@ serve(async (req) => {
       user_id: user.id,
       recipient: to,
       invoice_id: invoiceId ?? null,
+      resend_message_id: resendMessageId,
+      delivery_status: "queued",
     });
     if (sendLogErr) {
       // This is a money + audit record (the free-send tally is counted from it,

@@ -19,6 +19,7 @@ interface OuterPayload {
   notificationType: string;
   subtype?: string;
   notificationUUID?: string;
+  signedDate?: number; // ms since epoch — Apple's "when this event was signed"
   data?: {
     signedTransactionInfo?: string;
     signedRenewalInfo?: string;
@@ -109,6 +110,24 @@ serve(async (req) => {
       .eq("apple_original_transaction_id", originalTransactionId)
       .maybeSingle();
 
+    // Out-of-order protection: ignore events whose signedDate is older than the
+    // last event we already applied to this subscription. Apple guarantees
+    // notifications are delivered but not in strict order; a delayed
+    // DID_FAIL_TO_RENEW arriving after DID_RENEW would otherwise regress status.
+    const signedDateIso = typeof outer.signedDate === "number"
+      ? new Date(outer.signedDate).toISOString()
+      : null;
+    if (signedDateIso && subRow?.latest_event_signed_date) {
+      if (signedDateIso <= (subRow.latest_event_signed_date as string)) {
+        logInfo("apple-notifications: stale event ignored", { signedDate: signedDateIso, last: subRow.latest_event_signed_date });
+        await admin
+          .from("apple_notification_log")
+          .update({ processed_ok: true, original_transaction_id: originalTransactionId })
+          .eq("notification_uuid", notificationUUID);
+        return json({ ok: true, stale: true });
+      }
+    }
+
     if (!subRow) {
       logWarn("apple-notifications: no subscription row for", originalTransactionId);
       // Mark log entry processed so we don't keep retrying lookups for it.
@@ -121,7 +140,10 @@ serve(async (req) => {
 
     const expiresMs = parseInt(transactionInfo.expiresDate || "0", 10);
     const nowIso = new Date().toISOString();
-    const update: Record<string, unknown> = { last_event_at: nowIso };
+    const update: Record<string, unknown> = {
+      last_event_at: nowIso,
+      ...(signedDateIso ? { latest_event_signed_date: signedDateIso } : {}),
+    };
     let eventType = "webhook_received";
 
     switch (outer.notificationType) {
@@ -137,10 +159,26 @@ serve(async (req) => {
         eventType = "payment_failed";
         break;
       case "GRACE_PERIOD_EXPIRED":
-      case "EXPIRED":
+      case "EXPIRED": {
+        // Belt-and-braces guard: only flip to expired if the period really has
+        // ended. Stops a delayed EXPIRED event arriving after a successful
+        // DID_RENEW from regressing the subscription on its first call (the
+        // signedDate guard above handles ordering once a baseline exists).
+        const periodEndIso = expiresMs
+          ? new Date(expiresMs).toISOString()
+          : (subRow.current_period_end as string | null);
+        if (periodEndIso && periodEndIso > nowIso) {
+          logInfo("apple-notifications: EXPIRED received but period not yet ended; ignoring", { periodEnd: periodEndIso });
+          await admin
+            .from("apple_notification_log")
+            .update({ processed_ok: true, original_transaction_id: originalTransactionId })
+            .eq("notification_uuid", notificationUUID);
+          return json({ ok: true, ignored: "period_not_ended" });
+        }
         update.status = "expired";
         eventType = "expired";
         break;
+      }
       case "DID_CHANGE_RENEWAL_STATUS":
         if (renewalInfo?.autoRenewStatus === 0) {
           update.canceled_at = nowIso;

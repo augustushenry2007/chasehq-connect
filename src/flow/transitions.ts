@@ -15,7 +15,8 @@ export type FlowEvent =
   | "BACK_TO_DASHBOARD"
   | "SIGN_OUT"
   | "INVOICES_LOADED"
-  | "REPLAY_TOUR";
+  | "REPLAY_TOUR"
+  | "RESET_TO_LANDING";
 
 // Allowed transitions table. Anything not listed is rejected & logged.
 type Table = Partial<Record<FlowStateType, Partial<Record<FlowEvent, FlowStateType>>>>;
@@ -26,21 +27,25 @@ export const TRANSITIONS: Table = {
     BOOT_AUTHED_FRESH_SIGNUP: FlowState.ONBOARDING,
     BOOT_AUTHED_FIRST_RUN: FlowState.DASHBOARD_EMPTY,
     BOOT_AUTHED_RESUMING: FlowState.DASHBOARD_ACTIVE,
+    RESET_TO_LANDING: FlowState.LANDING,
   },
   [FlowState.LANDING]: {
     START: FlowState.ONBOARDING,
     AUTH_SUCCESS: FlowState.DASHBOARD_ACTIVE,
     SIGN_OUT: FlowState.LANDING,
+    RESET_TO_LANDING: FlowState.LANDING,
   },
   [FlowState.ONBOARDING]: {
     DECIDE_SKIP: FlowState.FEATURE_TOUR,
     TOUR_DONE: FlowState.DASHBOARD_EMPTY,
     SIGN_OUT: FlowState.LANDING,
+    RESET_TO_LANDING: FlowState.LANDING,
   },
   [FlowState.FEATURE_TOUR]: {
     TOUR_DONE: FlowState.DASHBOARD_EMPTY,
     TOUR_SKIP: FlowState.DASHBOARD_EMPTY,
     SIGN_OUT: FlowState.LANDING,
+    RESET_TO_LANDING: FlowState.LANDING,
   },
   [FlowState.DASHBOARD_EMPTY]: {
     INVOICE_CREATED: FlowState.INVOICE_DETAIL,
@@ -49,6 +54,7 @@ export const TRANSITIONS: Table = {
     AUTH_SUCCESS: FlowState.DASHBOARD_ACTIVE,
     REPLAY_TOUR: FlowState.FEATURE_TOUR,
     SIGN_OUT: FlowState.LANDING,
+    RESET_TO_LANDING: FlowState.LANDING,
   },
   [FlowState.DASHBOARD_ACTIVE]: {
     OPEN_INVOICE: FlowState.INVOICE_DETAIL,
@@ -56,11 +62,13 @@ export const TRANSITIONS: Table = {
     INVOICE_CREATED: FlowState.DASHBOARD_ACTIVE,
     REPLAY_TOUR: FlowState.FEATURE_TOUR,
     SIGN_OUT: FlowState.LANDING,
+    RESET_TO_LANDING: FlowState.LANDING,
   },
   [FlowState.INVOICE_DETAIL]: {
     BACK_TO_DASHBOARD: FlowState.DASHBOARD_ACTIVE,
     OPEN_INVOICE: FlowState.INVOICE_DETAIL,
     SIGN_OUT: FlowState.LANDING,
+    RESET_TO_LANDING: FlowState.LANDING,
   },
 };
 

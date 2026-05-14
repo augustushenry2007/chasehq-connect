@@ -5,7 +5,7 @@ import { STORAGE_KEYS } from "@/lib/storageKeys";
 import { type SchedulePreset, type ScheduleStep, PRESET_STEPS, getDefaultStepsForInvoice } from "@/lib/scheduleDefaults";
 import {
   ChevronDown, LogOut, Sparkles,
-  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, CreditCard, ChevronRight,
+  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, CreditCard, ChevronRight, Loader2,
 } from "lucide-react";
 import { requestLocalNotificationPermission, cancelAllPending } from "@/lib/localNotifications";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -381,7 +381,8 @@ function ScheduleSection() {
           disabled={applying}
           className="text-left px-3.5 py-3 rounded-xl border border-border bg-card hover:bg-accent transition-colors disabled:opacity-60"
         >
-          <p className="text-xs font-semibold text-foreground">
+          <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+            {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {applying ? "Applying…" : `Apply to ${eligibleCount} existing invoice${eligibleCount === 1 ? "" : "s"}`}
           </p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -765,7 +766,7 @@ export default function SettingsScreen() {
               >
                 <div className="flex flex-col divide-y divide-border -mx-4 -my-4">
                   <button onClick={handleExport} disabled={exporting} className="flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors disabled:opacity-60">
-                    <Download className="w-4 h-4 text-muted-foreground" />
+                    {exporting ? <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /> : <Download className="w-4 h-4 text-muted-foreground" />}
                     <div className="flex-1">
                       <p className="text-sm font-semibold text-foreground">{exporting ? "Exporting…" : "Export my data"}</p>
                       <p className="text-xs text-muted-foreground">Download a JSON copy of your invoices and account info</p>
@@ -845,8 +846,9 @@ export default function SettingsScreen() {
             <AlertDialogAction
               onClick={handleDeleteAccount}
               disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 flex items-center gap-2"
             >
+              {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
               {deleting ? "Deleting…" : "Delete everything"}
             </AlertDialogAction>
           </AlertDialogFooter>

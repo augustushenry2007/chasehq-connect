@@ -49,6 +49,19 @@ export default function PrivacyPolicy() {
               do not access any of your email accounts. We only handle the follow-up messages
               you author and approve inside the app.
             </p>
+            <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
+              Every follow-up email includes a one-click unsubscribe link in the
+              List-Unsubscribe header (surfaced by major mailbox providers as an
+              "Unsubscribe" button) and a mailto:unsubscribe@chasehq.app address. Once a
+              recipient unsubscribes, marks a ChaseHQ email as spam, or their address
+              hard-bounces, that address is added to a server-side suppression list and we
+              will not send any further mail to it from any ChaseHQ account.
+            </p>
+            <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
+              Follow-up emails sent by ChaseHQ do not contain tracking pixels or
+              read-receipt mechanisms. We do not know whether a recipient has opened
+              a message.
+            </p>
           </section>
 
           <section>

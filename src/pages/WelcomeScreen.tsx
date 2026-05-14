@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApp } from "@/context/AppContext";
@@ -33,6 +34,7 @@ const REVIEWER_CODE = "123456";
 
 export default function WelcomeScreen() {
   const { isAuthenticated } = useApp();
+  const navigate = useNavigate();
   const handleDemoTap = useDemoTap();
   const isDemoMode = localStorage.getItem("chasehq_demo_mode") === "1";
 
@@ -41,6 +43,7 @@ export default function WelcomeScreen() {
   const [code, setCode] = useState("");
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const verifyingRef = useRef(false);
   const [resendCountdown, setResendCountdown] = useState(0);
 
   useEffect(() => {
@@ -99,31 +102,35 @@ export default function WelcomeScreen() {
   }
 
   async function handleVerify(token: string) {
-    if (verifying) return;
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
     setVerifying(true);
     try {
       const trimmedEmail = email.trim().toLowerCase();
 
-      // App Review path: the reviewer-signin function trades the fixed code
-      // for a magic-link token_hash that establishes a real session.
+      // App Review path: reviewer-signin completes verification server-side and returns
+      // a full session. setSession() stores it locally and fires SIGNED_IN — no
+      // client-side verifyOtp call needed.
       if (trimmedEmail === REVIEWER_EMAIL && token === REVIEWER_CODE) {
-        const { data, error: fnError } = await supabase.functions.invoke<{ token_hash: string }>(
-          "reviewer-signin",
-          { body: { email: trimmedEmail, code: token } },
-        );
-        if (fnError || !data?.token_hash) {
+        const { data, error: fnError } = await supabase.functions.invoke<{
+          access_token: string;
+          refresh_token: string;
+        }>("reviewer-signin", { body: { email: trimmedEmail, code: token } });
+        if (fnError || !data?.access_token) {
           toast.error("That code didn't work. Try again.");
           setCode("");
+          verifyingRef.current = false;
           setVerifying(false);
           return;
         }
-        const { error: verifyError } = await supabase.auth.verifyOtp({
-          token_hash: data.token_hash,
-          type: "magiclink",
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
         });
-        if (verifyError) {
-          toast.error(verifyError.message || "Sign-in failed. Try again.");
+        if (sessionError) {
+          toast.error(sessionError.message || "Sign-in failed. Try again.");
           setCode("");
+          verifyingRef.current = false;
           setVerifying(false);
         }
         return;
@@ -137,6 +144,7 @@ export default function WelcomeScreen() {
       if (error) {
         toast.error(error.message || "That code didn't work. Try again.");
         setCode("");
+        verifyingRef.current = false;
         setVerifying(false);
         return;
       }
@@ -146,6 +154,7 @@ export default function WelcomeScreen() {
     } catch {
       toast.error("Network error. Try again.");
       setCode("");
+      verifyingRef.current = false;
       setVerifying(false);
     }
   }
@@ -229,7 +238,10 @@ export default function WelcomeScreen() {
 
               {!isDemoMode && (
                 <p className="text-[11px] text-muted-foreground/80 mt-1 leading-snug">
-                  By continuing, you agree to our Terms and Privacy Policy.
+                  By continuing, you agree to our{" "}
+                  <button onClick={() => navigate("/legal/terms")} className="underline">Terms</button>{" "}
+                  and{" "}
+                  <button onClick={() => navigate("/legal/privacy")} className="underline">Privacy Policy</button>.
                 </p>
               )}
             </form>

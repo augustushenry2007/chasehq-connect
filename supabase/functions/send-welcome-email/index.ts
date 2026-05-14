@@ -1,6 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCors, preflight } from "../_shared/cors.ts";
 import { logError } from "../_shared/log.ts";
+import { buildUnsubscribeHeaders } from "../_shared/unsubscribe.ts";
+import { isRecipientSuppressed } from "../_shared/suppression.ts";
 
 function escapeHtml(s: string): string {
   return s
@@ -11,7 +13,7 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
+const RESEND_API_KEY = Deno.env.get("RESEND_KEY_TRANSACTIONAL")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -44,6 +46,14 @@ Deno.serve(async (req) => {
     return new Response("User not found", { status: 404, headers: cors });
   }
 
+  // Respect prior unsubscribe / bounce / complaint. A re-signup from a
+  // previously-suppressed address shouldn't auto-resume welcome mail.
+  if (await isRecipientSuppressed(admin, user.email)) {
+    return new Response(JSON.stringify({ ok: true, skipped: "suppressed" }), {
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
   // First name from Google-provided full_name; fall back to "there" if absent.
   // Email prefix is intentionally NOT used — it produces garbage like "agushenry2007".
   // Escaped because full_name ultimately derives from a profiles row that users can edit.
@@ -56,10 +66,12 @@ Deno.serve(async (req) => {
       Authorization: `Bearer ${RESEND_API_KEY}`,
     },
     body: JSON.stringify({
-      from: "ChaseHQ <support@chasehq.app>",
+      from: "ChaseHQ <noreply@chasehq.app>",
+      reply_to: "support@chasehq.app",
       to: [user.email],
       subject: "Welcome to ChaseHQ",
       html: buildEmail(firstName),
+      headers: await buildUnsubscribeHeaders(user.email),
     }),
   });
 

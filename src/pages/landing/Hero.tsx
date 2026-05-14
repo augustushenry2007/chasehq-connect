@@ -25,7 +25,7 @@ export default function Hero() {
             </p>
             <div className="flex flex-col items-start gap-2.5">
               <AppStoreBadge size="lg" />
-              <p className="text-[13px] text-muted-foreground ml-1">iPhone · Free to start</p>
+              <p className="text-[13px] text-muted-foreground ml-1">iPhone · Free 14-day trial, then $9.99/month</p>
             </div>
           </div>
 

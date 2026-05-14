@@ -12,6 +12,8 @@
 //                dead-lettered — their count is surfaced in the response + logs.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { logError, logWarn } from "../_shared/log.ts";
+import { buildUnsubscribeHeaders } from "../_shared/unsubscribe.ts";
+import { isRecipientSuppressed } from "../_shared/suppression.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,12 +22,24 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const RESEND_API_KEY = Deno.env.get("RESEND_KEY_BULK");
 const FROM_EMAIL = "ChaseHQ <noreply@chasehq.app>";
 
 const MAX_EMAIL_ATTEMPTS = 5;
-const RETRY_WINDOW_HOURS = 48;
+// Match the dead-letter window — gives a transient Resend outage room to recover
+// across a full day before the row is abandoned.
+const RETRY_WINDOW_HOURS = 24 * 7;
 const DEAD_LETTER_WINDOW_HOURS = 24 * 7;
+
+// Exponential backoff: 1, 2, 4, 8, 16 minutes between attempts. Keeps a row
+// from burning through MAX_EMAIL_ATTEMPTS in the first 5 cron ticks of an
+// outage.
+function backoffEligible(attempts: number | null, lastAttemptAt: string | null): boolean {
+  if (lastAttemptAt === null) return true;
+  const minutesSince = (Date.now() - new Date(lastAttemptAt).getTime()) / 60_000;
+  const requiredGap = Math.pow(2, Math.min(attempts ?? 0, 4));
+  return minutesSince >= requiredGap;
+}
 
 // Advisory-lock key. Any 32-bit int will do; we just need a constant so all
 // invocations contend on the same lock.
@@ -56,15 +70,40 @@ function isQuietHour(hour: number, start: number, end: number): boolean {
 // Returns true only when Resend accepted the message. Throws are *not* caught
 // here — the per-row handler treats a throw the same as a `false` (a failed
 // attempt) but logs the stack.
-async function sendResendEmail(to: string, subject: string, html: string): Promise<boolean> {
+async function sendResendEmail(
+  admin: ReturnType<typeof createClient>,
+  to: string,
+  subject: string,
+  html: string,
+  text: string,
+  replyTo: string | undefined,
+  invoiceId: string,
+): Promise<boolean> {
   if (!RESEND_API_KEY) {
     logWarn("RESEND_API_KEY not set — skipping email");
     return false;
   }
+  // Don't burn domain reputation on a recipient that bounced or unsubscribed.
+  if (await isRecipientSuppressed(admin, to)) {
+    logWarn("[dispatch] skipping send to suppressed recipient");
+    return false;
+  }
+  const unsubHeaders = await buildUnsubscribeHeaders(to);
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
+    body: JSON.stringify({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      html,
+      text,
+      reply_to: replyTo,
+      headers: { ...unsubHeaders, "X-Entity-Ref-ID": invoiceId },
+    }),
+    // Resend's tail latency can stall a connection; cron has a 60s budget for
+    // ~200 rows, so cap per-call at 15s to keep the batch moving.
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     logError("Resend error:", res.status, (await res.text()).slice(0, 300));
@@ -83,6 +122,7 @@ type DueRow = {
   scheduled_for: string;
   attempts: number | null;
   email_attempts: number | null;
+  last_email_attempt_at: string | null;
 };
 
 type Invoice = {
@@ -95,24 +135,34 @@ type Invoice = {
   invoice_number: string;
 };
 
-function buildEmailContent(inv: Invoice): { subject: string; html: string } {
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildEmailContent(inv: Invoice): { subject: string; html: string; text: string } {
   const amountFormatted = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(inv.amount));
   const overdueText = inv.days_past_due > 0
     ? `${inv.days_past_due} day${inv.days_past_due === 1 ? "" : "s"} overdue`
     : "due soon";
+  const client = escapeHtml(inv.client);
+  const invoiceNumber = escapeHtml(inv.invoice_number);
   const subject = `Follow-up due: ${inv.client} · ${inv.invoice_number}`;
-  const html = `
-    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-      <h2 style="margin:0 0 8px;font-size:18px;color:#111">Time to follow up</h2>
-      <p style="margin:0 0 16px;color:#555;font-size:14px">
-        A follow-up is due for <strong>${inv.client}</strong> — invoice <strong>${inv.invoice_number}</strong>
-        for <strong>${amountFormatted}</strong> is <strong>${overdueText}</strong>.
-      </p>
-      <p style="margin:0 0 24px;color:#555;font-size:14px">Open ChaseHQ to review the AI-drafted follow-up and send it when you're ready.</p>
-      <p style="margin:0;color:#aaa;font-size:12px">You're receiving this because you enabled email notifications in ChaseHQ settings.</p>
-    </div>
-  `;
-  return { subject, html };
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body style="margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"><div style="max-width:480px;margin:0 auto;padding:24px"><h2 style="margin:0 0 8px;font-size:18px;color:#111">Time to follow up</h2><p style="margin:0 0 16px;color:#555;font-size:14px">A follow-up is due for <strong>${client}</strong> — invoice <strong>${invoiceNumber}</strong> for <strong>${amountFormatted}</strong> is <strong>${overdueText}</strong>.</p><p style="margin:0 0 24px;color:#555;font-size:14px">Open ChaseHQ to review the AI-drafted follow-up and send it when you're ready.</p><p style="margin:0;color:#aaa;font-size:12px">You're receiving this because you enabled email notifications in ChaseHQ settings.</p></div></body></html>`;
+  const text = [
+    `Time to follow up`,
+    ``,
+    `A follow-up is due for ${inv.client} — invoice ${inv.invoice_number} for ${amountFormatted} is ${overdueText}.`,
+    ``,
+    `Open ChaseHQ to review the AI-drafted follow-up and send it when you're ready.`,
+    ``,
+    `You're receiving this because you enabled email notifications in ChaseHQ settings.`,
+  ].join("\n");
+  return { subject, html, text };
 }
 
 // Shared validity gate for a notification row: the invoice still exists, is
@@ -238,7 +288,7 @@ Deno.serve(async (req) => {
   // --- Pass 1: due pending notifications ---
   const { data: due, error } = await admin
     .from("notifications")
-    .select("id, user_id, invoice_id, type, title, body, scheduled_for, attempts, email_attempts")
+    .select("id, user_id, invoice_id, type, title, body, scheduled_for, attempts, email_attempts, last_email_attempt_at")
     .eq("status", "pending")
     .lte("scheduled_for", nowISO)
     .order("scheduled_for", { ascending: true })
@@ -289,19 +339,32 @@ Deno.serve(async (req) => {
       if (enabled && emailEnabled) {
         const userEmail = await getUserEmail(admin, n.user_id);
         if (userEmail) {
-          const { subject, html } = buildEmailContent(inv);
+          const { subject, html, text } = buildEmailContent(inv);
           let sent = false;
           try {
-            sent = await sendResendEmail(userEmail, subject, html);
+            sent = await sendResendEmail(admin, userEmail, subject, html, text, userEmail, n.invoice_id);
           } catch (e) {
             logError("Resend threw for notification", n.id, e instanceof Error ? e.message : String(e));
           }
+          const nowIso2 = new Date().toISOString();
           if (sent) {
             emailsSent++;
-            await admin.from("notifications").update({ email_sent_at: new Date().toISOString() }).eq("id", n.id);
+            await admin
+              .from("notifications")
+              .update({ email_sent_at: nowIso2, last_email_attempt_at: nowIso2 })
+              .eq("id", n.id);
           } else {
             emailFailures++;
-            await admin.from("notifications").update({ email_attempts: (n.email_attempts ?? 0) + 1 }).eq("id", n.id);
+            const nextAttempts = (n.email_attempts ?? 0) + 1;
+            const isTerminal = nextAttempts >= MAX_EMAIL_ATTEMPTS;
+            await admin
+              .from("notifications")
+              .update({
+                email_attempts: nextAttempts,
+                last_email_attempt_at: nowIso2,
+                ...(isTerminal ? { status: "failed" as const } : {}),
+              })
+              .eq("id", n.id);
             logWarn("dispatch: email send failed for notification", n.id);
           }
         }
@@ -317,7 +380,7 @@ Deno.serve(async (req) => {
   let emailRetries = 0;
   const { data: retryRows } = await admin
     .from("notifications")
-    .select("id, user_id, invoice_id, type, title, body, scheduled_for, attempts, email_attempts")
+    .select("id, user_id, invoice_id, type, title, body, scheduled_for, attempts, email_attempts, last_email_attempt_at")
     .eq("status", "delivered")
     .is("email_sent_at", null)
     .lt("email_attempts", MAX_EMAIL_ATTEMPTS)
@@ -327,11 +390,17 @@ Deno.serve(async (req) => {
 
   for (const n of (retryRows ?? []) as DueRow[]) {
     try {
+      // Exponential backoff: skip rows whose last attempt is too recent.
+      if (!backoffEligible(n.email_attempts, n.last_email_attempt_at)) {
+        deferred++;
+        continue;
+      }
+
       const v = await validateForRow(admin, n);
       // The in-app notification already delivered; if the invoice is now paid /
       // deleted / paused we just stop retrying the email — we don't rewrite the
       // already-delivered row's status (matches the invoice-change trigger, which
-      // only cancels *pending* rows). The 48h retry window ages it out.
+      // only cancels *pending* rows). RETRY_WINDOW_HOURS ages it out.
       if ("cancel" in v) continue;
       const inv = v.invoice;
 
@@ -345,20 +414,33 @@ Deno.serve(async (req) => {
       const userEmail = await getUserEmail(admin, n.user_id);
       if (!userEmail) continue;
 
-      const { subject, html } = buildEmailContent(inv);
+      const { subject, html, text } = buildEmailContent(inv);
       let sent = false;
       try {
-        sent = await sendResendEmail(userEmail, subject, html);
+        sent = await sendResendEmail(admin, userEmail, subject, html, text, userEmail, n.invoice_id);
       } catch (e) {
         logError("Resend threw on retry for notification", n.id, e instanceof Error ? e.message : String(e));
       }
+      const retryNowIso = new Date().toISOString();
       if (sent) {
         emailRetries++;
         emailsSent++;
-        await admin.from("notifications").update({ email_sent_at: new Date().toISOString() }).eq("id", n.id);
+        await admin
+          .from("notifications")
+          .update({ email_sent_at: retryNowIso, last_email_attempt_at: retryNowIso })
+          .eq("id", n.id);
       } else {
         emailFailures++;
-        await admin.from("notifications").update({ email_attempts: (n.email_attempts ?? 0) + 1 }).eq("id", n.id);
+        const nextAttempts = (n.email_attempts ?? 0) + 1;
+        const isTerminal = nextAttempts >= MAX_EMAIL_ATTEMPTS;
+        await admin
+          .from("notifications")
+          .update({
+            email_attempts: nextAttempts,
+            last_email_attempt_at: retryNowIso,
+            ...(isTerminal ? { status: "failed" as const } : {}),
+          })
+          .eq("id", n.id);
       }
     } catch (e) {
       logError("dispatch retry row failed (continuing batch)", n.id, e instanceof Error ? e.message : String(e));
@@ -367,12 +449,13 @@ Deno.serve(async (req) => {
   }
 
   // --- Dead-letter visibility: emails that exhausted all attempts ---
+  // After the retry pass now flips rows to status='failed' at the attempt
+  // ceiling, the dead-letter query checks for that state directly.
   const { count: deadLetterCount } = await admin
     .from("notifications")
     .select("id", { count: "exact", head: true })
-    .eq("status", "delivered")
+    .eq("status", "failed")
     .is("email_sent_at", null)
-    .gte("email_attempts", MAX_EMAIL_ATTEMPTS)
     .gte("scheduled_for", deadLetterFloorISO);
   if ((deadLetterCount ?? 0) > 0) {
     logError(`dispatch: ${deadLetterCount} notification email(s) dead-lettered (>= ${MAX_EMAIL_ATTEMPTS} failed attempts in last ${DEAD_LETTER_WINDOW_HOURS}h)`);

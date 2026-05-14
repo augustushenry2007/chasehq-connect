@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { FLOW_STORAGE_KEY } from "@/flow/states";
 import { toast } from "sonner";
 import { Download, AlertTriangle } from "lucide-react";
+import { cancelAllPending } from "@/lib/localNotifications";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -20,11 +21,13 @@ export function DataControlsSection() {
 
   async function handleExport() {
     if (!user) return;
-    const [followupsRes, profileRes, prefsRes, sendLogRes] = await Promise.all([
+    const [followupsRes, profileRes, prefsRes, sendLogRes, subscriptionRes, schedulesRes] = await Promise.all([
       supabase.from("followups").select("invoice_id, subject, tone, is_ai_generated, sent_at").eq("user_id", user.id),
       supabase.from("profiles").select("full_name, onboarding_completed").eq("user_id", user.id).maybeSingle(),
       supabase.from("notification_preferences").select("enabled, email_enabled, quiet_hours_start, quiet_hours_end, timezone").eq("user_id", user.id).maybeSingle(),
       supabase.from("email_send_log").select("recipient, invoice_id, sent_at").eq("user_id", user.id),
+      supabase.from("subscriptions").select("status, plan, trial_ends_at, current_period_end, canceled_at, created_at").eq("user_id", user.id).maybeSingle(),
+      supabase.from("followup_schedules").select("invoice_id, paused, steps, timezone, created_at").eq("user_id", user.id),
     ]);
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -36,7 +39,9 @@ export function DataControlsSection() {
         fullName: profileRes.data?.full_name ?? null,
         accountCreated: (user as any).created_at ?? null,
       },
+      subscription: subscriptionRes.data ?? null,
       invoices,
+      followupSchedules: schedulesRes.data ?? [],
       followupsSent: followupsRes.data ?? [],
       emailSendLog: sendLogRes.data ?? [],
       notificationPreferences: prefsRes.data ?? null,
@@ -57,6 +62,7 @@ export function DataControlsSection() {
     try {
       const { error } = await supabase.functions.invoke("delete-account");
       if (error) throw error;
+      try { await cancelAllPending(); } catch { /* best-effort */ }
       localStorage.removeItem(FLOW_STORAGE_KEY);
       navigate("/", { replace: true });
     } catch {

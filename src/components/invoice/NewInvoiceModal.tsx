@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { withAuthRetry } from "@/flow/withAuthRetry";
 import { savePending } from "@/lib/localInvoice";
 import { createScheduleForInvoice } from "@/hooks/useNotifications";
-import { X, CalendarIcon, AlertCircle } from "lucide-react";
+import { X, CalendarIcon, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parse, isValid } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
@@ -349,9 +349,10 @@ export default function NewInvoiceModal({
 
           <button
             onClick={handleCreate}
-            disabled={!canSubmit}
-            className="mt-2 w-full bg-primary text-primary-foreground py-3 rounded-2xl font-semibold text-sm disabled:opacity-50 transition-all duration-200 ease-out active:scale-[0.97] shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)]"
+            disabled={creating || !canSubmit}
+            className="mt-2 w-full bg-primary text-primary-foreground py-3 rounded-2xl font-semibold text-sm disabled:opacity-50 transition-all duration-200 ease-out active:scale-[0.97] shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)] flex items-center justify-center gap-2"
           >
+            {creating && <Loader2 className="w-4 h-4 animate-spin" />}
             {creating ? "Creating…" : "Create Invoice"}
           </button>
         </div>
