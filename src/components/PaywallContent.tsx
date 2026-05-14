@@ -113,7 +113,13 @@ export default function PaywallContent({ onClose }: Props) {
         </p>
 
         <div className="mt-8 bg-card border border-border rounded-2xl p-5">
-          <div className="flex items-baseline gap-1.5">
+          <p className="text-[11px] tracking-[0.12em] font-semibold uppercase text-primary">
+            ChaseHQ Pro
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Monthly auto-renewing subscription
+          </p>
+          <div className="flex items-baseline gap-1.5 mt-3">
             <span className="text-3xl font-bold text-foreground">$9.99</span>
             <span className="text-sm text-muted-foreground">/month</span>
           </div>
@@ -158,9 +164,11 @@ export default function PaywallContent({ onClose }: Props) {
         </button>
 
         <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
-          Subscriptions auto-renew monthly until canceled. Manage or cancel anytime in App Store settings.
+          ChaseHQ Pro — $9.99/month auto-renewing subscription. Includes a 14-day free trial for new subscribers.
+          Payment is charged to your Apple ID at confirmation of purchase. Subscription auto-renews unless cancelled
+          at least 24 hours before the end of the current period. Manage or cancel anytime in Settings → [Apple ID] → Subscriptions.
           By continuing you agree to our{" "}
-          <button onClick={() => navigate("/legal/terms")} className="underline">Terms</button>{" "}
+          <button onClick={() => navigate("/legal/terms")} className="underline">Terms of Use</button>{" "}
           and{" "}
           <button onClick={() => navigate("/legal/privacy")} className="underline">Privacy Policy</button>.
         </p>

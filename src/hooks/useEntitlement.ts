@@ -188,7 +188,12 @@ export function useEntitlement(): Entitlement {
     setFollowupsCount(prev => (prev ?? 0) + 1);
   }, [user?.id]);
 
-  const hasFreeSend = !!user && !countLoading && followupsCount !== null && followupsCount === 0;
+  // "First send free" is for brand-new users only — never for lapsed subscribers.
+  // Anyone with a subscription row in any non-"none" status (trialing, active,
+  // past_due, expired, canceled) has already had access; granting another freebie
+  // would let an expired account slip past the paywall via canSend's third disjunct.
+  const hasFreeSend = !!user && !subLoading && !countLoading && followupsCount !== null && followupsCount === 0
+    && (!row || row.status === "none");
   const loading = subLoading || countLoading;
 
   if (!user) {

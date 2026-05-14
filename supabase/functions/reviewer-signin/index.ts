@@ -1,15 +1,22 @@
 // App Store Connect reviewer bypass. Apple's reviewer enters
-// `appreview@chasehq.app` + OTP `123456` on the sign-in screen; the client
+// `appreview@chasehq.app` + a fixed OTP on the sign-in screen; the client
 // calls this function, which trades the fixed code for a magic-link
 // token_hash so the reviewer lands in a real session without us needing to
 // deliver an actual email to a mailbox they can't access.
 //
+// Two codes, two seed modes (same reviewer user, different subscription state):
+//   - `123456` → "active" mode: status=trialing, trial_ends_at=2030-01-01.
+//     Use this to review every in-app feature.
+//   - `654321` → "expired" mode: status=expired, trial_ends_at/period 7 days
+//     ago. Required by Apple guideline 2.1 so the reviewer can walk the full
+//     purchase flow (paywall → StoreKit → receipt validation → entitlement).
+//
 // Every call also re-seeds the reviewer account idempotently:
 //   - profiles.onboarding_completed = true
-//   - subscriptions = trialing with far-future end date (2030-01-01)
+//   - subscriptions row matching the requested mode (UPDATE-then-INSERT)
 //   - 5 fixture invoices when none exist
-// This guarantees the trial is always active and the dashboard always shows
-// data, regardless of state wipes between rehearsal runs.
+// This guarantees state is correct on every sign-in regardless of wipes
+// between rehearsal runs.
 //
 // Safe by design: the bypass works for ONE pre-created account only. The
 // reviewer user holds no customer data, and delete-account refuses to delete
@@ -29,8 +36,11 @@ import {
 } from "../_shared/rate_limit.ts";
 
 const REVIEWER_EMAIL = "appreview@chasehq.app";
-const REVIEWER_CODE = "123456";
+const REVIEWER_CODE_ACTIVE = "123456";
+const REVIEWER_CODE_EXPIRED = "654321";
 const TRIAL_ENDS_AT = "2030-01-01T00:00:00Z";
+
+type ReviewerMode = "active" | "expired";
 
 serve(async (req) => {
   const cors = buildCors(req.headers.get("origin"));
@@ -64,9 +74,10 @@ serve(async (req) => {
     const email = String(body?.email ?? "").trim().toLowerCase();
     const code = String(body?.code ?? "").trim();
 
-    if (email !== REVIEWER_EMAIL || code !== REVIEWER_CODE) {
-      return json({ error: "Invalid credentials" }, 401);
-    }
+    let mode: ReviewerMode;
+    if (email === REVIEWER_EMAIL && code === REVIEWER_CODE_ACTIVE) mode = "active";
+    else if (email === REVIEWER_EMAIL && code === REVIEWER_CODE_EXPIRED) mode = "expired";
+    else return json({ error: "Invalid credentials" }, 401);
 
     // generateLink returns { properties: { hashed_token }, user: { id } } in one call.
     let link = await admin.auth.admin.generateLink({
@@ -102,7 +113,7 @@ serve(async (req) => {
 
     // Always re-seed (idempotent). Blocks so the client doesn't race the seed when
     // AppContext fires profile/subscription/invoice fetches after setSession fires SIGNED_IN.
-    await reseedReviewer(admin, userId);
+    await reseedReviewer(admin, userId, mode);
 
     // Complete sign-in server-side: verify the token here and return the full session.
     // The client calls setSession() — no client-side verifyOtp needed, eliminating the
@@ -133,10 +144,10 @@ serve(async (req) => {
   }
 });
 
-async function reseedReviewer(admin: SupabaseClient, uid: string) {
+async function reseedReviewer(admin: SupabaseClient, uid: string, mode: ReviewerMode) {
   await Promise.all([
     setOnboardingComplete(admin, uid),
-    activateTrial(admin, uid),
+    seedSubscription(admin, uid, mode),
     seedInvoicesIfEmpty(admin, uid),
   ]);
 }
@@ -151,19 +162,35 @@ async function setOnboardingComplete(admin: SupabaseClient, uid: string) {
   if (error) logError("reviewer-signin: profile update failed:", error.message);
 }
 
-async function activateTrial(admin: SupabaseClient, uid: string) {
+async function seedSubscription(admin: SupabaseClient, uid: string, mode: ReviewerMode) {
   const nowIso = new Date().toISOString();
-  // UPDATE first (matches start-trial). No status filter — force trialing
-  // regardless of prior state, so a rehearsal that flipped status='canceled' or
-  // similar gets restored on the next sign-in.
+  // Expired mode: trial ended 7 days ago, current period ended 7 days ago.
+  // Satisfies deriveCanSend → false (per useEntitlement.ts:50-57) so the paywall
+  // gates Send/Generate as Apple expects in guideline 2.1.
+  const sevenDaysAgoIso = new Date(Date.now() - 7 * 86400000).toISOString();
+
+  const row = mode === "active"
+    ? {
+        status: "trialing",
+        plan: "chasehq_pro_monthly",
+        trial_ends_at: TRIAL_ENDS_AT,
+        current_period_end: null as string | null,
+        last_event_at: nowIso,
+      }
+    : {
+        status: "expired",
+        plan: "chasehq_pro_monthly",
+        trial_ends_at: sevenDaysAgoIso,
+        current_period_end: sevenDaysAgoIso,
+        last_event_at: nowIso,
+      };
+
+  // UPDATE first (matches start-trial). No status filter — force the requested
+  // mode regardless of prior state, so a rehearsal that flipped to a different
+  // status gets restored on the next sign-in.
   const { data: updated, error: updateError } = await admin
     .from("subscriptions")
-    .update({
-      status: "trialing",
-      plan: "chasehq_pro_monthly",
-      trial_ends_at: TRIAL_ENDS_AT,
-      last_event_at: nowIso,
-    })
+    .update(row)
     .eq("user_id", uid)
     .select("user_id")
     .maybeSingle();
@@ -172,10 +199,7 @@ async function activateTrial(admin: SupabaseClient, uid: string) {
 
   const { error: insertError } = await admin.from("subscriptions").insert({
     user_id: uid,
-    status: "trialing",
-    plan: "chasehq_pro_monthly",
-    trial_ends_at: TRIAL_ENDS_AT,
-    last_event_at: nowIso,
+    ...row,
   });
   // 23505 = unique violation; a concurrent call already inserted. Treat as success.
   if (insertError && insertError.code !== "23505") {

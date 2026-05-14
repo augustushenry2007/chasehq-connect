@@ -30,7 +30,10 @@ function useDemoTap() {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESEND_COOLDOWN_SEC = 60;
 const REVIEWER_EMAIL = "appreview@chasehq.app";
-const REVIEWER_CODE = "123456";
+// 123456 → active Pro subscription. 654321 → expired subscription (Apple
+// guideline 2.1 requires demo of the full purchase flow). Both verified
+// server-side in reviewer-signin; only the seed step differs.
+const REVIEWER_CODES = new Set(["123456", "654321"]);
 
 export default function WelcomeScreen() {
   const { isAuthenticated } = useApp();
@@ -111,7 +114,7 @@ export default function WelcomeScreen() {
       // App Review path: reviewer-signin completes verification server-side and returns
       // a full session. setSession() stores it locally and fires SIGNED_IN — no
       // client-side verifyOtp call needed.
-      if (trimmedEmail === REVIEWER_EMAIL && token === REVIEWER_CODE) {
+      if (trimmedEmail === REVIEWER_EMAIL && REVIEWER_CODES.has(token)) {
         const { data, error: fnError } = await supabase.functions.invoke<{
           access_token: string;
           refresh_token: string;
