@@ -10,7 +10,7 @@ export default function TermsOfUse() {
       <div className="max-w-2xl mx-auto px-5 pb-[max(env(safe-area-inset-bottom,16px),32px)]">
 
         <h1 className="text-[28px] font-bold text-foreground tracking-[-0.02em] mb-1 pt-8">Terms of Use</h1>
-        <p className="text-xs text-muted-foreground mb-8">Last updated: May 13, 2026</p>
+        <p className="text-xs text-muted-foreground mb-8">Last updated: May 15, 2026</p>
 
         <div className="space-y-6">
           <section>
@@ -73,12 +73,15 @@ export default function TermsOfUse() {
               your account if we detect abuse or repeated bounces.
             </p>
             <p className="text-[14px] text-muted-foreground leading-[1.6] mt-2">
-              Every follow-up email includes a one-click unsubscribe link (in the
-              List-Unsubscribe header, surfaced by Gmail, Apple Mail, and Yahoo) and a
-              mailto:unsubscribe@chasehq.app address. Recipients who unsubscribe, mark a
+              Every follow-up email carries a one-click unsubscribe option in the
+              <span className="text-foreground font-medium"> List-Unsubscribe</span> and
+              <span className="text-foreground font-medium"> List-Unsubscribe-Post</span>{" "}
+              headers (surfaced by Gmail, Apple Mail, and Yahoo as a one-tap "Unsubscribe"
+              button at the top of the message), with both a signed HTTPS endpoint and a
+              mailto:unsubscribe@chasehq.app fallback. Recipients who unsubscribe, mark a
               message as spam, or whose address hard-bounces are added to our suppression
               list and will not receive future ChaseHQ-routed emails from any sender — this
-              is enforced server-side and cannot be overridden from the app.
+              is enforced server-side before each send and cannot be overridden from the app.
             </p>
           </section>
 
