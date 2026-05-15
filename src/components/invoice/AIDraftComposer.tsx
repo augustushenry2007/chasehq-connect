@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { RefreshCw, Send, Loader2, AlertCircle, Info, CheckCircle, Shuffle, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import type { Invoice } from "@/lib/data";
@@ -47,6 +48,7 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
   const entitlement = useEntitlement();
   const { trialEndsAt, refetch: refetchEntitlement, hasFreeSend } = entitlement;
   const gate = useActionGate();
+  const navigate = useNavigate();
 
   const [tone, setTone] = useState<Tone>((defaultTone ?? notifications.defaultTone) as Tone);
   const [currentSubject, setCurrentSubject] = useState("");
@@ -645,6 +647,12 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
             {/* State: NEEDS_TRIAL */}
             {sendSheet === "needs_trial" && (
               <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom,16px),24px)]">
+                <p className="text-[10px] tracking-[0.12em] font-semibold uppercase text-primary mb-0.5">
+                  ChaseHQ Pro
+                </p>
+                <p className="text-[10px] text-muted-foreground mb-2">
+                  Monthly auto-renewing subscription · $9.99/month
+                </p>
                 <h2 className="text-base font-bold text-foreground mb-1">
                   {trialEndsAt ? "Your trial has ended" : "Start Your 14-Day Trial"}
                 </h2>
@@ -695,6 +703,15 @@ export default function AIDraftComposer({ invoice, onSent, defaultTone }: { invo
                 >
                   Restore purchases
                 </button>
+                <p className="text-[10px] text-muted-foreground text-center leading-relaxed mt-3">
+                  ChaseHQ Pro — $9.99/month auto-renewing subscription. Includes a 14-day free trial for new subscribers.
+                  Payment is charged to your Apple ID at confirmation of purchase. Subscription auto-renews unless cancelled
+                  at least 24 hours before the end of the current period. Manage or cancel anytime in Settings → [Apple ID] → Subscriptions.
+                  By continuing you agree to our{" "}
+                  <button onClick={() => { setSendSheet("closed"); navigate("/legal/terms"); }} className="underline">Terms of Use</button>{" "}
+                  and{" "}
+                  <button onClick={() => { setSendSheet("closed"); navigate("/legal/privacy"); }} className="underline">Privacy Policy</button>.
+                </p>
               </div>
             )}
 
