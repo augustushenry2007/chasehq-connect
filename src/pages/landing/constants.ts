@@ -1,3 +1,2 @@
-// Swap these two values once the App Store listing is live.
-export const APP_STORE_ID = "XXXXXXXXXX";
-export const APP_STORE_URL = `https://apps.apple.com/app/chasehq/id${APP_STORE_ID}`;
+export const APP_STORE_ID = "6763510125";
+export const APP_STORE_URL = `https://apps.apple.com/app/id${APP_STORE_ID}`;
