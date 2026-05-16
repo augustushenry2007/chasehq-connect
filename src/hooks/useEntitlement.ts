@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/context/AppContext";
 import type { Tables } from "@/integrations/supabase/types";
+import { getActiveEntitlement } from "@/integrations/iap";
+import { analytics } from "@/integrations/analytics";
 
 type SubRow = Tables<"subscriptions">;
 
@@ -24,6 +26,7 @@ export interface Entitlement {
   isActive: boolean;
   isPastDue: boolean;
   refetch: () => Promise<void>;
+  noteFollowupSent: () => void;
 }
 
 const DEFAULT: Entitlement = {
@@ -41,6 +44,7 @@ const DEFAULT: Entitlement = {
   isActive: false,
   isPastDue: false,
   refetch: async () => {},
+  noteFollowupSent: () => {},
 };
 
 function deriveCanSend(row: SubRow | null): boolean {
@@ -58,6 +62,12 @@ export function useEntitlement(): Entitlement {
   const [subLoading, setSubLoading] = useState(true);
   const [followupsCount, setFollowupsCount] = useState<number | null>(null);
   const [countLoading, setCountLoading] = useState(true);
+  // Device-side RevenueCat entitlement — the source of truth Apple already verified.
+  // Used as a fallback for canSend when the `subscriptions` DB row is missing or
+  // stale (e.g. validate-apple-receipt had a brief outage right after a purchase),
+  // so a paying user isn't silently blocked while the row catches up. Never gates
+  // `loading` (it's a fast local bridge call) and always false on web.
+  const [rcEntitled, setRcEntitled] = useState(false);
 
   // Synchronously reset loading when user identity changes so the post-OAuth
   // recovery effect in AIDraftComposer sees loading=true on the first render
@@ -67,6 +77,7 @@ export function useEntitlement(): Entitlement {
     setPrevUserId(user?.id);
     setSubLoading(true);
     setCountLoading(true);
+    setRcEntitled(false);
   }
 
   const fetchRow = useCallback(async () => {
@@ -75,30 +86,77 @@ export function useEntitlement(): Entitlement {
       setSubLoading(false);
       return;
     }
-    const { data } = await supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    setRow(data ?? null);
-    setSubLoading(false);
-  }, [user]);
+    try {
+      const { data, error } = await supabase
+        .from("subscriptions")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.error("[useEntitlement] subscriptions fetch error:", error);
+        analytics.error("entitlement_fetch_error", error.message, { userId: user.id });
+      } else {
+        setRow(data ?? null);
+      }
+    } catch (e) {
+      // iOS/WKWebView transport errors reject rather than returning {error};
+      // without clearing subLoading the action gate stays in "loading" forever
+      // and the Send/Generate buttons go inert with no feedback.
+      console.error("[useEntitlement] subscriptions fetch threw:", e);
+      analytics.error("entitlement_fetch_exception", e instanceof Error ? e.message : String(e), { userId: user.id });
+    } finally {
+      setSubLoading(false);
+    }
+  }, [user?.id]);
+
+  const fetchRcEntitlement = useCallback(async () => {
+    if (!user) { setRcEntitled(false); return; }
+    try {
+      const ent = await getActiveEntitlement();
+      setRcEntitled(!!ent?.entitled);
+    } catch {
+      // getActiveEntitlement already swallows its own errors; this is belt-and-braces.
+      setRcEntitled(false);
+    }
+  }, [user?.id]);
 
   const fetchFollowupsCount = useCallback(async () => {
     if (!user) { setFollowupsCount(null); setCountLoading(false); return; }
-    const { count } = await supabase
-      .from("followups")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
-    setFollowupsCount(count ?? 0);
-    setCountLoading(false);
-  }, [user]);
+    try {
+      const { count, error } = await supabase
+        .from("followups")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      if (error) {
+        console.error("[useEntitlement] followups count error:", error);
+        analytics.error("followups_count_error", error.message, { userId: user.id });
+      } else {
+        setFollowupsCount(prev => Math.max(prev ?? 0, count ?? 0));
+      }
+    } catch (e) {
+      console.error("[useEntitlement] followups count threw:", e);
+      analytics.error("followups_count_exception", e instanceof Error ? e.message : String(e), { userId: user.id });
+    } finally {
+      setCountLoading(false);
+    }
+  }, [user?.id]);
+
+  const refetch = useCallback(async () => {
+    await Promise.all([fetchRow(), fetchRcEntitlement()]);
+  }, [fetchRow, fetchRcEntitlement]);
 
   useEffect(() => {
     if (!authReady) return;
     setSubLoading(true);
     setCountLoading(true);
+    if (user) {
+      try {
+        const floor = sessionStorage.getItem(`chase_free_send_used_${user.id}`);
+        if (floor === "1") setFollowupsCount(prev => Math.max(prev ?? 0, 1));
+      } catch {}
+    }
     void fetchRow();
+    void fetchRcEntitlement();
     void fetchFollowupsCount();
     if (!user) return;
     const channel = supabase
@@ -106,7 +164,7 @@ export function useEntitlement(): Entitlement {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "subscriptions", filter: `user_id=eq.${user.id}` },
-        () => { void fetchRow(); }
+        () => { void fetchRow(); void fetchRcEntitlement(); }
       )
       .subscribe();
     const followupsChannel = supabase
@@ -121,17 +179,31 @@ export function useEntitlement(): Entitlement {
       supabase.removeChannel(channel);
       supabase.removeChannel(followupsChannel);
     };
-  }, [user, authReady, fetchRow, fetchFollowupsCount]);
+  }, [user?.id, authReady, fetchRow, fetchRcEntitlement, fetchFollowupsCount]);
 
-  const hasFreeSend = !!user && !countLoading && followupsCount !== null && followupsCount <= 1;
+  const noteFollowupSent = useCallback(() => {
+    if (user) {
+      try { sessionStorage.setItem(`chase_free_send_used_${user.id}`, "1"); } catch {}
+    }
+    setFollowupsCount(prev => (prev ?? 0) + 1);
+  }, [user?.id]);
+
+  // "First send free" is for brand-new users only — never for lapsed subscribers.
+  // Anyone with a subscription row in any non-"none" status (trialing, active,
+  // past_due, expired, canceled) has already had access; granting another freebie
+  // would let an expired account slip past the paywall via canSend's third disjunct.
+  const hasFreeSend = !!user && !subLoading && !countLoading && followupsCount !== null && followupsCount === 0
+    && (!row || row.status === "none");
   const loading = subLoading || countLoading;
 
   if (!user) {
-    return { ...DEFAULT, loading: loading || !authReady, hasFreeSend: false, refetch: fetchRow };
+    return { ...DEFAULT, loading: loading || !authReady, hasFreeSend: false, refetch, noteFollowupSent };
   }
   if (!row) {
-    // No subscription row = user hasn't subscribed yet; route through IAP or use free send
-    return { ...DEFAULT, loading, canSend: hasFreeSend, hasFreeSend, followupsSent: followupsCount, refetch: fetchRow };
+    // No subscription row yet — either the user hasn't subscribed (route through IAP /
+    // free send) or validate-apple-receipt hasn't written the row yet after a purchase.
+    // rcEntitled covers the latter so a paying user isn't blocked while the row catches up.
+    return { ...DEFAULT, loading, canSend: rcEntitled || hasFreeSend, hasFreeSend, followupsSent: followupsCount, refetch, noteFollowupSent };
   }
 
   const trialEndsAt = row.trial_ends_at ? new Date(row.trial_ends_at) : null;
@@ -148,12 +220,13 @@ export function useEntitlement(): Entitlement {
     currentPeriodEnd,
     daysLeftInTrial,
     nextBillingDate: currentPeriodEnd,
-    canSend: deriveCanSend(row) || hasFreeSend,
+    canSend: deriveCanSend(row) || rcEntitled || hasFreeSend,
     hasFreeSend,
     followupsSent: followupsCount,
     isTrialing: row.status === "trialing",
     isActive: row.status === "active",
     isPastDue: row.status === "past_due",
-    refetch: fetchRow,
+    refetch,
+    noteFollowupSent,
   };
 }

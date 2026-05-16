@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import { buildCors } from "../_shared/cors.ts";
+import { logError, logWarn } from "../_shared/log.ts";
+import { verifyWithRevenueCat } from "../_shared/revenuecat.ts";
 
 // Apple verifyReceipt endpoints
 const APPLE_PROD = "https://buy.itunes.apple.com/verifyReceipt";
@@ -121,12 +123,22 @@ serve(async (req) => {
       originalTransactionId = `mock_${userId}`;
     } else if (isRcReceipt) {
       // === REVENUECAT VALIDATION ===
+      // SECURITY: the RC app-user-id is ALWAYS the authenticated Supabase user id
+      // (the client calls Purchases.logIn({ appUserID: <supabase uid> }) before any
+      // purchase/restore, and restore aliases transactions onto the logged-in id).
+      // We therefore ignore the id embedded in body.receipt entirely and verify
+      // entitlements for `userId` — otherwise a caller could pass
+      // "RC_CUSTOMER:<someone-else's-uid>" and copy that account's subscription
+      // state onto their own row (one paid sub → unlimited Pro accounts).
       const rcSecretKey = Deno.env.get("RC_SECRET_KEY");
-      const appUserId = body.receipt.slice("RC_CUSTOMER:".length);
+      const receiptAppUserId = body.receipt.slice("RC_CUSTOMER:".length);
+      if (receiptAppUserId && receiptAppUserId !== userId) {
+        logWarn("[validate-apple-receipt] receipt app-user-id does not match session; using session id");
+      }
 
       let rcOk = false;
       if (rcSecretKey) {
-        const verify = await verifyWithRevenueCat(appUserId, rcSecretKey);
+        const verify = await verifyWithRevenueCat(userId, rcSecretKey);
         if (verify.ok) {
           status = verify.status;
           currentPeriodEnd = verify.currentPeriodEnd;
@@ -181,7 +193,7 @@ serve(async (req) => {
     }, { onConflict: "user_id" }).select().maybeSingle();
 
     if (upsert.error) {
-      console.error("validate-apple-receipt upsert error:", upsert.error);
+      logError("validate-apple-receipt upsert error:", upsert.error);
       return json({ error: "Could not record subscription" }, 500);
     }
 
@@ -197,44 +209,10 @@ serve(async (req) => {
 
     return json({ ok: true, status, current_period_end: currentPeriodEnd, trial_ends_at: trialEndsAt, mock: useMock });
   } catch (e) {
-    console.error("validate-apple-receipt error:", e);
-    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
+    logError("validate-apple-receipt error:", e);
+    return json({ error: "Internal error" }, 500);
   }
 });
-
-async function verifyWithRevenueCat(appUserId: string, secretKey: string) {
-  const res = await fetch(
-    `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
-    { headers: { "Authorization": `Bearer ${secretKey}`, "Content-Type": "application/json" } }
-  );
-  if (!res.ok) {
-    const bodyText = await res.text().catch(() => "<unreadable>");
-    console.error("[validate-apple-receipt] RC API error", { status: res.status, body: bodyText.slice(0, 500), appUserId });
-    if (res.status === 401 || res.status === 403) {
-      return { ok: false as const, error: "Subscription verification is temporarily unavailable. Please try Restore Purchases in a moment." };
-    }
-    return { ok: false as const, error: `RevenueCat API error (${res.status})` };
-  }
-  const data = await res.json();
-  const entitlement = data.subscriber?.entitlements?.["ChaseHQ Pro"];
-  if (!entitlement?.expires_date) {
-    return { ok: false as const, error: "No active ChaseHQ Pro subscription found" };
-  }
-  const expiresDate = new Date(entitlement.expires_date);
-  if (expiresDate < new Date()) {
-    return { ok: false as const, error: "Subscription has expired" };
-  }
-  const sub = data.subscriber?.subscriptions?.[entitlement.product_identifier];
-  const periodType = sub?.period_type ?? "normal";
-  const isTrialing = periodType === "trial" || periodType === "intro";
-  return {
-    ok: true as const,
-    status: isTrialing ? "trialing" as const : "active" as const,
-    currentPeriodEnd: expiresDate.toISOString(),
-    trialEndsAt: isTrialing ? expiresDate.toISOString() : null,
-    originalTransactionId: sub?.original_transaction_id ?? appUserId,
-  };
-}
 
 async function verifyReceiptWithApple(receipt: string, sharedSecret: string) {
   const body = JSON.stringify({

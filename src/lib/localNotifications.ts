@@ -2,7 +2,7 @@ import { LocalNotifications } from "@capacitor/local-notifications";
 import {
   buildNotificationTitle,
   buildNotificationBody,
-  computeStepWithEscalation,
+  computeStepDate,
   type ScheduleStep,
 } from "./scheduleDefaults";
 
@@ -49,8 +49,11 @@ export async function scheduleForInvoice(
     const now = Date.now();
     const notifications = steps
       .map((step, idx) => {
-        const { scheduledFor } = computeStepWithEscalation(invoice, step);
-        const fireAt = new Date(scheduledFor);
+        // Same anchor the DB rows use (computeStepDate in createScheduleForInvoice /
+        // ChaseSchedule.persist): due_date + offset_days @ 9am device-local. Keeping
+        // these in lockstep means the phone buzzes at the same instant the cron /
+        // in-app bell consider the step due.
+        const fireAt = new Date(computeStepDate(invoice.dueDateISO, step.offset_days));
         if (fireAt.getTime() <= now) return null;
         return {
           id: notifId(invoiceId, idx),
@@ -66,6 +69,86 @@ export async function scheduleForInvoice(
     }
   } catch (e) {
     console.warn("[localNotifications] scheduleForInvoice failed:", e);
+  }
+}
+
+// iOS keeps at most ~64 pending local notifications. Stay safely under it so we
+// never silently drop one — and so the cap is applied nearest-first.
+const RECONCILE_CAP = 60;
+
+type ReconcileRow = {
+  invoice_id: string;
+  schedule_step_index: number;
+  title: string;
+  body: string;
+  scheduled_for: string;
+};
+
+/**
+ * Converge OS-scheduled notifications to the desired set (DB rows passed in).
+ * - Cancels OS notifications whose (invoice_id, step_idx) is no longer in the
+ *   desired set — fixes the multi-device divergence where Phone A pauses/pays
+ *   an invoice and Phone B's backgrounded OS would otherwise still fire ghost
+ *   reminders.
+ * - Arms desired rows missing from OS — repairs OS schedules lost to reinstall /
+ *   notification purge / device restore, and backfills anything earlier
+ *   scheduleForInvoice dropped past the iOS 64-pending cap.
+ *
+ * Idempotent (stable notifIds). Caller passes only rows that SHOULD remain
+ * armed (already filtered for paid/paused) — anything in OS not in that set is
+ * cancelled. Silent on undetermined/denied permission (no prompt from a
+ * background reconcile).
+ */
+export async function reconcilePendingLocalNotifications(rows: ReconcileRow[]): Promise<void> {
+  if (!isPushEnabled()) return;
+  try {
+    const { display } = await LocalNotifications.checkPermissions();
+    if (display !== "granted") return;
+    const { notifications: pending } = await LocalNotifications.getPending();
+    const now = Date.now();
+
+    const desiredIds = new Set<number>();
+    for (const r of rows) {
+      const at = new Date(r.scheduled_for);
+      if (isNaN(at.getTime()) || at.getTime() <= now) continue;
+      desiredIds.add(notifId(r.invoice_id, r.schedule_step_index));
+    }
+
+    // Cancel OS-scheduled notifications no longer desired. Only touch ones we
+    // armed (carry invoice_id in extra) — defensive against any future
+    // non-chase scheduling that lands in the same pending list.
+    const toCancel = pending
+      .filter((n) => !desiredIds.has(n.id) && !!(n.extra as { invoice_id?: string } | undefined)?.invoice_id)
+      .map((n) => ({ id: n.id }));
+    if (toCancel.length > 0) {
+      await LocalNotifications.cancel({ notifications: toCancel });
+    }
+
+    const canceledIds = new Set(toCancel.map((c) => c.id));
+    const remainingPendingIds = new Set(pending.map((n) => n.id).filter((id) => !canceledIds.has(id)));
+    const slots = Math.max(0, RECONCILE_CAP - remainingPendingIds.size);
+    if (slots === 0) return;
+
+    const toArm: { id: number; title: string; body: string; schedule: { at: Date; allowWhileIdle: boolean }; extra: { invoice_id: string } }[] = [];
+    for (const r of rows) {
+      if (toArm.length >= slots) break;
+      const at = new Date(r.scheduled_for);
+      if (isNaN(at.getTime()) || at.getTime() <= now) continue;
+      const id = notifId(r.invoice_id, r.schedule_step_index);
+      if (remainingPendingIds.has(id)) continue;
+      toArm.push({
+        id,
+        title: r.title,
+        body: r.body,
+        schedule: { at, allowWhileIdle: true },
+        extra: { invoice_id: r.invoice_id },
+      });
+    }
+    if (toArm.length > 0) {
+      await LocalNotifications.schedule({ notifications: toArm });
+    }
+  } catch (e) {
+    console.warn("[localNotifications] reconcilePendingLocalNotifications failed:", e);
   }
 }
 

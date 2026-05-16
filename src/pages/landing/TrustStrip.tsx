@@ -3,7 +3,7 @@ import { useScrollReveal } from "./useScrollReveal";
 
 const POINTS = [
   { Icon: Lock, label: "Your data stays yours." },
-  { Icon: MailCheck, label: "Gmail send-only access." },
+  { Icon: MailCheck, label: "Replies route to your inbox." },
   { Icon: EyeOff, label: "No tracking pixels." },
 ];
 

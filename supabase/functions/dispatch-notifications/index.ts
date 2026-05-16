@@ -1,8 +1,19 @@
-// Cron-driven dispatcher. Picks pending notifications whose scheduled_for has passed,
-// re-validates the underlying invoice, respects user preferences + quiet hours,
-// then marks them delivered and sends Resend email if email_enabled.
+// Cron-driven dispatcher. Two passes per tick:
+//   1. "due"   — pending notifications whose scheduled_for has passed: re-validate
+//                the invoice, respect user prefs + quiet hours, mark them delivered
+//                (the in-app reminder), and — if email is enabled — send the Resend
+//                email. Email outcome is tracked separately (email_sent_at /
+//                email_attempts) so a failed email can be retried without
+//                re-delivering the in-app notification.
+//   2. "retry" — rows already delivered whose email never went out
+//                (email_sent_at IS NULL, email_attempts < 5, within a 2-day window):
+//                re-attempt the email only. Idempotent via email_sent_at IS NULL;
+//                bounded by email_attempts < 5. Rows that exhaust the attempts are
+//                dead-lettered — their count is surfaced in the response + logs.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { logError, logWarn } from "../_shared/log.ts";
+import { buildUnsubscribeHeaders } from "../_shared/unsubscribe.ts";
+import { isRecipientSuppressed } from "../_shared/suppression.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,8 +22,24 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const FROM_EMAIL = "ChaseHQ <onboarding@resend.dev>";
+const RESEND_API_KEY = Deno.env.get("RESEND_KEY_BULK");
+const FROM_EMAIL = "ChaseHQ <noreply@chasehq.app>";
+
+const MAX_EMAIL_ATTEMPTS = 5;
+// Match the dead-letter window — gives a transient Resend outage room to recover
+// across a full day before the row is abandoned.
+const RETRY_WINDOW_HOURS = 24 * 7;
+const DEAD_LETTER_WINDOW_HOURS = 24 * 7;
+
+// Exponential backoff: 1, 2, 4, 8, 16 minutes between attempts. Keeps a row
+// from burning through MAX_EMAIL_ATTEMPTS in the first 5 cron ticks of an
+// outage.
+function backoffEligible(attempts: number | null, lastAttemptAt: string | null): boolean {
+  if (lastAttemptAt === null) return true;
+  const minutesSince = (Date.now() - new Date(lastAttemptAt).getTime()) / 60_000;
+  const requiredGap = Math.pow(2, Math.min(attempts ?? 0, 4));
+  return minutesSince >= requiredGap;
+}
 
 // Advisory-lock key. Any 32-bit int will do; we just need a constant so all
 // invocations contend on the same lock.
@@ -40,15 +67,43 @@ function isQuietHour(hour: number, start: number, end: number): boolean {
   return hour >= start || hour < end;
 }
 
-async function sendResendEmail(to: string, subject: string, html: string): Promise<boolean> {
+// Returns true only when Resend accepted the message. Throws are *not* caught
+// here — the per-row handler treats a throw the same as a `false` (a failed
+// attempt) but logs the stack.
+async function sendResendEmail(
+  admin: ReturnType<typeof createClient>,
+  to: string,
+  subject: string,
+  html: string,
+  text: string,
+  replyTo: string | undefined,
+  invoiceId: string,
+): Promise<boolean> {
   if (!RESEND_API_KEY) {
     logWarn("RESEND_API_KEY not set — skipping email");
     return false;
   }
+  // Don't burn domain reputation on a recipient that bounced or unsubscribed.
+  if (await isRecipientSuppressed(admin, to)) {
+    logWarn("[dispatch] skipping send to suppressed recipient");
+    return false;
+  }
+  const unsubHeaders = await buildUnsubscribeHeaders(to);
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
+    body: JSON.stringify({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      html,
+      text,
+      reply_to: replyTo,
+      headers: { ...unsubHeaders, "X-Entity-Ref-ID": invoiceId },
+    }),
+    // Resend's tail latency can stall a connection; cron has a 60s budget for
+    // ~200 rows, so cap per-call at 15s to keep the batch moving.
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
     logError("Resend error:", res.status, (await res.text()).slice(0, 300));
@@ -57,15 +112,109 @@ async function sendResendEmail(to: string, subject: string, html: string): Promi
   return true;
 }
 
+type DueRow = {
+  id: string;
+  user_id: string;
+  invoice_id: string;
+  type: string;
+  title: string;
+  body: string;
+  scheduled_for: string;
+  attempts: number | null;
+  email_attempts: number | null;
+  last_email_attempt_at: string | null;
+};
+
+type Invoice = {
+  id: string;
+  user_id: string;
+  status: string;
+  client: string;
+  amount: number;
+  days_past_due: number;
+  invoice_number: string;
+};
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildEmailContent(inv: Invoice): { subject: string; html: string; text: string } {
+  const amountFormatted = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(inv.amount));
+  const overdueText = inv.days_past_due > 0
+    ? `${inv.days_past_due} day${inv.days_past_due === 1 ? "" : "s"} overdue`
+    : "due soon";
+  const client = escapeHtml(inv.client);
+  const invoiceNumber = escapeHtml(inv.invoice_number);
+  const subject = `Follow-up due: ${inv.client} · ${inv.invoice_number}`;
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body style="margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"><div style="max-width:480px;margin:0 auto;padding:24px"><h2 style="margin:0 0 8px;font-size:18px;color:#111">Time to follow up</h2><p style="margin:0 0 16px;color:#555;font-size:14px">A follow-up is due for <strong>${client}</strong> — invoice <strong>${invoiceNumber}</strong> for <strong>${amountFormatted}</strong> is <strong>${overdueText}</strong>.</p><p style="margin:0 0 24px;color:#555;font-size:14px">Open ChaseHQ to review the AI-drafted follow-up and send it when you're ready.</p><p style="margin:0;color:#aaa;font-size:12px">You're receiving this because you enabled email notifications in ChaseHQ settings.</p></div></body></html>`;
+  const text = [
+    `Time to follow up`,
+    ``,
+    `A follow-up is due for ${inv.client} — invoice ${inv.invoice_number} for ${amountFormatted} is ${overdueText}.`,
+    ``,
+    `Open ChaseHQ to review the AI-drafted follow-up and send it when you're ready.`,
+    ``,
+    `You're receiving this because you enabled email notifications in ChaseHQ settings.`,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+// Shared validity gate for a notification row: the invoice still exists, is
+// unpaid, is owned by the same user, and its schedule isn't paused. Returns the
+// invoice on success, or { cancel: true } when the row is no longer valid.
+async function validateForRow(
+  admin: ReturnType<typeof createClient>,
+  n: { id: string; user_id: string; invoice_id: string },
+): Promise<{ invoice: Invoice } | { cancel: true }> {
+  const { data: inv } = await admin
+    .from("invoices")
+    .select("id, user_id, status, client, amount, days_past_due, invoice_number")
+    .eq("id", n.invoice_id)
+    .maybeSingle();
+  if (!inv || inv.status === "Paid") return { cancel: true };
+  if (inv.user_id !== n.user_id) {
+    logWarn("dispatch: notification owner != invoice owner; canceling", { notifId: n.id });
+    return { cancel: true };
+  }
+  const { data: sched } = await admin
+    .from("followup_schedules")
+    .select("paused")
+    .eq("invoice_id", n.invoice_id)
+    .maybeSingle();
+  if (sched?.paused) return { cancel: true };
+  return { invoice: inv as Invoice };
+}
+
+async function getPrefs(admin: ReturnType<typeof createClient>, userId: string) {
+  const { data: prefs } = await admin
+    .from("notification_preferences")
+    .select("enabled, email_enabled, quiet_hours_start, quiet_hours_end, timezone")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return {
+    enabled: prefs?.enabled ?? false,
+    emailEnabled: prefs?.email_enabled ?? false,
+    tz: prefs?.timezone ?? "UTC",
+    qStart: prefs?.quiet_hours_start ?? 21,
+    qEnd: prefs?.quiet_hours_end ?? 8,
+  };
+}
+
+async function getUserEmail(admin: ReturnType<typeof createClient>, userId: string): Promise<string | null> {
+  const { data: authUser } = await admin.auth.admin.getUserById(userId);
+  return authUser?.user?.email ?? null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   // === Auth gate ===
-  // The function is verify_jwt=false because pg_cron's HTTP wrapper doesn't
-  // mint user JWTs. Instead we require a shared secret in a custom header so
-  // an attacker on the public internet can't trigger the send loop. The
-  // secret is set as a Supabase function secret and configured into the cron
-  // job's `headers` parameter.
   const cronSecret = Deno.env.get("CRON_DISPATCH_SECRET");
   if (!cronSecret) {
     logError("CRON_DISPATCH_SECRET not set — refusing to run unauthenticated dispatcher");
@@ -86,123 +235,262 @@ Deno.serve(async (req) => {
   const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
   // === Concurrency guard ===
-  // Postgres advisory lock: if another invocation is already running, bail
-  // out so we don't double-send. Released automatically when this function
-  // exits (transaction-scoped advisory locks are session-scoped here).
   const lockRes = await admin.rpc("pg_try_advisory_lock", { key: ADVISORY_LOCK_KEY });
-  // Supabase RPC for built-in functions may need a wrapper SQL function;
-  // fall back gracefully if the RPC isn't available — the duplicate-send
-  // window is small (1 minute) and the email_send_log + notifications.status
-  // already de-dup at the per-row level.
   if (lockRes.error) {
-    logWarn("advisory lock unavailable, continuing without:", lockRes.error.message);
-  } else if (lockRes.data === false) {
+    logError("advisory lock RPC unavailable — skipping run (deploy 20260503000000_advisory_lock_wrapper.sql):", lockRes.error.message);
+    return new Response(JSON.stringify({ skipped: "advisory lock unavailable" }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (lockRes.data === false) {
     return new Response(JSON.stringify({ skipped: "another dispatch in progress" }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  const nowISO = new Date().toISOString();
+  // === Heartbeat ===
+  // We hold the lock — this run is really happening. Read last_ok_at *before*
+  // stamping last_run_at so we can tell whether prior hourly runs were missed
+  // while the function was down/undeployed (the cron's net.http_post is
+  // fire-and-forget — pg_net never awaits or retries, so a 5xx batch just
+  // doesn't run; the next OK run self-heals via `scheduled_for <= now()`, so the
+  // visible effect is *delayed* notifications, not lost — and nothing watches).
+  // dispatch-health-check re-fires us if last_ok_at goes >90min stale; this just
+  // surfaces the gap in the logs + response the moment service comes back.
+  let lastOkAt: string | null = null;
+  try {
+    const { data: hb } = await admin.from("dispatch_health").select("last_ok_at").eq("id", 1).maybeSingle();
+    lastOkAt = (hb?.last_ok_at as string | null) ?? null;
+  } catch { /* dispatch_health missing on this env — non-fatal, heartbeat is best-effort */ }
+  try {
+    await admin.from("dispatch_health").upsert({ id: 1, last_run_at: new Date().toISOString() }, { onConflict: "id" });
+  } catch { /* best-effort */ }
+
+  let missedRunsSince: string | null = null;
+  if (lastOkAt) {
+    const staleMs = Date.now() - new Date(lastOkAt).getTime();
+    const HOUR_MS = 3600_000;
+    if (staleMs > 2 * HOUR_MS) {
+      const missed = Math.max(1, Math.floor(staleMs / HOUR_MS) - 1);
+      missedRunsSince = lastOkAt;
+      logError(`dispatch: ~${missed} hourly run(s) missed since ${lastOkAt} — function was likely down/undeployed`);
+    }
+  }
+
+  try {
+  const now = new Date();
+  const nowISO = now.toISOString();
+  const retryFloorISO = new Date(now.getTime() - RETRY_WINDOW_HOURS * 3600_000).toISOString();
+  const deadLetterFloorISO = new Date(now.getTime() - DEAD_LETTER_WINDOW_HOURS * 3600_000).toISOString();
+
+  // --- Pass 1: due pending notifications ---
   const { data: due, error } = await admin
     .from("notifications")
-    .select("id, user_id, invoice_id, type, title, body, scheduled_for, attempts")
+    .select("id, user_id, invoice_id, type, title, body, scheduled_for, attempts, email_attempts, last_email_attempt_at")
     .eq("status", "pending")
     .lte("scheduled_for", nowISO)
+    .order("scheduled_for", { ascending: true })
     .limit(200);
 
   if (error) {
-    logError("Fetch pending failed:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    // Throw so the outer catch records it in dispatch_health.last_error.
+    throw new Error(`fetch pending failed: ${error.message}`);
   }
 
   let delivered = 0;
   let canceled = 0;
   let deferred = 0;
   let emailsSent = 0;
+  let emailFailures = 0;
 
-  for (const n of due ?? []) {
-    // Validate invoice still exists and is unpaid
-    const { data: inv } = await admin
-      .from("invoices")
-      .select("id, status, client, amount, days_past_due, invoice_number")
-      .eq("id", n.invoice_id)
-      .maybeSingle();
-    if (!inv || inv.status === "Paid") {
-      await admin.from("notifications").update({ status: "canceled" }).eq("id", n.id);
-      canceled++;
-      continue;
-    }
-
-    // Honor paused schedules — cancel rather than deliver
-    const { data: sched } = await admin
-      .from("followup_schedules")
-      .select("paused")
-      .eq("invoice_id", n.invoice_id)
-      .maybeSingle();
-    if (sched?.paused) {
-      await admin.from("notifications").update({ status: "canceled" }).eq("id", n.id);
-      canceled++;
-      continue;
-    }
-
-    // Fetch user prefs (defaults if missing)
-    const { data: prefs } = await admin
-      .from("notification_preferences")
-      .select("enabled, email_enabled, quiet_hours_start, quiet_hours_end, timezone")
-      .eq("user_id", n.user_id)
-      .maybeSingle();
-
-    const enabled = prefs?.enabled ?? false;
-    const emailEnabled = prefs?.email_enabled ?? false;
-    const tz = prefs?.timezone ?? "UTC";
-    const qStart = prefs?.quiet_hours_start ?? 21;
-    const qEnd = prefs?.quiet_hours_end ?? 8;
-
-    if (isQuietHour(hourInTimezone(tz), qStart, qEnd)) {
-      deferred++;
-      continue;
-    }
-
-    // Mark delivered regardless of push preference (inbox always gets it)
-    await admin
-      .from("notifications")
-      .update({ status: "delivered", delivered_at: new Date().toISOString(), attempts: (n.attempts ?? 0) + 1 })
-      .eq("id", n.id);
-    delivered++;
-
-    // Send Resend email if user opted in
-    if (enabled && emailEnabled) {
-      const { data: authUser } = await admin.auth.admin.getUserById(n.user_id);
-      const userEmail = authUser?.user?.email;
-      if (userEmail) {
-        const amountFormatted = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(inv.amount));
-        const overdueText = inv.days_past_due > 0
-          ? `${inv.days_past_due} day${inv.days_past_due === 1 ? "" : "s"} overdue`
-          : "due soon";
-        const subject = `Follow-up due: ${inv.client} · ${inv.invoice_number}`;
-        const html = `
-          <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-            <h2 style="margin:0 0 8px;font-size:18px;color:#111">Time to follow up</h2>
-            <p style="margin:0 0 16px;color:#555;font-size:14px">
-              A follow-up is due for <strong>${inv.client}</strong> — invoice <strong>${inv.invoice_number}</strong>
-              for <strong>${amountFormatted}</strong> is <strong>${overdueText}</strong>.
-            </p>
-            <p style="margin:0 0 24px;color:#555;font-size:14px">Open ChaseHQ to review the AI-drafted follow-up and send it when you're ready.</p>
-            <p style="margin:0;color:#aaa;font-size:12px">You're receiving this because you enabled email notifications in ChaseHQ settings.</p>
-          </div>
-        `;
-        const sent = await sendResendEmail(userEmail, subject, html);
-        if (sent) emailsSent++;
+  for (const n of (due ?? []) as DueRow[]) {
+    try {
+      const v = await validateForRow(admin, n);
+      if ("cancel" in v) {
+        await admin.from("notifications").update({ status: "canceled" }).eq("id", n.id);
+        canceled++;
+        continue;
       }
+      const inv = v.invoice;
+
+      const { enabled, emailEnabled, tz, qStart, qEnd } = await getPrefs(admin, n.user_id);
+      if (isQuietHour(hourInTimezone(tz), qStart, qEnd)) {
+        deferred++;
+        continue;
+      }
+
+      // Atomic claim: only this invocation gets to deliver this row.
+      const { data: claimed, error: claimErr } = await admin
+        .from("notifications")
+        .update({ status: "delivered", delivered_at: new Date().toISOString(), attempts: (n.attempts ?? 0) + 1 })
+        .eq("id", n.id)
+        .eq("status", "pending")
+        .select("id");
+      if (claimErr) {
+        logError("Failed to claim notification", n.id, claimErr.message);
+        continue;
+      }
+      if (!claimed || claimed.length === 0) continue; // already claimed by another run
+      delivered++;
+
+      // Email is a separate channel — its failure must not undo the in-app delivery.
+      if (enabled && emailEnabled) {
+        const userEmail = await getUserEmail(admin, n.user_id);
+        if (userEmail) {
+          const { subject, html, text } = buildEmailContent(inv);
+          let sent = false;
+          try {
+            sent = await sendResendEmail(admin, userEmail, subject, html, text, userEmail, n.invoice_id);
+          } catch (e) {
+            logError("Resend threw for notification", n.id, e instanceof Error ? e.message : String(e));
+          }
+          const nowIso2 = new Date().toISOString();
+          if (sent) {
+            emailsSent++;
+            await admin
+              .from("notifications")
+              .update({ email_sent_at: nowIso2, last_email_attempt_at: nowIso2 })
+              .eq("id", n.id);
+          } else {
+            emailFailures++;
+            const nextAttempts = (n.email_attempts ?? 0) + 1;
+            const isTerminal = nextAttempts >= MAX_EMAIL_ATTEMPTS;
+            await admin
+              .from("notifications")
+              .update({
+                email_attempts: nextAttempts,
+                last_email_attempt_at: nowIso2,
+                ...(isTerminal ? { status: "failed" as const } : {}),
+              })
+              .eq("id", n.id);
+            logWarn("dispatch: email send failed for notification", n.id);
+          }
+        }
+        // No user email (deleted auth row) → leave email_sent_at NULL; not retried.
+      }
+    } catch (e) {
+      logError("dispatch row failed (continuing batch)", n.id, e instanceof Error ? e.message : String(e));
+      continue;
     }
   }
 
+  // --- Pass 2: re-attempt emails that never went out ---
+  let emailRetries = 0;
+  const { data: retryRows } = await admin
+    .from("notifications")
+    .select("id, user_id, invoice_id, type, title, body, scheduled_for, attempts, email_attempts, last_email_attempt_at")
+    .eq("status", "delivered")
+    .is("email_sent_at", null)
+    .lt("email_attempts", MAX_EMAIL_ATTEMPTS)
+    .gte("scheduled_for", retryFloorISO)
+    .order("scheduled_for", { ascending: true })
+    .limit(100);
+
+  for (const n of (retryRows ?? []) as DueRow[]) {
+    try {
+      // Exponential backoff: skip rows whose last attempt is too recent.
+      if (!backoffEligible(n.email_attempts, n.last_email_attempt_at)) {
+        deferred++;
+        continue;
+      }
+
+      const v = await validateForRow(admin, n);
+      // The in-app notification already delivered; if the invoice is now paid /
+      // deleted / paused we just stop retrying the email — we don't rewrite the
+      // already-delivered row's status (matches the invoice-change trigger, which
+      // only cancels *pending* rows). RETRY_WINDOW_HOURS ages it out.
+      if ("cancel" in v) continue;
+      const inv = v.invoice;
+
+      const { enabled, emailEnabled, tz, qStart, qEnd } = await getPrefs(admin, n.user_id);
+      if (!enabled || !emailEnabled) continue; // email no longer applicable — leave as-is
+      if (isQuietHour(hourInTimezone(tz), qStart, qEnd)) {
+        deferred++;
+        continue;
+      }
+
+      const userEmail = await getUserEmail(admin, n.user_id);
+      if (!userEmail) continue;
+
+      const { subject, html, text } = buildEmailContent(inv);
+      let sent = false;
+      try {
+        sent = await sendResendEmail(admin, userEmail, subject, html, text, userEmail, n.invoice_id);
+      } catch (e) {
+        logError("Resend threw on retry for notification", n.id, e instanceof Error ? e.message : String(e));
+      }
+      const retryNowIso = new Date().toISOString();
+      if (sent) {
+        emailRetries++;
+        emailsSent++;
+        await admin
+          .from("notifications")
+          .update({ email_sent_at: retryNowIso, last_email_attempt_at: retryNowIso })
+          .eq("id", n.id);
+      } else {
+        emailFailures++;
+        const nextAttempts = (n.email_attempts ?? 0) + 1;
+        const isTerminal = nextAttempts >= MAX_EMAIL_ATTEMPTS;
+        await admin
+          .from("notifications")
+          .update({
+            email_attempts: nextAttempts,
+            last_email_attempt_at: retryNowIso,
+            ...(isTerminal ? { status: "failed" as const } : {}),
+          })
+          .eq("id", n.id);
+      }
+    } catch (e) {
+      logError("dispatch retry row failed (continuing batch)", n.id, e instanceof Error ? e.message : String(e));
+      continue;
+    }
+  }
+
+  // --- Dead-letter visibility: emails that exhausted all attempts ---
+  // After the retry pass now flips rows to status='failed' at the attempt
+  // ceiling, the dead-letter query checks for that state directly.
+  const { count: deadLetterCount } = await admin
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "failed")
+    .is("email_sent_at", null)
+    .gte("scheduled_for", deadLetterFloorISO);
+  if ((deadLetterCount ?? 0) > 0) {
+    logError(`dispatch: ${deadLetterCount} notification email(s) dead-lettered (>= ${MAX_EMAIL_ATTEMPTS} failed attempts in last ${DEAD_LETTER_WINDOW_HOURS}h)`);
+  }
+
+  const counts = {
+    checked: due?.length ?? 0,
+    delivered,
+    canceled,
+    deferred,
+    emailsSent,
+    emailRetries,
+    emailFailures,
+    deadLetter: deadLetterCount ?? 0,
+  };
+  try {
+    await admin.from("dispatch_health").upsert(
+      { id: 1, last_ok_at: new Date().toISOString(), last_error: null, last_counts: counts },
+      { onConflict: "id" },
+    );
+  } catch { /* best-effort */ }
+
   return new Response(
-    JSON.stringify({ checked: due?.length ?? 0, delivered, canceled, deferred, emailsSent }),
+    JSON.stringify(missedRunsSince ? { ...counts, missedRunsSince } : counts),
     { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
   );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logError("dispatch run failed:", msg);
+    try {
+      await admin.from("dispatch_health").upsert({ id: 1, last_error: msg }, { onConflict: "id" });
+    } catch { /* best-effort */ }
+    return new Response(JSON.stringify({ error: "Internal error" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 });

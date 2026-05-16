@@ -3,12 +3,15 @@
 // - no persisted onboarding answers, notifications, or schedule pre-fill
 // - localStorage caches are cleared on every auth event
 //
-// Toggle via:
-//   1. VITE_TESTING_MODE=true at build time, OR
-//   2. localStorage.setItem("testing_mode", "true") at runtime, OR
-//   3. ?testing=1 in the URL (sticky — sets the localStorage flag)
+// In PRODUCTION builds the only way to enable it is VITE_TESTING_MODE=true at
+// build time. The runtime toggles (?testing=1 URL param and the testing_mode
+// localStorage key) are DEV-only — otherwise a stray ?testing=1 link would
+// permanently strand a production user in fresh-user mode (the URL flag used to
+// be written to localStorage, so it stuck across reloads).
 //
-// Disable with: localStorage.setItem("testing_mode", "false")  (or remove the key)
+// Dev toggles:
+//   - ?testing=1 / ?testing=0 in the URL (sticky in dev — writes the localStorage flag)
+//   - localStorage.setItem("testing_mode", "true" | "false")
 
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 
@@ -29,9 +32,12 @@ function readUrlFlag(): boolean | null {
 }
 
 export function isTestingMode(): boolean {
+  if (import.meta.env.VITE_TESTING_MODE === "true") return true;
+  // Production builds ignore the URL param and the persisted localStorage key —
+  // those are reachable from untrusted input and used to stick forever.
+  if (!import.meta.env.DEV) return false;
   const urlFlag = readUrlFlag();
   if (urlFlag !== null) return urlFlag;
-  if (import.meta.env.VITE_TESTING_MODE === "true") return true;
   try {
     return localStorage.getItem(KEY) === "true";
   } catch {

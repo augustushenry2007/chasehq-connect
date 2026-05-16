@@ -32,6 +32,9 @@ dist-ssr
 setup-*.js
 setup-*.ts
 
+# Claude Code hook sentinel
+.claude/.dirty
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -43,3 +46,9 @@ setup-*.ts
 *.sln
 *.sw?
 .vercel
+
+# graphify knowledge-graph output — only the repo-root graphify-out/ is tracked.
+# Stray copies inside src/ pollute editor indexing and the graph itself.
+/src/**/graphify-out/
+# graphify AST cache — large, reproducible, no value in git
+graphify-out/cache/

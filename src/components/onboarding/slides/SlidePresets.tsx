@@ -31,7 +31,7 @@ export function SlidePresets() {
       <div className="text-center">
         <h2 className="text-xl font-bold text-foreground mb-1">Scheduling Styles</h2>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          Active, Patient, and Light are scheduling philosophies — not status lights. Each sets a different default cadence for new invoices.
+          Three schedules, each with a different cadence and tone sequence.
         </p>
       </div>
 
@@ -49,7 +49,7 @@ export function SlidePresets() {
       </div>
 
       <p className="text-sm text-muted-foreground font-medium text-center">
-        You chose your style during setup. Change it anytime in Settings.
+        Change anytime in Settings.
       </p>
     </div>
   );

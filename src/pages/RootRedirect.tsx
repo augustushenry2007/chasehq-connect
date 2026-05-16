@@ -1,15 +1,11 @@
 import { Navigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { useState, useEffect } from "react";
-import { STORAGE_KEYS } from "@/lib/storageKeys";
 import { FLOW_STORAGE_KEY } from "@/flow/states";
 
 export default function RootRedirect() {
   const { authReady, isAuthenticated } = useApp();
 
-  // Authenticated users should never be at root — FlowRouter can deadlock here
-  // if oauth_in_progress clears but state has no AUTH_SUCCESS transition (so deps never change).
-  // Navigate directly to /dashboard as a safety net; RequireOnboarding handles the rest.
   if (authReady && isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -49,8 +45,6 @@ export default function RootRedirect() {
             <div>isAuthenticated: {String(isAuthenticated)}</div>
             <div>elapsed: {elapsed}s</div>
             <div>flow_state: {flowState ? JSON.parse(flowState).state : "null"}</div>
-            <div>oauth_in_progress: {sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) || "null"}</div>
-            <div>oauth_completed: {sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) || "null"}</div>
           </div>
           <button
             onClick={handleReset}

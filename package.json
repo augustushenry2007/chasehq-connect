@@ -13,9 +13,8 @@
     "test:watch": "vitest",
     "test:security": "vitest run --config vitest.security.config.ts",
     "watch:ios": "node scripts/watch-ios.mjs",
-    "cap:inject": "node scripts/inject-app-plugins.mjs",
-    "cap:copy:ios": "npm run build && cap copy ios && node scripts/inject-app-plugins.mjs",
-    "cap:sync:ios": "npm run build && cap sync ios && node scripts/inject-app-plugins.mjs",
+    "cap:copy:ios": "npm run build && cap copy ios",
+    "cap:sync:ios": "npm run build && cap sync ios",
     "postinstall": "patch-package"
   },
   "dependencies": {

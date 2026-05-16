@@ -1,6 +1,5 @@
-// HMAC-signed OAuth state tokens. Replaces the old base64-JSON state, which
-// was forgeable and let an attacker bind a victim's Gmail tokens to an
-// arbitrary userId during the OAuth dance.
+// HMAC-signed state tokens used by any flow that needs to round-trip a bound
+// userId through an untrusted intermediary and verify it on return.
 //
 // Format: base64url(payload).base64url(hmacSha256(secret, base64url(payload)))
 // The signature is verified with constant-time comparison; expired / replayed

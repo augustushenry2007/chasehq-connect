@@ -1,6 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { STORAGE_KEYS } from "@/lib/storageKeys";
-import { FLOW_STORAGE_KEY } from "@/flow/states";
+import { analytics } from "@/integrations/analytics";
 
 interface Props {
   children: ReactNode;
@@ -21,16 +20,20 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo) {
     // eslint-disable-next-line no-console
     console.error("[ErrorBoundary]", error, info);
-    // TODO(prod): forward to analytics
+    try {
+      analytics.error("react_error_boundary", error.message, {
+        stack: error.stack?.slice(0, 2000),
+        componentStack: info.componentStack?.slice(0, 2000),
+      });
+    } catch {
+      /* analytics must never throw out of an error handler */
+    }
   }
 
   handleReload = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_STATE);
-      localStorage.removeItem(FLOW_STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
+    // Note: we intentionally do NOT clear ONBOARDING_STATE / FLOW_STORAGE_KEY here —
+    // a crash mid-onboarding shouldn't also lose the user's onboarding progress.
+    // Supabase Auth state lives in its own storage and is untouched by a reload.
     window.location.href = "/";
   };
 

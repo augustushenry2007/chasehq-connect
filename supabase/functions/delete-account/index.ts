@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import { buildCors } from "../_shared/cors.ts";
+import { logError } from "../_shared/log.ts";
 
 serve(async (req) => {
   const cors = buildCors(req.headers.get("origin"));
@@ -25,36 +26,33 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
     if (authError || !user) return json({ error: "Invalid session" }, 401);
 
+    // The App Review reviewer account is seeded by reviewer-signin and must
+    // persist across reviews — refuse to delete it from inside the app.
+    if (user.email?.toLowerCase() === "appreview@chasehq.app") {
+      return json({ error: "This account cannot be deleted." }, 403);
+    }
+
     const admin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Delete all user data in dependency order (children first)
     const userId = user.id;
-    await admin.from("notifications").delete().eq("user_id", userId);
-    await admin.from("followup_schedules").delete().eq("user_id", userId);
-    await admin.from("notification_preferences").delete().eq("user_id", userId);
-    await admin.from("email_send_log").delete().eq("user_id", userId);
-    await admin.from("followups").delete().eq("user_id", userId);
-    await admin.from("invoices").delete().eq("user_id", userId);
-    await admin.from("gmail_connections").delete().eq("user_id", userId);
-    await admin.from("smtp_connections").delete().eq("user_id", userId);
-    await admin.from("subscription_events").delete().eq("user_id", userId);
-    await admin.from("subscriptions").delete().eq("user_id", userId);
-    await admin.from("profiles").delete().eq("user_id", userId);
 
-    // Delete the auth user — requires service role
+    // Delete the auth user. Every user-scoped table carries an
+    // `ON DELETE CASCADE` FK to auth.users(id) — invoices, followups,
+    // followup_schedules, notifications, notification_preferences,
+    // subscriptions, subscription_events, profiles, email_send_log — so this
+    // one delete tears down everything in a single transactional cascade.
     const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
     if (deleteError) {
-      console.error("delete-account: auth.admin.deleteUser failed:", deleteError.message);
-      return json({ error: "Failed to delete account: " + deleteError.message }, 500);
+      logError("delete-account: auth.admin.deleteUser failed:", deleteError.message);
+      return json({ error: "Failed to delete account" }, 500);
     }
 
     return json({ ok: true });
   } catch (e) {
-    console.error("delete-account error:", e);
-    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
+    logError("delete-account error:", e);
+    return json({ error: "Internal error" }, 500);
   }
 });
-

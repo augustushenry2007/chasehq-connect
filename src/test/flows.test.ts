@@ -1,5 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { STORAGE_KEYS } from "@/lib/storageKeys";
+import { describe, it, expect, beforeEach } from "vitest";
 
 describe("Authentication Flow", () => {
   it("should validate email format", () => {
@@ -14,19 +13,15 @@ describe("Authentication Flow", () => {
     expect(emailRegex.test(invalidEmail)).toBe(false);
   });
 
-  it("should require strong password characteristics", () => {
-    const strongPassword = "Test1234!";
-    const hasUppercase = /[A-Z]/.test(strongPassword);
-    const hasLowercase = /[a-z]/.test(strongPassword);
-    const hasNumber = /\d/.test(strongPassword);
-    const hasMinLength = strongPassword.length >= 8;
-
-    expect(hasUppercase && hasLowercase && hasNumber && hasMinLength).toBe(true);
+  it("should accept a 6-digit OTP code", () => {
+    const code = "123456";
+    expect(code).toHaveLength(6);
+    expect(/^\d{6}$/.test(code)).toBe(true);
   });
 
-  it("should reject weak passwords", () => {
-    const weakPassword = "short";
-    expect(weakPassword.length >= 8).toBe(false);
+  it("should reject non-numeric OTP codes", () => {
+    const code = "abc123";
+    expect(/^\d{6}$/.test(code)).toBe(false);
   });
 });
 
@@ -82,7 +77,7 @@ describe("Onboarding Flow", () => {
 });
 
 describe("Flow Machine Transitions", () => {
-  it("should transition from LANDING to ONBOARDING", () => {
+  it("should transition from LANDING to ONBOARDING via START", () => {
     const transitions = {
       LANDING: {
         START: "ONBOARDING",
@@ -91,38 +86,18 @@ describe("Flow Machine Transitions", () => {
     expect(transitions.LANDING.START).toBe("ONBOARDING");
   });
 
-  it("should transition from ONBOARDING to GUEST_DRAFT or DASHBOARD_EMPTY", () => {
+  it("should transition from LANDING to DASHBOARD_ACTIVE via AUTH_SUCCESS", () => {
     const transitions = {
-      ONBOARDING: {
-        DECIDE_YES:  "GUEST_DRAFT",
-        DECIDE_SKIP: "DASHBOARD_EMPTY",
+      LANDING: {
+        AUTH_SUCCESS: "DASHBOARD_ACTIVE",
       },
     };
-    expect(transitions.ONBOARDING.DECIDE_YES).toBe("GUEST_DRAFT");
-    expect(transitions.ONBOARDING.DECIDE_SKIP).toBe("DASHBOARD_EMPTY");
+    expect(transitions.LANDING.AUTH_SUCCESS).toBe("DASHBOARD_ACTIVE");
   });
 
   it("should handle sign out from any state", () => {
     const signOutTransition = "LANDING";
     expect(signOutTransition).toBe("LANDING");
-  });
-});
-
-describe("OAuth Flow", () => {
-  it("should set oauth_in_progress flag", () => {
-    sessionStorage.setItem(STORAGE_KEYS.OAUTH_IN_PROGRESS, "1");
-    expect(sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS)).toBe("1");
-  });
-
-  it("should clear oauth_in_progress on sign in", () => {
-    sessionStorage.setItem(STORAGE_KEYS.OAUTH_IN_PROGRESS, "1");
-    sessionStorage.removeItem(STORAGE_KEYS.OAUTH_IN_PROGRESS);
-    expect(sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS)).toBeNull();
-  });
-
-  it("should have correct redirect URI", () => {
-    const redirectUri = `${window.location.origin}`;
-    expect(redirectUri).toContain("localhost");
   });
 });
 
@@ -157,13 +132,8 @@ describe("Local Storage Persistence", () => {
 
 describe("Route Configuration", () => {
   it("should have all required routes", () => {
-    const routes = ["/", "/welcome", "/auth", "/dashboard", "/onboarding", "/invoices"];
-    expect(routes).toContain("/auth");
+    const routes = ["/", "/welcome", "/dashboard", "/onboarding", "/invoices"];
+    expect(routes).toContain("/welcome");
     expect(routes).toContain("/dashboard");
-  });
-
-  it("should have auth route for OAuth callback", () => {
-    const authRoute = "/auth";
-    expect(authRoute).toBe("/auth");
   });
 });

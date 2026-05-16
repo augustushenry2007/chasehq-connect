@@ -51,7 +51,7 @@ export default function MockIAPSheet({ open, onConfirm, onCancel }: MockIAPSheet
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-foreground">14-day free trial</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Then $19.99/month</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Then $9.99/month</p>
             </div>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary/10 px-2 py-1 rounded-full">
               Free

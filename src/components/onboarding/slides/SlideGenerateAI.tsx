@@ -26,7 +26,7 @@ export function SlideGenerateAI() {
       <div className="text-center">
         <h2 className="text-xl font-bold text-foreground mb-1">Generate with AI</h2>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          Each draft starts from one of the five templates above — AI tailors it to your invoice details, days overdue, and chosen tone. Edit it, or send it as-is.
+          AI tailors each draft to your invoice, days overdue, and tone. Edit it, or send as-is.
         </p>
       </div>
 
@@ -49,7 +49,7 @@ export function SlideGenerateAI() {
       <div className="bg-muted/30 rounded-xl px-4 py-3">
         <p className="text-sm text-muted-foreground">
           <span className="text-foreground font-semibold">Always in your control.</span>{" "}
-          Nothing sends without your review. You can edit the draft, change the tone, or regenerate.
+          Nothing sends without your review.
         </p>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import { buildCors } from "../_shared/cors.ts";
+import { logError } from "../_shared/log.ts";
 
 const TRIAL_DAYS = 14;
 
@@ -114,8 +115,8 @@ serve(async (req) => {
           .maybeSingle();
         return json({ ok: true, already: true, status: existing?.status, trial_ends_at: existing?.trial_ends_at });
       }
-      console.error("start-trial insert error:", insertErr);
-      return json({ error: insertErr.message || "Could not start trial" }, 500);
+      logError("start-trial insert error:", insertErr);
+      return json({ error: "Could not start trial" }, 500);
     }
 
     await admin.from("subscription_events").insert({
@@ -126,8 +127,8 @@ serve(async (req) => {
 
     return json({ ok: true, status: "trialing", trial_ends_at: trialEndsAt });
   } catch (e) {
-    console.error("start-trial error:", e);
-    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
+    logError("start-trial error:", e);
+    return json({ error: "Internal error" }, 500);
   }
 });
 

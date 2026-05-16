@@ -3,41 +3,57 @@ import { useNavigate } from "react-router-dom";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { getStats, getChaseFeed, formatUSD } from "@/lib/data";
 import { useApp } from "@/context/AppContext";
-import { StatusBadge, STATUS_CONFIG } from "@/components/StatusBadge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useFlow } from "@/flow/FlowMachine";
 import {
   TrendingUp, AlertCircle, CheckCircle, Check,
-  Plus, FileText, Sparkles, Clock, Mail, Pen, ChevronRight,
+  Plus, FileText, Sparkles, Clock, Pen, ChevronRight,
 } from "lucide-react";
 import { CoachHint } from "@/components/onboarding/CoachHint";
-import { GoogleAuthSheet } from "@/components/auth/GoogleAuthSheet";
 import { useMissedSteps } from "@/hooks/useMissedSteps";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
+import NotificationRationaleSheet from "@/components/NotificationRationaleSheet";
 import TrialBanner from "@/components/TrialBanner";
 import NotificationBell from "@/components/NotificationBell";
-import { useGmailConnection } from "@/hooks/useGmailConnection";
-import { useSendingMailbox } from "@/hooks/useSendingMailbox";
-import { mailboxPromptShownKey, displayNamePromptShownKey, STORAGE_KEYS } from "@/lib/storageKeys";
+import { displayNamePromptShownKey } from "@/lib/storageKeys";
 
-function StatCard({ label, value, sub, icon: Icon, iconColor, valueColor, onClick }: {
-  label: string; value: string; sub: string; icon: React.ElementType; iconColor: string; valueColor?: string; onClick?: () => void;
+type StatTone = "primary" | "warm" | "success" | "neutral";
+
+function StatCard({ label, value, sub, icon: Icon, valueColor, onClick, tone = "neutral" }: {
+  label: string; value: string; sub: string; icon: React.ElementType; valueColor?: string; onClick?: () => void; tone?: StatTone;
 }) {
   const interactive = !!onClick;
   const Elem = interactive ? "button" : "div";
+  const topBorder =
+    tone === "primary" ? "hsl(var(--primary) / 0.45)"
+    : tone === "warm" ? "hsl(28 90% 60% / 0.45)"
+    : tone === "success" ? "hsl(142 70% 45% / 0.40)"
+    : "hsl(var(--border))";
+  const tileCls =
+    tone === "primary" ? "bg-accent/60 text-primary"
+    : tone === "warm" ? "bg-[hsl(var(--warm-100))] text-orange-700"
+    : tone === "success" ? "bg-emerald-100 text-emerald-700"
+    : "bg-muted text-muted-foreground";
   return (
     <Elem
       {...(interactive ? { onClick } : { "aria-disabled": true })}
-      className={`flex-1 bg-card border border-border rounded-2xl p-4 text-left transition-colors ${interactive ? "hover:border-primary/40 active:scale-[0.98]" : "cursor-default"}`}
+      style={{
+        borderTop: `2px solid ${topBorder}`,
+        boxShadow: "var(--shadow-card)",
+      }}
+      className={`flex-1 bg-card border border-border rounded-2xl p-4 text-left transition-shadow ${interactive ? "hover:shadow-[var(--shadow-card-lg)] active:scale-[0.98]" : "cursor-default"}`}
     >
-      <div className="flex items-center gap-2 mb-2">
-        <Icon className="w-4 h-4" style={{ color: iconColor }} />
+      <div className="flex items-center gap-2 mb-2.5">
+        <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${tileCls}`}>
+          <Icon className="w-3.5 h-3.5" />
+        </span>
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
       </div>
-      <p className={`text-xl font-bold ${interactive ? "" : "opacity-50"}`} style={{ color: valueColor || "hsl(var(--foreground))" }}>{value}</p>
+      <p className={`text-[22px] font-bold tracking-[-0.02em] ${interactive ? "" : "opacity-50"}`} style={{ color: valueColor || "hsl(var(--foreground))" }}>{value}</p>
       <p className={`text-xs text-muted-foreground mt-0.5 ${interactive ? "" : "opacity-50"}`}>{sub}</p>
     </Elem>
   );
@@ -56,36 +72,9 @@ export default function DashboardScreen() {
   const { invoices, loading, refetch } = useInvoices();
   const { missed: missedSteps } = useMissedSteps();
   const { send: flowSend } = useFlow();
-  const { signedInWithGoogle, connectGmail } = useGmailConnection();
-  const { canSend: hasMailbox, loading: mailboxLoading } = useSendingMailbox();
   const [showNew, setShowNew] = useState(false);
-  const [mailboxPromptOpen, setMailboxPromptOpen] = useState(false);
   const [namePromptOpen, setNamePromptOpen] = useState(false);
-  const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [promptName, setPromptName] = useState("");
-  const [oauthLatched, setOauthLatched] = useState(() =>
-    sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1" ||
-    sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1"
-  );
-
-  useEffect(() => {
-    function onSignal() {
-      const inFlight =
-        sessionStorage.getItem(STORAGE_KEYS.OAUTH_IN_PROGRESS) === "1" ||
-        sessionStorage.getItem(STORAGE_KEYS.OAUTH_COMPLETED) === "1";
-      setOauthLatched(inFlight);
-    }
-    window.addEventListener("chasehq:oauth-signal", onSignal);
-    return () => window.removeEventListener("chasehq:oauth-signal", onSignal);
-  }, []);
-
-  useEffect(() => {
-    if (!isAuthenticated || mailboxLoading || hasMailbox || oauthLatched) return;
-    const key = mailboxPromptShownKey(user?.id);
-    if (localStorage.getItem(key)) return;
-    setMailboxPromptOpen(true);
-  }, [isAuthenticated, mailboxLoading, hasMailbox, oauthLatched, user?.id]);
-
   useEffect(() => {
     if (!isAuthenticated || !profileReady || fullName) return;
     const email = user?.email || "";
@@ -97,26 +86,13 @@ export default function DashboardScreen() {
     setNamePromptOpen(true);
   }, [isAuthenticated, profileReady, fullName, user?.id, user?.email]);
 
-  function handleDismissMailboxPrompt() {
-    localStorage.setItem(mailboxPromptShownKey(user?.id), "1");
-    setMailboxPromptOpen(false);
-  }
 
-  function handleConnectMailbox() {
-    localStorage.setItem(mailboxPromptShownKey(user?.id), "1");
-    setMailboxPromptOpen(false);
-    if (signedInWithGoogle) {
-      connectGmail("/dashboard");
-    } else {
-      navigate("/settings");
-    }
-  }
 
   const stats = getStats(invoices);
   const chaseFeed = getChaseFeed(invoices);
   const isEmpty = invoices.length === 0;
 
-  if (loading || (oauthLatched && !isAuthenticated)) {
+  if (loading) {
     return (
       <div className="flex-1 overflow-hidden pb-24 pt-[env(safe-area-inset-top,0px)]">
         <div className="px-5 pt-5">
@@ -139,17 +115,12 @@ export default function DashboardScreen() {
   const greetingText = firstName ? `${greeting()}, ${firstName}` : greeting();
 
   return (
-    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24 pt-[env(safe-area-inset-top,0px)] animate-page-enter">
-      <TrialBanner />
-      {!isAuthenticated && (
-        <button
-          onClick={() => setAuthDialogOpen(true)}
-          className="mx-5 mt-3 w-[calc(100%-2.5rem)] flex items-center justify-between rounded-xl bg-primary/10 border border-primary/20 px-4 py-3 text-sm transition-all active:scale-[0.99]"
-        >
-          <span className="text-foreground font-medium">Save your work — create your free account</span>
-          <ChevronRight className="w-4 h-4 text-primary shrink-0" />
-        </button>
+    <div className="flex-1 flex flex-col overflow-hidden pt-[env(safe-area-inset-top,0px)] animate-page-enter">
+      {user?.email?.toLowerCase() !== "appreview@chasehq.app" && (
+        <NotificationRationaleSheet hasAnyInvoice={invoices.length > 0} />
       )}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24">
+      <TrialBanner />
       {isAuthenticated && missedSteps.length > 0 && (
         <button
           onClick={() => navigate("/catchup")}
@@ -170,23 +141,14 @@ export default function DashboardScreen() {
       <div className="px-5 pt-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-xl font-bold text-foreground">
+            <h1 className="text-[clamp(24px,6vw,32px)] font-bold text-foreground tracking-[-0.03em] leading-[1.1]">
               {greetingText}
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-[15px] text-muted-foreground mt-1 leading-[1.5]">
               {isEmpty ? "Add your first invoice — we'll take the hardest part off your plate." : "Here's what needs your attention today."}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {!isEmpty && (
-              <button
-                onClick={() => { flowSend("CREATE_INVOICE"); setShowNew(true); }}
-                aria-label="New invoice"
-                className="w-9 h-9 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            )}
             <span className="inline-flex"><NotificationBell /></span>
           </div>
         </div>
@@ -197,7 +159,7 @@ export default function DashboardScreen() {
             value={formatUSD(stats.outstandingTotal)}
             sub={isEmpty ? "Add an invoice to get started" : `${stats.outstandingCount} invoices`}
             icon={TrendingUp}
-            iconColor="#3B82F6"
+            tone="primary"
             onClick={isEmpty ? undefined : () => navigate("/invoices")}
           />
           <StatCard
@@ -205,7 +167,7 @@ export default function DashboardScreen() {
             value={formatUSD(stats.overdueTotal)}
             sub={isEmpty ? "Nothing overdue" : `${stats.overdueCount} need action`}
             icon={AlertCircle}
-            iconColor="#F59E0B"
+            tone="warm"
             valueColor={stats.overdueCount > 0 ? "#DC2626" : undefined}
             onClick={isEmpty ? undefined : () => navigate("/invoices?filter=overdue")}
           />
@@ -214,7 +176,7 @@ export default function DashboardScreen() {
             value={formatUSD(stats.paidTotal)}
             sub={isEmpty ? "No payments yet" : `${stats.paidCount} invoices paid`}
             icon={CheckCircle}
-            iconColor="#22C55E"
+            tone="success"
             valueColor={stats.paidCount > 0 ? "#16A34A" : undefined}
             onClick={isEmpty ? undefined : () => navigate("/invoices?filter=paid")}
           />
@@ -223,7 +185,7 @@ export default function DashboardScreen() {
             value={formatUSD(stats.upcomingTotal)}
             sub={isEmpty ? "No invoices yet" : `${stats.upcomingCount} invoices`}
             icon={Clock}
-            iconColor="#6366F1"
+            tone="neutral"
             onClick={isEmpty ? undefined : () => navigate("/invoices?filter=upcoming")}
           />
         </div>
@@ -232,18 +194,19 @@ export default function DashboardScreen() {
       {isEmpty ? (
         <>
           {/* Empty-state hero */}
-          <div className="mt-5 mx-5 bg-card border border-border rounded-2xl p-5 relative overflow-hidden animate-fade-in">
+          <div className="mt-5 mx-5 card-elevated p-5 relative overflow-hidden animate-fade-in">
             <div className="relative">
-              <div className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center mb-3">
-                <FileText className="w-5 h-5 text-primary-foreground" />
+              <div className="w-14 h-14 rounded-2xl bg-accent/60 flex items-center justify-center mb-4">
+                <FileText className="w-6 h-6 text-primary" />
               </div>
-              <h2 className="text-lg font-bold text-foreground">Ready to create your first follow-up?</h2>
-              <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+              <p className="text-xs uppercase tracking-[0.12em] font-semibold text-primary mb-2">Get started</p>
+              <h2 className="text-[22px] font-bold text-foreground tracking-[-0.02em] leading-[1.15]">Ready to create your first follow-up?</h2>
+              <p className="text-[15px] text-muted-foreground mt-2 leading-[1.55] max-w-sm">
                 Add an invoice to ChaseHQ and we'll draft personalized follow-ups in your tone. Send them on your schedule.
               </p>
               <button
                 onClick={() => { flowSend("CREATE_INVOICE"); setShowNew(true); }}
-                className="mt-4 inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97]"
+                className="mt-5 inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out active:scale-[0.97] shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)]"
               >
                 <Plus className="w-4 h-4" /> Add Your First Invoice
               </button>
@@ -315,20 +278,20 @@ export default function DashboardScreen() {
                   <button
                     key={inv.id}
                     onClick={() => navigate(`/invoice/${inv.id}`)}
-                    className={`w-full flex items-center gap-3 px-4 py-3.5 text-left ${i < chaseFeed.length - 1 ? "border-b border-border" : ""}`}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-left ${i < chaseFeed.length - 1 ? "border-b border-border" : ""}`}
                   >
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: STATUS_CONFIG[inv.status]?.dot }} />
+                    <span className="w-9 h-9 rounded-full bg-muted text-muted-foreground flex items-center justify-center shrink-0 text-xs font-semibold uppercase">
+                      {inv.client.charAt(0)}
+                    </span>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold text-foreground capitalize">{inv.client}</span>
-                        <span className="text-xs text-muted-foreground">{inv.id}</span>
-                        <StatusBadge status={inv.status} />
-                      </div>
+                      <p className="text-sm font-semibold text-foreground truncate capitalize">
+                        {inv.client} <span className="text-muted-foreground font-normal">· {inv.id}</span>
+                      </p>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {inv.daysPastDue > 0 ? `${inv.daysPastDue} days overdue` : inv.description}
+                        {formatUSD(inv.amount)} · {inv.daysPastDue > 0 ? `${inv.daysPastDue} days late` : inv.description}
                       </p>
                     </div>
-                    <span className="text-sm font-semibold text-foreground shrink-0">{formatUSD(inv.amount)}</span>
+                    <StatusBadge status={inv.status} />
                   </button>
                 ))}
               </div>
@@ -338,11 +301,17 @@ export default function DashboardScreen() {
         </>
       )}
 
-      <GoogleAuthSheet
-        open={authDialogOpen}
-        onClose={() => setAuthDialogOpen(false)}
-        variant="create_account"
-      />
+      </div>
+
+      {!isEmpty && (
+        <button
+          onClick={() => { flowSend("CREATE_INVOICE"); setShowNew(true); }}
+          aria-label="New invoice"
+          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+72px)] right-5 w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-[0_8px_24px_rgba(91,123,142,0.35)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.40)] active:scale-[0.95] transition-all z-30"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+      )}
 
       <NewInvoiceModal
         visible={showNew}
@@ -403,27 +372,6 @@ export default function DashboardScreen() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={mailboxPromptOpen} onOpenChange={setMailboxPromptOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <Mail className="w-5 h-5 text-primary" />
-              Connect your Gmail to send
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {signedInWithGoogle
-                ? "ChaseHQ needs permission to send from your Gmail. We never read your inbox. You can connect anytime from Settings → Gmail."
-                : "Connect your Gmail account in Settings so ChaseHQ can send follow-ups on your behalf."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleDismissMailboxPrompt}>Skip for now</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConnectMailbox}>
-              {signedInWithGoogle ? "Connect Gmail" : "Open Settings"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

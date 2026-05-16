@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "touch \"/Users/augustushenry/Desktop/ChaseHQ for VSCode/chasehq-connect-main/.claude/.dirty\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"/Users/augustushenry/Desktop/ChaseHQ for VSCode/chasehq-connect-main\" && if [ -f .claude/.dirty ]; then echo '[hook] frontend changes detected — running cap:copy:ios + graphify update'; npm run cap:copy:ios && /Users/augustushenry/Library/Python/3.13/bin/graphify update . ; rm -f .claude/.dirty; fi"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f \"/Users/augustushenry/Desktop/ChaseHQ for VSCode/chasehq-connect-main/graphify-out/GRAPH_REPORT.md\" ]; then echo '[graphify] knowledge graph at graphify-out/GRAPH_REPORT.md — read for god nodes / community structure before answering architecture questions'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

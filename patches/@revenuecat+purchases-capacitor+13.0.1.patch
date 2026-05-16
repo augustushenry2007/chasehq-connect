@@ -1,0 +1,556 @@
+diff --git a/node_modules/@revenuecat/purchases-capacitor/.swiftpm/xcode/xcuserdata/augustushenry.xcuserdatad/xcschemes/xcschememanagement.plist b/node_modules/@revenuecat/purchases-capacitor/.swiftpm/xcode/xcuserdata/augustushenry.xcuserdatad/xcschemes/xcschememanagement.plist
+new file mode 100644
+index 0000000..c541b5e
+--- /dev/null
++++ b/node_modules/@revenuecat/purchases-capacitor/.swiftpm/xcode/xcuserdata/augustushenry.xcuserdatad/xcschemes/xcschememanagement.plist
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>SchemeUserState</key>
++	<dict>
++		<key>RevenuecatPurchasesCapacitor.xcscheme_^#shared#^_</key>
++		<dict>
++			<key>orderHint</key>
++			<integer>6</integer>
++		</dict>
++	</dict>
++</dict>
++</plist>
+diff --git a/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/CAPPluginCallExtensions.swift b/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/CAPPluginCallExtensions.swift
+index 25d1d81..16787ca 100644
+--- a/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/CAPPluginCallExtensions.swift
++++ b/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/CAPPluginCallExtensions.swift
+@@ -4,34 +4,35 @@ import Capacitor
+ internal extension CAPPluginCall {
+ 
+     func getOrRejectString(_ parameterName: String) -> String? {
+-        guard let parameter = self.getString(parameterName) else {
+-            self.reject("Must provide \(parameterName) parameter")
++        let parameter = self.getString(parameterName, "")
++        if parameter.isEmpty {
++            self.unimplemented("Must provide \(parameterName) parameter")
+             return nil
+         }
+         return parameter
+     }
+ 
+     func getOrRejectBool(_ parameterName: String) -> Bool? {
+-        guard let parameter = self.getBool(parameterName) else {
+-            self.reject("Must provide \(parameterName) parameter")
++        if self.dictionaryRepresentation[parameterName] == nil {
++            self.unimplemented("Must provide \(parameterName) parameter")
+             return nil
+         }
+-        return parameter
++        return self.getBool(parameterName, false)
+     }
+ 
+     func getOrRejectStringArray(_ parameterName: String) -> [String]? {
+-        guard let parameter = self.getArray(parameterName) as? [String] else {
+-            self.reject("Must provide \(parameterName) parameter")
++        if self.dictionaryRepresentation[parameterName] == nil {
++            self.unimplemented("Must provide \(parameterName) parameter")
+             return nil
+         }
+-        return parameter
++        return self.getArray(parameterName, []) as? [String]
+     }
+ 
+     func getOrRejectObject(_ parameterName: String) -> JSObject? {
+-        guard let parameter = self.getObject(parameterName) else {
+-            self.reject("Must provide \(parameterName) parameter")
++        if self.dictionaryRepresentation[parameterName] == nil {
++            self.unimplemented("Must provide \(parameterName) parameter")
+             return nil
+         }
+-        return parameter
++        return self.getObject(parameterName, [:])
+     }
+ }
+diff --git a/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PluginHelperExtensions.swift b/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PluginHelperExtensions.swift
+index c42be09..9db1788 100644
+--- a/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PluginHelperExtensions.swift
++++ b/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PluginHelperExtensions.swift
+@@ -6,7 +6,7 @@ import RevenueCat
+ internal extension PurchasesPlugin {
+     func rejectIfPurchasesNotConfigured(_ call: CAPPluginCall) -> Bool {
+         if !Purchases.isConfigured {
+-            call.reject("Purchases must be configured before calling this function")
++            call.unimplemented("Purchases must be configured before calling this function")
+             return false
+         }
+         return true
+@@ -17,7 +17,7 @@ internal extension PurchasesPlugin {
+     }
+ 
+     func rejectWithErrorContainer(_ call: CAPPluginCall, error: ErrorContainer) {
+-        call.reject("\(error.message)", "\(error.code)", error.error)
++        call.unimplemented("\(error.code): \(error.message)")
+     }
+ 
+     func getNullableCompletionBlockHandler(_ call: CAPPluginCall,
+@@ -56,7 +56,7 @@ internal extension PurchasesPlugin {
+                 }()
+                 call.resolve(mapToResolve)
+             } else {
+-                call.reject("Incorrect completion. No response nor error passed.")
++                call.unimplemented("Incorrect completion. No response nor error passed.")
+             }
+         }
+         return handleResponse
+@@ -73,7 +73,7 @@ internal extension PurchasesPlugin {
+                 let mapToResolve: [String: Any] = [wrapperKey: response]
+                 call.resolve(mapToResolve)
+             } else {
+-                call.reject("Incorrect completion. No response nor error passed.")
++                call.unimplemented("Incorrect completion. No response nor error passed.")
+             }
+         }
+         return handleResponse
+diff --git a/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PropertySetterPluginExtensions.swift b/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PropertySetterPluginExtensions.swift
+index 92be0ea..489b4e4 100644
+--- a/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PropertySetterPluginExtensions.swift
++++ b/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PropertySetterPluginExtensions.swift
+@@ -17,140 +17,140 @@ public extension PurchasesPlugin {
+ 
+     @objc func setEmail(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let email = call.getString("email")
++        let email = call.getString("email", "")
+         CommonFunctionality.setEmail(email)
+         call.resolve()
+     }
+ 
+     @objc func setPhoneNumber(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let phoneNumber = call.getString("phoneNumber")
++        let phoneNumber = call.getString("phoneNumber", "")
+         CommonFunctionality.setPhoneNumber(phoneNumber)
+         call.resolve()
+     }
+ 
+     @objc func setDisplayName(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let displayName = call.getString("displayName")
++        let displayName = call.getString("displayName", "")
+         CommonFunctionality.setDisplayName(displayName)
+         call.resolve()
+     }
+ 
+     @objc func setPushToken(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let pushToken = call.getString("pushToken")
++        let pushToken = call.getString("pushToken", "")
+         CommonFunctionality.setPushToken(pushToken)
+         call.resolve()
+     }
+ 
+     @objc func setAdjustID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let adjustID = call.getString("adjustID")
++        let adjustID = call.getString("adjustID", "")
+         CommonFunctionality.setAdjustID(adjustID)
+         call.resolve()
+     }
+ 
+     @objc func setAppsflyerID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let appsflyerID = call.getString("appsflyerID")
++        let appsflyerID = call.getString("appsflyerID", "")
+         CommonFunctionality.setAppsflyerID(appsflyerID)
+         call.resolve()
+     }
+ 
+     @objc func setFBAnonymousID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let fbAnonymousID = call.getString("fbAnonymousID")
++        let fbAnonymousID = call.getString("fbAnonymousID", "")
+         CommonFunctionality.setFBAnonymousID(fbAnonymousID)
+         call.resolve()
+     }
+ 
+     @objc func setMparticleID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let mparticleID = call.getString("mparticleID")
++        let mparticleID = call.getString("mparticleID", "")
+         CommonFunctionality.setMparticleID(mparticleID)
+         call.resolve()
+     }
+ 
+     @objc func setCleverTapID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let cleverTapID = call.getString("cleverTapID")
++        let cleverTapID = call.getString("cleverTapID", "")
+         CommonFunctionality.setCleverTapID(cleverTapID)
+         call.resolve()
+     }
+ 
+     @objc func setMixpanelDistinctID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let mixpanelDistinctID = call.getString("mixpanelDistinctID")
++        let mixpanelDistinctID = call.getString("mixpanelDistinctID", "")
+         CommonFunctionality.setMixpanelDistinctID(mixpanelDistinctID)
+         call.resolve()
+     }
+ 
+     @objc func setFirebaseAppInstanceID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let firebaseAppInstanceID = call.getString("firebaseAppInstanceID")
++        let firebaseAppInstanceID = call.getString("firebaseAppInstanceID", "")
+         CommonFunctionality.setFirebaseAppInstanceID(firebaseAppInstanceID)
+         call.resolve()
+     }
+ 
+     @objc func setOnesignalID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let onesignalID = call.getString("onesignalID")
++        let onesignalID = call.getString("onesignalID", "")
+         CommonFunctionality.setOnesignalID(onesignalID)
+         call.resolve()
+     }
+ 
+     @objc func setOnesignalUserID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let onesignalUserID = call.getString("onesignalUserID")
++        let onesignalUserID = call.getString("onesignalUserID", "")
+         CommonFunctionality.setOnesignalUserID(onesignalUserID)
+         call.resolve()
+     }
+ 
+     @objc func setAirshipChannelID(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let airshipChannelID = call.getString("airshipChannelID")
++        let airshipChannelID = call.getString("airshipChannelID", "")
+         CommonFunctionality.setAirshipChannelID(airshipChannelID)
+         call.resolve()
+     }
+ 
+     @objc func setMediaSource(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let mediaSource = call.getString("mediaSource")
++        let mediaSource = call.getString("mediaSource", "")
+         CommonFunctionality.setMediaSource(mediaSource)
+         call.resolve()
+     }
+ 
+     @objc func setCampaign(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let campaign = call.getString("campaign")
++        let campaign = call.getString("campaign", "")
+         CommonFunctionality.setCampaign(campaign)
+         call.resolve()
+     }
+ 
+     @objc func setAdGroup(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let adGroup = call.getString("adGroup")
++        let adGroup = call.getString("adGroup", "")
+         CommonFunctionality.setAdGroup(adGroup)
+         call.resolve()
+     }
+ 
+     @objc func setAd(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let adProperty = call.getString("ad")
++        let adProperty = call.getString("ad", "")
+         CommonFunctionality.setAd(adProperty)
+         call.resolve()
+     }
+ 
+     @objc func setKeyword(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let keyword = call.getString("keyword")
++        let keyword = call.getString("keyword", "")
+         CommonFunctionality.setKeyword(keyword)
+         call.resolve()
+     }
+ 
+     @objc func setCreative(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let creative = call.getString("creative")
++        let creative = call.getString("creative", "")
+         CommonFunctionality.setCreative(creative)
+         call.resolve()
+     }
+diff --git a/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PurchasesPlugin.swift b/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PurchasesPlugin.swift
+index 9a739e3..9293b82 100644
+--- a/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PurchasesPlugin.swift
++++ b/node_modules/@revenuecat/purchases-capacitor/ios/Sources/RevenuecatPurchasesCapacitor/PurchasesPlugin.swift
+@@ -102,19 +102,21 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+     }
+ 
+     // WIP: Need to handle concurrency for these...
+-    private var customerInfoUpdateListeners: [String] = []
++    private var customerInfoUpdateListeners: [String: CAPPluginCall] = [:]
+     private var lastReceivedCustomerInfo: CustomerInfo?
+ 
+     @objc func configure(_ call: CAPPluginCall) {
+         guard let apiKey = call.getOrRejectString("apiKey") else { return }
+-        let appUserID = call.getString("appUserID")
+-        var storeKitVersion = call.getString("storeKitVersion") ?? StoreKitVersion.default.name
+-        let purchasesAreCompletedByString = call.getString("purchasesAreCompletedBy")
++        let _appUserID = call.getString("appUserID", "")
++        let appUserID: String? = _appUserID.isEmpty ? nil : _appUserID
++        var storeKitVersion = call.getString("storeKitVersion", StoreKitVersion.default.name)
++        let purchasesAreCompletedByString = call.getString("purchasesAreCompletedBy", "")
+         var purchasesAreCompletedBy: String? = nil
+         if purchasesAreCompletedByString == PurchasesAreCompletedBy.revenueCat.name {
+             purchasesAreCompletedBy = PurchasesAreCompletedBy.revenueCat.name
+         } else {
+-            if let purchasesAreCompletedByObject = call.getObject("purchasesAreCompletedBy") {
++            let purchasesAreCompletedByObject = call.getObject("purchasesAreCompletedBy", [:])
++            if !purchasesAreCompletedByObject.isEmpty {
+                 purchasesAreCompletedBy = purchasesAreCompletedByObject["type"] as? String
+                 if let newStoreKitVersion = purchasesAreCompletedByObject["storeKitVersion"] as? String,
+                    newStoreKitVersion != storeKitVersion {
+@@ -127,12 +129,15 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+                 }
+             }
+         }
+-        let userDefaultsSuiteName = call.getString("userDefaultsSuiteName")
+-        let shouldShowInAppMessagesAutomatically = call.getBool("shouldShowInAppMessagesAutomatically") ?? true
+-        let entitlementVerificationMode = call.getString("entitlementVerificationMode")
+-        let diagnosticsEnabled = call.getBool("diagnosticsEnabled") ?? false
+-        let automaticDeviceIdentifierCollectionEnabled = call.getBool("automaticDeviceIdentifierCollectionEnabled") ?? true
+-        let preferredLocale = call.getString("preferredUILocaleOverride")
++        let _userDefaultsSuiteName = call.getString("userDefaultsSuiteName", "")
++        let userDefaultsSuiteName: String? = _userDefaultsSuiteName.isEmpty ? nil : _userDefaultsSuiteName
++        let shouldShowInAppMessagesAutomatically = call.getBool("shouldShowInAppMessagesAutomatically", true)
++        let _entitlementVerificationMode = call.getString("entitlementVerificationMode", "")
++        let entitlementVerificationMode: String? = _entitlementVerificationMode.isEmpty ? nil : _entitlementVerificationMode
++        let diagnosticsEnabled = call.getBool("diagnosticsEnabled", false)
++        let automaticDeviceIdentifierCollectionEnabled = call.getBool("automaticDeviceIdentifierCollectionEnabled", true)
++        let _preferredLocale = call.getString("preferredUILocaleOverride", "")
++        let preferredLocale: String? = _preferredLocale.isEmpty ? nil : _preferredLocale
+ 
+         let purchases = Purchases.configure(apiKey: apiKey,
+                                             appUserID: appUserID,
+@@ -190,7 +195,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+     @objc func redeemWebPurchase(_ call: CAPPluginCall) {
+         guard let webPurchaseRedemption = call.getOrRejectObject("webPurchaseRedemption") else { return }
+         guard let redemptionLink = webPurchaseRedemption["redemptionLink"] as? String else {
+-            call.reject("WebPurchaseRedemption parameter did not have a redemptionLink key")
++            call.unimplemented("WebPurchaseRedemption parameter did not have a redemptionLink key")
+             return
+         }
+         CommonFunctionality.redeemWebPurchase(urlString: redemptionLink,
+@@ -210,7 +215,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+ 
+     @objc func addCustomerInfoUpdateListener(_ call: CAPPluginCall) {
+         call.keepAlive = true
+-        self.customerInfoUpdateListeners.append(call.callbackId)
++        self.customerInfoUpdateListeners[call.callbackId] = call
+         if let lastReceivedCustomerInfo {
+             call.resolve(CommonFunctionality.encode(customerInfo: lastReceivedCustomerInfo))
+         }
+@@ -220,9 +225,9 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard let callbackId = call.getOrRejectString("listenerToRemove") else { return }
+ 
+         var wasRemoved = false
+-        if let index = self.customerInfoUpdateListeners.firstIndex(of: callbackId) {
+-            self.customerInfoUpdateListeners.remove(at: index)
+-            self.bridge?.savedCall(withID: callbackId)?.keepAlive = false
++        if let savedCall = self.customerInfoUpdateListeners[callbackId] {
++            savedCall.keepAlive = false
++            self.customerInfoUpdateListeners.removeValue(forKey: callbackId)
+             wasRemoved = true
+         }
+         call.resolve([
+@@ -260,7 +265,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let storeProduct = call.getOrRejectObject("product") else { return }
+         guard let productId = storeProduct["identifier"] as? String else {
+-            call.reject("Product parameter did not have identifier key")
++            call.unimplemented("Product parameter did not have identifier key")
+             return
+         }
+         CommonFunctionality.purchase(product: productId,
+@@ -272,12 +277,12 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let storeProduct = call.getOrRejectObject("product") else { return }
+         guard let productId = storeProduct["identifier"] as? String else {
+-            call.reject("Product parameter did not have identifier key")
++            call.unimplemented("Product parameter did not have identifier key")
+             return
+         }
+         guard let discount = call.getOrRejectObject("discount") else { return }
+         guard let signedDiscountTimestamp = discount["timestamp"] as? Int else {
+-            call.reject("Discount parameter did not have timestamp key")
++            call.unimplemented("Discount parameter did not have timestamp key")
+             return
+         }
+         CommonFunctionality.purchase(product: productId,
+@@ -289,11 +294,11 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let package = call.getOrRejectObject("aPackage") else { return }
+         guard let packageId = package["identifier"] as? String else {
+-            call.reject("aPackage parameter did not have identifier key")
++            call.unimplemented("aPackage parameter did not have identifier key")
+             return
+         }
+         guard let presentedOfferingContext = package["presentedOfferingContext"] as? [String: Any] else {
+-            call.reject("aPackage parameter did not have presentedOfferingContext key")
++            call.unimplemented("aPackage parameter did not have presentedOfferingContext key")
+             return
+         }
+         CommonFunctionality.purchase(package: packageId,
+@@ -310,16 +315,16 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let package = call.getOrRejectObject("aPackage") else { return }
+         guard let packageId = package["identifier"] as? String else {
+-            call.reject("aPackage parameter did not have identifier key")
++            call.unimplemented("aPackage parameter did not have identifier key")
+             return
+         }
+         guard let presentedOfferingContext = package["presentedOfferingContext"] as? [String: Any] else {
+-            call.reject("aPackage parameter did not have presentedOfferingContext key")
++            call.unimplemented("aPackage parameter did not have presentedOfferingContext key")
+             return
+         }
+         guard let discount = call.getOrRejectObject("discount") else { return }
+         guard let signedDiscountTimestamp = discount["timestamp"] as? Int else {
+-            call.reject("Discount parameter did not have timestamp key")
++            call.unimplemented("Discount parameter did not have timestamp key")
+             return
+         }
+         CommonFunctionality.purchase(package: packageId,
+@@ -360,7 +365,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+             if let storefront = storefront {
+                 call.resolve(storefront)
+             } else {
+-                call.reject("Storefront info could not be obtained for account.")
++                call.unimplemented("Storefront info could not be obtained for account.")
+             }
+         }
+     }
+@@ -437,12 +442,12 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let storeProduct = call.getOrRejectObject("product") else { return }
+         guard let productId = storeProduct["identifier"] as? String else {
+-            call.reject("Product parameter did not have identifier key")
++            call.unimplemented("Product parameter did not have identifier key")
+             return
+         }
+         guard let discount = call.getOrRejectObject("discount") else { return }
+         guard let discountIdentifier = discount["identifier"] as? String else {
+-            call.reject("Discount parameter did not have identifier key")
++            call.unimplemented("Discount parameter did not have identifier key")
+             return
+         }
+ 
+@@ -461,7 +466,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let product = call.getOrRejectObject("product"),
+               let productID = product["identifier"] as? String else {
+-            call.reject("Product does not contain an identifier.")
++            call.unimplemented("Product does not contain an identifier.")
+             return
+         }
+ 
+@@ -485,7 +490,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard let aPackage = call.getOrRejectObject("aPackage"),
+               let product = aPackage["product"] as? [String: Any],
+               let productID = product["identifier"] as? String else {
+-            call.reject("Package did not contain a product with a product identifier.")
++            call.unimplemented("Package did not contain a product with a product identifier.")
+             return
+         }
+ 
+@@ -508,13 +513,13 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let product = call.getOrRejectObject("product") else { return }
+         guard let productID = product["identifier"] as? String else {
+-            call.reject("Product does not contain an identifier.")
++            call.unimplemented("Product does not contain an identifier.")
+             return
+         }
+ 
+         guard let winBackOffer = call.getOrRejectObject("winBackOffer") else { return }
+         guard let winBackOfferID = winBackOffer["identifier"] as? String else {
+-            call.reject("Win-back offer does not contain an identifier.")
++            call.unimplemented("Win-back offer does not contain an identifier.")
+             return
+         }
+ 
+@@ -535,18 +540,18 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let aPackage = call.getOrRejectObject("aPackage") else { return }
+         guard let packageID = aPackage["identifier"] as? String else {
+-            call.reject("Package does not contain an identifier.")
++            call.unimplemented("Package does not contain an identifier.")
+             return
+         }
+ 
+         guard let winBackOffer = call.getOrRejectObject("winBackOffer") else { return }
+         guard let winBackOfferID = winBackOffer["identifier"] as? String else {
+-            call.reject("Win-back offer does not contain an identifier.")
++            call.unimplemented("Win-back offer does not contain an identifier.")
+             return
+         }
+ 
+         guard let presentedOfferingContext = aPackage["presentedOfferingContext"] as? [String: Any] else {
+-            call.reject("aPackage parameter did not have presentedOfferingContext key")
++            call.unimplemented("aPackage parameter did not have presentedOfferingContext key")
+             return
+         }
+ 
+@@ -573,7 +578,8 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+     }
+ 
+     @objc func setProxyURL(_ call: CAPPluginCall) {
+-        let url = call.getString("url")
++        let _url = call.getString("url", "")
++        let url: String? = _url.isEmpty ? nil : _url
+         CommonFunctionality.proxyURLString = url
+         call.resolve()
+     }
+@@ -607,7 +613,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let entitlementInfo = call.getOrRejectObject("entitlementInfo") else { return }
+         guard let entitlementId = entitlementInfo["identifier"] as? String else {
+-            call.reject("entitlementInfo parameter did not have identifier field")
++            call.unimplemented("entitlementInfo parameter did not have identifier field")
+             return
+         }
+ 
+@@ -623,7 +629,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+         guard let storeProduct = call.getOrRejectObject("storeProduct") else { return }
+         guard let productId = storeProduct["identifier"] as? String else {
+-            call.reject("storeProduct parameter did not have identifier field")
++            call.unimplemented("storeProduct parameter did not have identifier field")
+             return
+         }
+ 
+@@ -637,7 +643,7 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+ 
+     @objc func showInAppMessages(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let intMessageTypes = call.getArray("messageTypes") as? [Int]
++        let intMessageTypes: [Int]? = call.dictionaryRepresentation["messageTypes"] != nil ? call.getArray("messageTypes", []) as? [Int] : nil
+         #if os(iOS) || targetEnvironment(macCatalyst) || VISION_OS
+         if #available(iOS 16.0, *) {
+             if let intMessageTypes {
+@@ -670,7 +676,8 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+ 
+     @objc func overridePreferredUILocale(_ call: CAPPluginCall) {
+         guard self.rejectIfPurchasesNotConfigured(call) else { return }
+-        let locale = call.getString("locale")
++        let _locale = call.getString("locale", "")
++        let locale: String? = _locale.isEmpty ? nil : _locale
+         CommonFunctionality.overridePreferredLocale(locale)
+         call.resolve()
+     }
+@@ -682,8 +689,8 @@ public class PurchasesPlugin: CAPPlugin, PurchasesDelegate, CAPBridgedPlugin {
+     }
+ 
+     public func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
+-        self.customerInfoUpdateListeners.forEach { [weak self] callbackId in
+-            self?.bridge?.savedCall(withID: callbackId)?.resolve(CommonFunctionality.encode(customerInfo: customerInfo))
++        self.customerInfoUpdateListeners.values.forEach { call in
++            call.resolve(CommonFunctionality.encode(customerInfo: customerInfo))
+         }
+         self.lastReceivedCustomerInfo = customerInfo
+     }

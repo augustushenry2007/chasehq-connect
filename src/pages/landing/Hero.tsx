@@ -25,55 +25,63 @@ export default function Hero() {
             </p>
             <div className="flex flex-col items-start gap-2.5">
               <AppStoreBadge size="lg" />
-              <p className="text-[13px] text-muted-foreground ml-1">iPhone · Free to start</p>
+              <p className="text-[13px] text-muted-foreground ml-1">iPhone · Free 14-day trial, then $9.99/month</p>
             </div>
           </div>
 
-          {/* Device mockup */}
+          {/* Device mockup — pure CSS iPhone-15-Pro frame */}
           <div className="reveal flex justify-center lg:justify-end">
             <div className="relative flex justify-center">
               {/* Glow */}
               <div className="absolute inset-[8%_12%] bg-gradient-radial from-accent/60 to-transparent blur-[60px] rounded-full" />
-              {/* Phone shell */}
+
+              <style>{`@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
+
+              {/* Outer titanium frame */}
               <div
-                className="relative w-[388px] h-[836px] rounded-[58px] p-[20px] z-10"
+                className="relative w-[360px] h-[740px] rounded-[58px] z-10"
                 style={{
-                  background: "linear-gradient(160deg,#1c1c1e 0%,#0d0d0f 60%,#111 100%)",
-                  boxShadow: "0 80px 160px rgba(0,0,0,0.55), 0 30px 60px rgba(0,0,0,0.35), 0 0 0 1.5px rgba(255,255,255,0.12), inset 0 0 0 1px rgba(255,255,255,0.06)"
+                  background: "linear-gradient(160deg,#2a2a2c 0%,#0e0e10 55%,#1a1a1c 100%)",
+                  padding: "12px",
+                  boxShadow:
+                    "0 80px 160px rgba(0,0,0,0.55), 0 30px 60px rgba(0,0,0,0.35), 0 0 0 1.5px rgba(255,255,255,0.10), inset 0 0 0 1px rgba(255,255,255,0.05)",
+                  animation: "floaty 4s ease-in-out infinite",
                 }}
-                aria-label="ChaseHQ iPhone app demo showing the full follow-up workflow"
+                aria-label="ChaseHQ iPhone app demo showing the follow-up workflow"
                 role="img"
               >
                 {/* Side buttons */}
-                <div style={{ position: "absolute", left: -14, top: 132, width: 14, height: 24, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
-                <div style={{ position: "absolute", left: -14, top: 194, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
-                <div style={{ position: "absolute", left: -14, top: 262, width: 14, height: 52, borderRadius: "4px 0 0 4px", background: "linear-gradient(to right,#252525,#181818)", boxShadow: "-3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
-                <div style={{ position: "absolute", right: -14, top: 234, width: 14, height: 80, borderRadius: "0 4px 4px 0", background: "linear-gradient(to left,#252525,#181818)", boxShadow: "3px 0 6px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.08)" }} />
-                {/* Floating animation */}
-                <style>{`@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
-                <div style={{ animation: "floaty 4s ease-in-out infinite", width: "100%", height: "100%" }}>
-                  {/* Screen */}
-                  <div className="w-full h-full bg-[#F7F9FA] rounded-[42px] overflow-hidden flex flex-col relative">
-                    {/* Dynamic Island */}
-                    <div className="absolute top-3 left-1/2 -translate-x-1/2 w-[120px] h-[35px] bg-[#111111] rounded-full z-10" />
-                    {/* Status bar */}
-                    <div className="flex justify-between items-center px-8 pt-[14px] pb-1 text-[13px] font-semibold text-[#1A2B35] shrink-0">
-                      <span>9:41</span>
-                      <span className="inline-flex gap-1 items-center">
-                        <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><path d="M1 7.5C3 5 5.5 4 8 4s5 1 7 3.5L14 9c-1.5-2-3.5-3-6-3s-4.5 1-6 3L1 7.5z" fill="#1A2B35"/></svg>
-                        <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><rect x="0" y="3" width="3" height="6" rx="0.5" fill="#1A2B35"/><rect x="4" y="2" width="3" height="7" rx="0.5" fill="#1A2B35"/><rect x="8" y="1" width="3" height="8" rx="0.5" fill="#1A2B35"/><rect x="12" y="0" width="3" height="9" rx="0.5" fill="#1A2B35"/></svg>
-                        <svg width="22" height="10" viewBox="0 0 22 10" fill="none"><rect x="0.5" y="0.5" width="18" height="9" rx="2" stroke="#1A2B35" fill="none"/><rect x="2" y="2" width="14" height="6" rx="1" fill="#1A2B35"/><rect x="19.5" y="3" width="1.5" height="4" rx="0.75" fill="#1A2B35"/></svg>
-                      </span>
-                    </div>
+                <div style={{ position: "absolute", left: -3, top: 120, width: 3, height: 26, borderRadius: "2px 0 0 2px", background: "linear-gradient(to right,#3a3a3c,#1f1f21)" }} />
+                <div style={{ position: "absolute", left: -3, top: 178, width: 3, height: 54, borderRadius: "2px 0 0 2px", background: "linear-gradient(to right,#3a3a3c,#1f1f21)" }} />
+                <div style={{ position: "absolute", left: -3, top: 244, width: 3, height: 54, borderRadius: "2px 0 0 2px", background: "linear-gradient(to right,#3a3a3c,#1f1f21)" }} />
+                <div style={{ position: "absolute", right: -3, top: 220, width: 3, height: 84, borderRadius: "0 2px 2px 0", background: "linear-gradient(to left,#3a3a3c,#1f1f21)" }} />
 
-                    {/* Animated demo screens */}
-                    <div className="flex-1 overflow-hidden">
-                      <HeroPhoneDemo />
-                    </div>
-                    {/* Home indicator */}
-                    <div className="shrink-0 flex justify-center py-2">
-                      <div className="w-[100px] h-[4px] bg-[#1A2B35]/20 rounded-full" />
-                    </div>
+                {/* Inner screen */}
+                <div className="relative w-full h-full bg-[#F7F9FA] rounded-[46px] overflow-hidden flex flex-col">
+                  {/* Dynamic Island — single, clean, centered */}
+                  <div
+                    className="absolute top-[10px] left-1/2 -translate-x-1/2 w-[110px] h-[32px] bg-black rounded-full z-20"
+                    aria-hidden="true"
+                  />
+
+                  {/* Status bar */}
+                  <div className="flex justify-between items-center px-7 pt-[14px] pb-1 text-[13px] font-semibold text-[#1A2B35] shrink-0 relative z-10">
+                    <span>9:41</span>
+                    <span className="inline-flex gap-1 items-center">
+                      <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><path d="M1 7.5C3 5 5.5 4 8 4s5 1 7 3.5L14 9c-1.5-2-3.5-3-6-3s-4.5 1-6 3L1 7.5z" fill="#1A2B35"/></svg>
+                      <svg width="16" height="10" viewBox="0 0 16 10" fill="none"><rect x="0" y="3" width="3" height="6" rx="0.5" fill="#1A2B35"/><rect x="4" y="2" width="3" height="7" rx="0.5" fill="#1A2B35"/><rect x="8" y="1" width="3" height="8" rx="0.5" fill="#1A2B35"/><rect x="12" y="0" width="3" height="9" rx="0.5" fill="#1A2B35"/></svg>
+                      <svg width="22" height="10" viewBox="0 0 22 10" fill="none"><rect x="0.5" y="0.5" width="18" height="9" rx="2" stroke="#1A2B35" fill="none"/><rect x="2" y="2" width="14" height="6" rx="1" fill="#1A2B35"/><rect x="19.5" y="3" width="1.5" height="4" rx="0.75" fill="#1A2B35"/></svg>
+                    </span>
+                  </div>
+
+                  {/* Demo screens */}
+                  <div className="flex-1 overflow-hidden">
+                    <HeroPhoneDemo />
+                  </div>
+
+                  {/* Home indicator */}
+                  <div className="shrink-0 flex justify-center py-2">
+                    <div className="w-[100px] h-[4px] bg-[#1A2B35]/30 rounded-full" />
                   </div>
                 </div>
               </div>

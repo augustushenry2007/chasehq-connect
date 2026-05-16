@@ -4,16 +4,17 @@ import "./index.css";
 
 const root = createRoot(document.getElementById("root")!);
 
-// Code-splitting boundary doubles as the security gate: the web bundle physically
-// does not contain auth, Supabase, OAuth, or routing code. Vite tree-shakes anything
-// not reachable from the entry — so an attacker opening DevTools on chasehq.app sees
-// only landing chunk JS, not the Supabase anon key or the app surface.
+// Code-splitting boundary doubles as the security gate: the web bundle contains
+// landing + legal pages + react-router, but physically excludes auth, Supabase,
+// and OAuth code. Vite tree-shakes anything not reachable from the entry — so an
+// attacker opening DevTools on chasehq.app sees marketing/legal chunk JS only,
+// not the Supabase anon key or the app surface.
 if (Capacitor.isNativePlatform()) {
   import("./AppNative").then(({ default: AppNative }) => {
     root.render(<AppNative />);
   });
 } else {
-  import("./pages/LandingPage").then(({ default: LandingPage }) => {
-    root.render(<LandingPage />);
+  import("./WebApp").then(({ default: WebApp }) => {
+    root.render(<WebApp />);
   });
 }

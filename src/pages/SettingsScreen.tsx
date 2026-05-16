@@ -4,29 +4,21 @@ import { useApp } from "@/context/AppContext";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 import { type SchedulePreset, type ScheduleStep, PRESET_STEPS, getDefaultStepsForInvoice } from "@/lib/scheduleDefaults";
 import {
-  ChevronDown, LogOut, Mail, Loader2, Sparkles,
-  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, Server, CreditCard, ChevronRight,
+  ChevronDown, LogOut, Sparkles,
+  User as UserIcon, Bell, Shield, Download, FileText, ScrollText, AlertTriangle, CreditCard, ChevronRight, Loader2,
 } from "lucide-react";
 import { requestLocalNotificationPermission, cancelAllPending } from "@/lib/localNotifications";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-
-function toTitleCase(s: string): string {
-  return s
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
+import { toTitleCase } from "@/lib/textCase";
 
 const ONBOARDING_STORAGE_KEY = "onboarding_v5";
 
-function deriveOnboardingDefaults(): { tone: "Friendly" | "Firm"; preset: "patient" | "light" | "active" } {
+function deriveOnboardingDefaults(): { tone: "Friendly" | "Firm" | "Urgent"; preset: "patient" | "light" | "active" } {
   try {
     const raw = localStorage.getItem(ONBOARDING_STORAGE_KEY);
     if (!raw) return { tone: "Friendly", preset: "patient" };
     const data = JSON.parse(raw);
-    const toneMap: Record<string, "Friendly" | "Firm"> = { friendly: "Friendly", firm: "Firm" };
+    const toneMap: Record<string, "Friendly" | "Firm" | "Urgent"> = { friendly: "Friendly", firm: "Firm", urgent: "Urgent" };
     const presetMap: Record<string, "patient" | "light" | "active"> = { wait: "patient", nudge: "light", persist: "active" };
     return {
       tone: toneMap[data?.tone_preference] ?? "Friendly",
@@ -35,9 +27,8 @@ function deriveOnboardingDefaults(): { tone: "Friendly" | "Firm"; preset: "patie
   } catch { return { tone: "Friendly", preset: "patient" }; }
 }
 import { Switch } from "@/components/ui/switch";
-import { useGmailConnection } from "@/hooks/useGmailConnection";
-import { useSendingMailbox } from "@/hooks/useSendingMailbox";
 import { useInvoices } from "@/hooks/useSupabaseData";
+import { countReflowEligibleInvoices, reflowDefaultScheduleToInvoices } from "@/hooks/useNotifications";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { supabase } from "@/integrations/supabase/client";
 import { FLOW_STORAGE_KEY } from "@/flow/states";
@@ -47,32 +38,21 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import NotificationBell from "@/components/NotificationBell";
-import { GoogleAuthSheet } from "@/components/auth/GoogleAuthSheet";
 import { useFlow } from "@/flow/FlowMachine";
+import type { WorkType, InvoiceSizeBucket, ClientLoadBucket } from "@/lib/userProfile/types";
+import {
+  writeWorkType, writeInvoiceSize, writeClientLoad,
+  clearLocalUserProfile, clearDemoUserProfile,
+} from "@/lib/userProfile/storage";
+import { displayNamePromptShownKey } from "@/lib/storageKeys";
 
-type SmtpPreset = {
-  id: string;
-  label: string;
-  host: string;
-  port: number;
-  helpUrl?: string;
-  helpText?: string;
-};
-
-const SMTP_PRESETS: SmtpPreset[] = [
-  { id: "outlook", label: "Outlook / Microsoft 365", host: "smtp.office365.com", port: 587, helpUrl: "https://support.microsoft.com/en-us/account-billing/manage-app-passwords-for-two-step-verification-d6dc8c6d-4bf7-4851-ad95-6d07799387e9", helpText: "Use an app password if you have 2FA enabled." },
-  { id: "yahoo", label: "Yahoo Mail", host: "smtp.mail.yahoo.com", port: 587, helpUrl: "https://help.yahoo.com/kb/SLN15241.html", helpText: "Yahoo requires an app password — generate one in your account settings." },
-  { id: "icloud", label: "iCloud Mail", host: "smtp.mail.me.com", port: 587, helpUrl: "https://support.apple.com/en-us/102654", helpText: "iCloud requires an app-specific password." },
-  { id: "custom", label: "Custom SMTP", host: "", port: 587 },
-];
-
-type SectionKey = "notifications" | "schedule" | "data" | null;
+type SectionKey = "notifications" | "schedule" | "personalization" | "data" | null;
 
 function CollapsibleSection({ title, subtitle, isOpen, onToggle, children }: {
   title: string; subtitle: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
-    <div className={`bg-card border rounded-2xl overflow-hidden transition-colors ${isOpen ? "border-primary" : "border-border"}`}>
+    <div className={`bg-card border rounded-2xl overflow-hidden transition-colors shadow-[var(--shadow-card)] ${isOpen ? "border-primary" : "border-border"}`}>
       <button onClick={onToggle} className="w-full flex items-center justify-between p-4 text-left">
         <div>
           <p className="text-sm font-semibold text-foreground">{title}</p>
@@ -87,13 +67,13 @@ function CollapsibleSection({ title, subtitle, isOpen, onToggle, children }: {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+    <p className="text-xs uppercase tracking-[0.12em] font-semibold text-primary mb-2.5 px-1">
       {children}
     </p>
   );
 }
 
-const DEFAULT_TONES = ["Friendly", "Firm"] as const;
+const DEFAULT_TONES = ["Friendly", "Firm", "Urgent"] as const;
 
 function NotificationsSection({ notifications, updateNotifications }: {
   notifications: { emailNotifications: boolean; autoChase: boolean; defaultTone: string };
@@ -124,10 +104,10 @@ function NotificationsSection({ notifications, updateNotifications }: {
             <button
               key={tone}
               onClick={() => updateNotifications({ ...notifications, defaultTone: tone })}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                 notifications.defaultTone === tone
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground"
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-background text-muted-foreground border-border hover:border-primary/40 hover:text-foreground"
               }`}
             >
               {tone}
@@ -142,10 +122,46 @@ function NotificationsSection({ notifications, updateNotifications }: {
 const SCHEDULE_TONE_OPTIONS: ScheduleStep["tone"][] = ["Friendly", "Firm", "Urgent", "Final Notice"];
 
 function ScheduleSection() {
+  const { user } = useApp();
   const [preset, setPreset] = useState<SchedulePreset>(() => {
     const stored = localStorage.getItem(STORAGE_KEYS.SCHEDULE_PRESET) as SchedulePreset | null;
     return stored ?? deriveOnboardingDefaults().preset;
   });
+
+  // Count of existing invoices the "apply default" action would rebuild (unpaid,
+  // not paused, not yet started chasing). Lazily fetched; null = still loading / no user.
+  const [eligibleCount, setEligibleCount] = useState<number | null>(null);
+  const [confirmApply, setConfirmApply] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) { setEligibleCount(null); return; }
+    let cancelled = false;
+    countReflowEligibleInvoices(user.id)
+      .then((c) => { if (!cancelled) setEligibleCount(c); })
+      .catch(() => { if (!cancelled) setEligibleCount(null); });
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  async function runReflow() {
+    if (!user?.id || applying) return;
+    setApplying(true);
+    try {
+      const { updated } = await reflowDefaultScheduleToInvoices(user.id);
+      toast.success(
+        updated > 0
+          ? `Updated ${updated} invoice${updated === 1 ? "" : "s"} to your default schedule.`
+          : "No invoices needed updating.",
+      );
+    } catch (e) {
+      console.error("[ScheduleSection] reflow failed:", e);
+      toast.error("Couldn't apply the schedule — give it another try.");
+    } finally {
+      setApplying(false);
+      setConfirmApply(false);
+      if (user?.id) countReflowEligibleInvoices(user.id).then(setEligibleCount).catch(() => {});
+    }
+  }
 
   // savedCustom: steps committed to localStorage (null = no custom override, use preset)
   const [savedCustom, setSavedCustom] = useState<ScheduleStep[] | null>(() => {
@@ -168,6 +184,23 @@ function ScheduleSection() {
   const baseSteps = savedCustom ?? PRESET_STEPS[preset];
   const isDirty = JSON.stringify(draftSteps) !== JSON.stringify(baseSteps);
 
+  // Best-effort mirror of the schedule prefs onto notification_preferences so they
+  // follow the account across reinstall / new device. local is authoritative on
+  // this device regardless; the next change retries if this fails.
+  function pushScheduleToServer(presetVal: SchedulePreset, stepsVal: ScheduleStep[] | null) {
+    if (!user?.id) return;
+    supabase
+      .from("notification_preferences")
+      .upsert(
+        { user_id: user.id, schedule_preset: presetVal, schedule_steps: stepsVal },
+        { onConflict: "user_id" },
+      )
+      .then(
+        ({ error }) => { if (error) console.warn("[ScheduleSection] schedule prefs upsert failed:", error.message); },
+        (e) => console.warn("[ScheduleSection] schedule prefs upsert threw:", e),
+      );
+  }
+
   function applyPreset(p: SchedulePreset) {
     setPreset(p);
     try { localStorage.setItem(STORAGE_KEYS.SCHEDULE_PRESET, p); } catch {}
@@ -175,6 +208,7 @@ function ScheduleSection() {
     setSavedCustom(null);
     setDraftSteps(PRESET_STEPS[p].map((s) => ({ ...s })));
     setConfirmPreset(null);
+    pushScheduleToServer(p, null);
   }
 
   function pickPreset(p: SchedulePreset) {
@@ -204,6 +238,7 @@ function ScheduleSection() {
     try { localStorage.removeItem(STORAGE_KEYS.SCHEDULE_CUSTOM_STEPS); } catch {}
     setSavedCustom(null);
     setDraftSteps(PRESET_STEPS[preset].map((s) => ({ ...s })));
+    pushScheduleToServer(preset, null);
   }
 
   function handleSave() {
@@ -212,6 +247,7 @@ function ScheduleSection() {
     setSavedCustom(steps);
     setSavedMsg(true);
     setTimeout(() => setSavedMsg(false), 2500);
+    pushScheduleToServer(preset, steps);
   }
 
   function handleDiscard() {
@@ -235,7 +271,7 @@ function ScheduleSection() {
           <button
             key={p}
             onClick={() => pickPreset(p)}
-            className={`text-left px-3.5 py-3 rounded-xl border-[1.5px] transition-colors ${isActive ? "border-primary bg-accent" : "border-border bg-card"}`}
+            className={`text-left px-3.5 py-3 rounded-xl transition-colors ${isActive ? "border-2 border-primary bg-accent shadow-[var(--shadow-card)]" : "border border-border bg-card"}`}
           >
             <div className="flex items-center gap-1.5 flex-wrap">
               <p className="text-sm font-semibold text-foreground capitalize">{p} <span className="font-normal text-muted-foreground">· {descriptions[p].tagline}</span></p>
@@ -261,21 +297,29 @@ function ScheduleSection() {
         {customOpen && (
           <div className="border-t border-border px-3.5 pb-3.5 pt-2.5">
             <div className="flex flex-col gap-1">
-              {draftSteps.map((step, idx) => (
+              {[...draftSteps]
+                .map((step, idx) => ({ step, idx }))
+                .sort((a, b) => b.step.offset_days - a.step.offset_days)
+                .map(({ step, idx }) => (
                 <div key={idx} className="flex items-center gap-1.5 flex-wrap py-1">
-                  <select
-                    value={step.tone}
-                    onChange={(e) => updateTone(idx, e.target.value as ScheduleStep["tone"])}
-                    className="text-xs bg-muted border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = SCHEDULE_TONE_OPTIONS[(SCHEDULE_TONE_OPTIONS.indexOf(step.tone) + 1) % SCHEDULE_TONE_OPTIONS.length];
+                      updateTone(idx, next);
+                    }}
+                    className="flex items-center gap-1 text-xs bg-muted border border-border rounded-md px-2.5 py-1 text-foreground hover:border-primary/40 transition-colors"
                   >
-                    {SCHEDULE_TONE_OPTIONS.map((t) => <option key={t}>{t}</option>)}
-                  </select>
+                    {step.tone} <ChevronDown className="w-3 h-3 opacity-50" />
+                  </button>
                   <span className="text-xs text-muted-foreground">+</span>
                   <input
-                    type="number"
-                    min={1}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={step.offset_days}
-                    onChange={(e) => updateOffset(idx, parseInt(e.target.value) || 1)}
+                    onChange={(e) => updateOffset(idx, parseInt(e.target.value.replace(/\D/g, "")) || 1)}
+                    onKeyDown={(e) => e.stopPropagation()}
                     className="w-14 px-2 py-1 text-xs font-bold text-primary bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/30"
                   />
                   <span className="text-xs text-muted-foreground flex-1">days after due</span>
@@ -329,7 +373,23 @@ function ScheduleSection() {
         )}
       </div>
 
-      <p className="text-[11px] text-muted-foreground px-1">Applies to new invoices only. To change a specific invoice, edit it from its detail page.</p>
+      <p className="text-[11px] text-muted-foreground px-1">New invoices use this schedule automatically. Apply it to invoices already in flight with the button below, or edit any one invoice from its detail page.</p>
+
+      {eligibleCount !== null && eligibleCount > 0 && (
+        <button
+          onClick={() => setConfirmApply(true)}
+          disabled={applying}
+          className="text-left px-3.5 py-3 rounded-xl border border-border bg-card hover:bg-accent transition-colors disabled:opacity-60"
+        >
+          <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+            {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            {applying ? "Applying…" : `Apply to ${eligibleCount} existing invoice${eligibleCount === 1 ? "" : "s"}`}
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Rebuilds the follow-up schedule for invoices that haven't started chasing yet. Paid and in-progress invoices stay as they are.
+          </p>
+        </button>
+      )}
 
       {/* Confirm preset switch when custom steps exist */}
       {confirmPreset && (
@@ -344,178 +404,112 @@ function ScheduleSection() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-function SmtpCard({
-  open, setOpen, mailbox, defaultFromEmail, defaultFromName,
-}: {
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  mailbox: ReturnType<typeof useSendingMailbox>;
-  defaultFromEmail: string;
-  defaultFromName: string;
-}) {
-  const [presetId, setPresetId] = useState<string>("outlook");
-  const preset = SMTP_PRESETS.find((p) => p.id === presetId)!;
-  const [fromEmail, setFromEmail] = useState(defaultFromEmail);
-  const [fromName, setFromName] = useState(defaultFromName);
-  const [host, setHost] = useState(preset.host);
-  const [port, setPort] = useState(preset.port);
-  const [username, setUsername] = useState(defaultFromEmail);
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  function applyPreset(id: string) {
-    setPresetId(id);
-    const p = SMTP_PRESETS.find((x) => x.id === id)!;
-    if (p.host) setHost(p.host);
-    if (p.port) setPort(p.port);
-  }
-
-  async function handleSave() {
-    if (!fromEmail || !host || !port || !username || !password) {
-      toast.error("Fill in host, port, username, and password to connect.");
-      return;
-    }
-    setBusy(true);
-    const { data, error } = await supabase.functions.invoke("smtp-verify", {
-      body: {
-        from_email: fromEmail, from_name: fromName || null,
-        smtp_host: host, smtp_port: port, smtp_username: username, smtp_password: password,
-      },
-    });
-    setBusy(false);
-    if (error || (data as any)?.error) {
-      toast.error((data as any)?.error || error?.message || "We couldn't reach your email provider. Double-check the details and try once more.");
-      return;
-    }
-    if ((data as any)?.verified === false) {
-      toast.error((data as any)?.error || "Those credentials didn't work. Check the password — many providers need an app-specific one.");
-      return;
-    }
-    toast.success("Connected");
-    setPassword("");
-    setOpen(false);
-    await mailbox.refetch();
-  }
-
-  async function handleDisconnect() {
-    if (!mailbox.smtp) return;
-    setBusy(true);
-    await supabase.from("smtp_connections").delete().eq("user_id", mailbox.smtp.user_id);
-    if (mailbox.activeSender === "smtp") {
-      await mailbox.setActiveSender(mailbox.hasGmail ? "gmail" : "none");
-    }
-    setBusy(false);
-    toast.success("Disconnected");
-    await mailbox.refetch();
-  }
-
-  const connected = mailbox.hasSmtp;
-  const isActive = mailbox.activeSender === "smtp";
-
-  return (
-    <div className="bg-card border border-border rounded-2xl p-4">
-      <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
-          <Server className="w-5 h-5 text-primary" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-foreground">Other email (SMTP)</p>
-            {connected && isActive && (
-              <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                Active
-              </span>
-            )}
+      {/* Confirm applying the default to existing invoices */}
+      {confirmApply && eligibleCount !== null && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={() => { if (!applying) setConfirmApply(false); }}>
+          <div className="bg-card border border-border rounded-2xl p-5 max-w-sm w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm font-bold text-foreground mb-1">Apply to {eligibleCount} existing invoice{eligibleCount === 1 ? "" : "s"}?</p>
+            <p className="text-xs text-muted-foreground mb-4">Rebuilds the follow-up schedule for invoices that haven't started chasing yet — any per-invoice tweaks on those will be reset. Paid and in-progress invoices are untouched.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmApply(false)} disabled={applying} className="flex-1 py-2 rounded-xl border border-border text-xs font-medium text-foreground disabled:opacity-60">Cancel</button>
+              <button onClick={runReflow} disabled={applying} className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-60">{applying ? "Applying…" : "Apply"}</button>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {connected
-              ? `Sending as ${mailbox.smtp?.from_email}`
-              : "For Outlook, Yahoo, iCloud, or any custom domain."}
-          </p>
-        </div>
-        {connected ? (
-          <button
-            onClick={handleDisconnect}
-            disabled={busy}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-destructive/10 text-destructive disabled:opacity-50 shrink-0"
-          >
-            Disconnect
-          </button>
-        ) : (
-          <button
-            onClick={() => setOpen(!open)}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground shrink-0"
-          >
-            {open ? "Close" : "Connect"}
-          </button>
-        )}
-      </div>
-
-      {open && !connected && (
-        <div className="mt-4 pt-4 border-t border-border flex flex-col gap-3">
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Provider</label>
-            <select
-              value={presetId}
-              onChange={(e) => applyPreset(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              {SMTP_PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>{p.label}</option>
-              ))}
-            </select>
-            {preset.helpText && (
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {preset.helpText}{" "}
-                {preset.helpUrl && (
-                  <a href={preset.helpUrl} target="_blank" rel="noreferrer" className="underline text-primary">Learn more</a>
-                )}
-              </p>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <SmtpField label="From name" value={fromName} onChange={setFromName} placeholder="Your name" />
-            <SmtpField label="From email" value={fromEmail} onChange={setFromEmail} placeholder="you@domain.com" type="email" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <SmtpField label="SMTP host" value={host} onChange={setHost} placeholder="smtp.example.com" />
-            <SmtpField label="Port" value={String(port)} onChange={(v) => setPort(parseInt(v) || 587)} placeholder="587" />
-          </div>
-          <SmtpField label="Username" value={username} onChange={setUsername} placeholder="usually your email" />
-          <SmtpField label="Password" value={password} onChange={setPassword} placeholder="App password" type="password" />
-          <button
-            onClick={handleSave}
-            disabled={busy}
-            className="mt-1 flex items-center justify-center gap-2 bg-primary text-primary-foreground rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50"
-          >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Verify & save"}
-          </button>
-          <p className="text-[11px] text-muted-foreground">
-            We'll send a test message to your own address to confirm the connection works.
-          </p>
         </div>
       )}
     </div>
   );
 }
 
-function SmtpField({ label, value, onChange, placeholder, type = "text" }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string;
-}) {
+
+const WORK_TYPE_LABELS: Record<WorkType, string> = {
+  designer: "Designer",
+  developer: "Developer",
+  writer: "Writer",
+  consultant: "Consultant",
+  agency: "Agency or studio",
+  other: "Something else",
+};
+const INVOICE_SIZE_LABELS: Record<InvoiceSizeBucket, string> = {
+  "<500": "Under $500",
+  "500-2k": "$500 to $2,000",
+  "2k-10k": "$2,000 to $10,000",
+  "10k+": "$10,000+",
+};
+const CLIENT_LOAD_LABELS: Record<ClientLoadBucket, string> = {
+  "1-3": "1 to 3 clients",
+  "4-10": "4 to 10 clients",
+  "10+": "More than 10",
+};
+
+function PersonalizationSection() {
+  const { userProfile, refreshUserProfile } = useApp();
+
+  function pickWorkType(v: WorkType) {
+    writeWorkType(v);
+    refreshUserProfile();
+  }
+  function pickInvoiceSize(v: InvoiceSizeBucket) {
+    writeInvoiceSize(v);
+    refreshUserProfile();
+  }
+  function pickClientLoad(v: ClientLoadBucket) {
+    writeClientLoad(v);
+    refreshUserProfile();
+  }
+  const PillRow = <T extends string>({ label, value, options, labels, onPick }: {
+    label: string;
+    value: T | undefined;
+    options: T[];
+    labels: Record<T, string>;
+    onPick: (v: T) => void;
+  }) => (
+    <div className="py-3">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((opt) => {
+          const selected = value === opt;
+          return (
+            <button
+              key={opt}
+              onClick={() => onPick(opt)}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
+            >
+              {labels[opt]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
-    <div>
-      <label className="text-[11px] font-medium text-muted-foreground mb-1 block">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+    <div className="flex flex-col divide-y divide-border -mx-4 -my-4 px-4">
+      <PillRow
+        label="Work type"
+        value={userProfile.workType}
+        options={["designer", "developer", "writer", "consultant", "agency", "other"]}
+        labels={WORK_TYPE_LABELS}
+        onPick={pickWorkType}
       />
+      <PillRow
+        label="Typical invoice size"
+        value={userProfile.invoiceSize}
+        options={["<500", "500-2k", "2k-10k", "10k+"]}
+        labels={INVOICE_SIZE_LABELS}
+        onPick={pickInvoiceSize}
+      />
+      <PillRow
+        label="Client load"
+        value={userProfile.clientLoad}
+        options={["1-3", "4-10", "10+"]}
+        labels={CLIENT_LOAD_LABELS}
+        onPick={pickClientLoad}
+      />
+      <p className="text-[11px] text-muted-foreground italic pt-3">
+        These calibrate AI drafts and the default schedule. Changes apply to new follow-ups.
+      </p>
     </div>
   );
 }
@@ -552,49 +546,77 @@ export default function SettingsScreen() {
   const { invoices } = useInvoices();
   const ent = useEntitlement();
   const [openSection, setOpenSection] = useState<SectionKey>(null);
-  const { signedInWithGoogle } = useGmailConnection();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   function toggleSection(key: SectionKey) { setOpenSection((prev) => (prev === key ? null : key)); }
 
-  async function handleSignOut() { await signOut(); navigate("/onboarding", { replace: true }); }
+  async function handleSignOut() { await signOut(); navigate("/welcome", { replace: true }); }
+
+
 
   async function handleExport() {
-    if (!user) return;
-    const [followupsRes, profileRes, prefsRes, sendLogRes, gmailRes] = await Promise.all([
-      supabase.from("followups").select("invoice_id, subject, tone, is_ai_generated, sent_at").eq("user_id", user.id),
-      supabase.from("profiles").select("full_name, onboarding_completed, sender_type").eq("user_id", user.id).maybeSingle(),
-      supabase.from("notification_preferences").select("enabled, email_enabled, quiet_hours_start, quiet_hours_end, timezone").eq("user_id", user.id).maybeSingle(),
-      supabase.from("email_send_log").select("recipient, invoice_id, sent_at").eq("user_id", user.id),
-      supabase.from("gmail_connections").select("email, token_expires_at").eq("user_id", user.id).maybeSingle(),
-    ]);
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      dataController: "ChaseHQ",
-      requestedBy: user.email,
-      account: {
-        email: user.email,
-        authMethod: signedInWithGoogle ? "Google" : "Email",
-        fullName: profileRes.data?.full_name ?? null,
-        accountCreated: (user as any).created_at ?? null,
-      },
-      invoices,
-      followupsSent: followupsRes.data ?? [],
-      emailSendLog: sendLogRes.data ?? [],
-      connectedAccounts: {
-        gmail: gmailRes.data ? { email: gmailRes.data.email, tokenExpiresAt: gmailRes.data.token_expires_at } : null,
-      },
-      notificationPreferences: prefsRes.data ?? null,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `chasehq-data-export-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Data exported");
+    if (!user || exporting) return;
+    setExporting(true);
+    try {
+      const [
+        followupsRes, profileRes, prefsRes, sendLogRes,
+        scheduleRes, subscriptionsRes, subEventsRes, notificationsRes,
+      ] = await Promise.all([
+        supabase.from("followups").select("invoice_id, subject, tone, is_ai_generated, sent_at").eq("user_id", user.id),
+        supabase.from("profiles").select("full_name, onboarding_completed").eq("user_id", user.id).maybeSingle(),
+        supabase.from("notification_preferences").select("enabled, email_enabled, quiet_hours_start, quiet_hours_end, timezone, schedule_preset, schedule_steps, default_tone").eq("user_id", user.id).maybeSingle(),
+        supabase.from("email_send_log").select("recipient, invoice_id, sent_at").eq("user_id", user.id),
+        supabase.from("followup_schedules").select("invoice_id, steps, created_at, updated_at").eq("user_id", user.id),
+        supabase.from("subscriptions").select("status, plan, trial_ends_at, current_period_end, created_at, updated_at").eq("user_id", user.id).maybeSingle(),
+        supabase.from("subscription_events").select("event_type, payload, created_at").eq("user_id", user.id),
+        supabase.from("notifications").select("invoice_id, schedule_step_index, type, title, body, scheduled_for, status, delivered_at, read_at, created_at").eq("user_id", user.id),
+      ]);
+
+      // supabase-js doesn't reject on a query error — it returns { data: null, error }.
+      // If ANY query failed, refuse to write a partial export that silently shows
+      // those tables as null.
+      const results = [followupsRes, profileRes, prefsRes, sendLogRes, scheduleRes, subscriptionsRes, subEventsRes, notificationsRes];
+      if (results.some((r) => r.error)) {
+        console.warn("[SettingsScreen] export query failed:", results.find((r) => r.error)?.error?.message);
+        toast.error("We couldn't export everything just now — try again.");
+        return;
+      }
+
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        dataController: "ChaseHQ",
+        requestedBy: user.email,
+        account: {
+          email: user.email,
+          authMethod: "Email",
+          fullName: profileRes.data?.full_name ?? null,
+          accountCreated: (user as any).created_at ?? null,
+        },
+        invoices,
+        followupsSent: followupsRes.data ?? [],
+        followupSchedules: scheduleRes.data ?? [],
+        emailSendLog: sendLogRes.data ?? [],
+        notificationPreferences: prefsRes.data ?? null,
+        notifications: notificationsRes.data ?? [],
+        subscription: subscriptionsRes.data ?? null,
+        subscriptionEvents: subEventsRes.data ?? [],
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `chasehq-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Data exported");
+    } catch (e) {
+      console.warn("[SettingsScreen] export failed:", e);
+      toast.error("We couldn't export everything just now — try again.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function handleDeleteAccount() {
@@ -603,6 +625,18 @@ export default function SettingsScreen() {
     try {
       const { error } = await supabase.functions.invoke("delete-account");
       if (error) throw error;
+      // Cancel any queued local notifications so they don't fire after the auth row is gone.
+      await cancelAllPending();
+      // Wipe all user-scoped localStorage so nothing lingers after account deletion.
+      clearLocalUserProfile();
+      clearDemoUserProfile();
+      localStorage.removeItem(STORAGE_KEYS.SCHEDULE_PRESET);
+      localStorage.removeItem(STORAGE_KEYS.SCHEDULE_CUSTOM_STEPS);
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_DONE_SESSION);
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_STATE);
+      localStorage.removeItem("notifications");
+      localStorage.removeItem("schedule");
+      localStorage.removeItem(displayNamePromptShownKey(user.id));
       localStorage.removeItem(FLOW_STORAGE_KEY);
       navigate("/", { replace: true });
     } catch (e) {
@@ -612,7 +646,7 @@ export default function SettingsScreen() {
     }
   }
 
-  const authMethod = "Google";
+  const authMethod = "Email";
 
 
 
@@ -620,7 +654,7 @@ export default function SettingsScreen() {
     <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24 pt-[env(safe-area-inset-top,0px)] animate-page-enter">
       <div className="px-5 pt-5">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-bold text-foreground">Settings</h1>
+          <h1 className="text-[clamp(24px,6vw,32px)] font-bold text-foreground tracking-[-0.03em]">Settings</h1>
           <NotificationBell />
         </div>
 
@@ -628,7 +662,7 @@ export default function SettingsScreen() {
           <>
             {/* ACCOUNT */}
             <SectionLabel>Account</SectionLabel>
-            <div className="bg-card border border-border rounded-2xl p-4 mb-3">
+            <div className="bg-card border border-border rounded-2xl p-4 mb-3 shadow-[var(--shadow-card)]">
               <div className="flex items-center gap-3">
                 <Avatar className="w-10 h-10 rounded-xl shrink-0">
                   <AvatarImage src={user?.user_metadata?.avatar_url} className="rounded-xl object-cover" />
@@ -656,7 +690,7 @@ export default function SettingsScreen() {
 
             <button
               onClick={() => navigate("/settings/billing")}
-              className="w-full bg-card border border-border rounded-2xl p-4 mb-5 flex items-center gap-3 hover:border-primary/40 transition-colors"
+              className="w-full bg-card border border-border rounded-2xl p-4 mb-5 flex items-center gap-3 hover:border-primary/40 transition-colors shadow-[var(--shadow-card)]"
             >
               <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
                 <CreditCard className="w-5 h-5 text-primary" />
@@ -677,6 +711,7 @@ export default function SettingsScreen() {
             </button>
           </>
         )}
+
 
         {/* PREFERENCES */}
         <SectionLabel>Preferences</SectionLabel>
@@ -707,6 +742,15 @@ export default function SettingsScreen() {
           >
             <ScheduleSection />
           </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Personalization"
+            subtitle="Tunes AI draft register and the default schedule"
+            isOpen={openSection === "personalization"}
+            onToggle={() => toggleSection("personalization")}
+          >
+            <PersonalizationSection />
+          </CollapsibleSection>
         </div>
 
         {isAuthenticated && (
@@ -721,10 +765,10 @@ export default function SettingsScreen() {
                 onToggle={() => toggleSection("data")}
               >
                 <div className="flex flex-col divide-y divide-border -mx-4 -my-4">
-                  <button onClick={handleExport} className="flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
-                    <Download className="w-4 h-4 text-muted-foreground" />
+                  <button onClick={handleExport} disabled={exporting} className="flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors disabled:opacity-60">
+                    {exporting ? <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /> : <Download className="w-4 h-4 text-muted-foreground" />}
                     <div className="flex-1">
-                      <p className="text-sm font-semibold text-foreground">Export my data</p>
+                      <p className="text-sm font-semibold text-foreground">{exporting ? "Exporting…" : "Export my data"}</p>
                       <p className="text-xs text-muted-foreground">Download a JSON copy of your invoices and account info</p>
                     </div>
                   </button>
@@ -743,12 +787,14 @@ export default function SettingsScreen() {
 
         {/* HELP */}
         <SectionLabel>Help</SectionLabel>
-        <div className="bg-card border border-border rounded-2xl mb-5">
+        <div className="bg-card border border-border rounded-2xl shadow-[var(--shadow-card)] mb-5">
           <button
             onClick={() => flowSend("REPLAY_TOUR")}
-            className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors"
+            className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors rounded-2xl"
           >
-            <Sparkles className="w-4 h-4 text-muted-foreground" />
+            <div className="w-9 h-9 rounded-xl bg-accent/60 text-primary flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </div>
             <div className="flex-1">
               <p className="text-sm font-semibold text-foreground">Replay product tour</p>
               <p className="text-xs text-muted-foreground mt-0.5">Walk through ChaseHQ's key features again</p>
@@ -759,14 +805,18 @@ export default function SettingsScreen() {
 
         {/* LEGAL */}
         <SectionLabel>Legal</SectionLabel>
-        <div className="bg-card border border-border rounded-2xl divide-y divide-border mb-5">
-          <button onClick={() => navigate("/legal/privacy")} className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
-            <Shield className="w-4 h-4 text-muted-foreground" />
+        <div className="bg-card border border-border rounded-2xl shadow-[var(--shadow-card)] divide-y divide-border mb-5">
+          <button onClick={() => navigate("/legal/privacy")} className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors rounded-t-2xl">
+            <div className="w-9 h-9 rounded-xl bg-[hsl(var(--warm-100))] text-orange-700 flex items-center justify-center shrink-0">
+              <Shield className="w-4 h-4" />
+            </div>
             <p className="flex-1 text-sm font-semibold text-foreground">Privacy Policy</p>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </button>
-          <button onClick={() => navigate("/legal/terms")} className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors">
-            <ScrollText className="w-4 h-4 text-muted-foreground" />
+          <button onClick={() => navigate("/legal/terms")} className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors rounded-b-2xl">
+            <div className="w-9 h-9 rounded-xl bg-accent/60 text-primary flex items-center justify-center shrink-0">
+              <ScrollText className="w-4 h-4" />
+            </div>
             <p className="flex-1 text-sm font-semibold text-foreground">Terms of Use</p>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </button>
@@ -781,13 +831,14 @@ export default function SettingsScreen() {
         )}
       </div>
 
+
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete your account?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently deletes your account, invoices, follow-ups, and Gmail
-              connection. You will not be able to sign back in. This cannot be undone.
+              This permanently deletes your account, invoices, and follow-ups.
+              You will not be able to sign back in. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -795,8 +846,9 @@ export default function SettingsScreen() {
             <AlertDialogAction
               onClick={handleDeleteAccount}
               disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 flex items-center gap-2"
             >
+              {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
               {deleting ? "Deleting…" : "Delete everything"}
             </AlertDialogAction>
           </AlertDialogFooter>

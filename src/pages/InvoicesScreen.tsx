@@ -1,18 +1,11 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
 import { useInvoices } from "@/hooks/useSupabaseData";
 import { formatUSD, type Invoice } from "@/lib/data";
-import { differenceInDays, parseISO } from "date-fns";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Search, Plus, X, ChevronRight, FileText } from "lucide-react";
+import { Search, Plus, X, ChevronRight, FileText, AlertCircle, RefreshCw, Loader2 } from "lucide-react";
 import NewInvoiceModal from "@/components/invoice/NewInvoiceModal";
 import NotificationBell from "@/components/NotificationBell";
-import { useFlow } from "@/flow/FlowMachine";
-import { FlowState } from "@/flow/states";
-import { useApp } from "@/context/AppContext";
-import { startGoogleOAuth } from "@/lib/oauth";
-import { readPending } from "@/lib/localInvoice";
 type FilterTab = "all" | "overdue" | "upcoming" | "paid";
 
 function getFiltered(invoices: Invoice[], tab: FilterTab, query: string) {
@@ -48,21 +41,14 @@ export default function InvoicesScreen() {
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [query, setQuery] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [guestDraftCreated, setGuestDraftCreated] = useState(false);
-  const invoiceCreatedRef = useRef(false);
-  const { state: flowState, send } = useFlow();
-  const { isAuthenticated, authReady } = useApp();
+  const [retrying, setRetrying] = useState(false);
 
-  const { invoices, loading, refetch } = useInvoices();
+  const { invoices, loading, error, refetch } = useInvoices();
   const filtered = useMemo(() => getFiltered(invoices, activeTab, query), [invoices, activeTab, query]);
   const isEmptyWorkspace = invoices.length === 0;
-
-  // Open the New Invoice modal whenever the flow says CREATE_INVOICE, OR via legacy ?new=1.
-  useEffect(() => {
-    if (flowState === FlowState.CREATE_INVOICE) {
-      setShowNew(true);
-    }
-  }, [flowState]);
+  // We couldn't load and have nothing cached to show — offer a retry rather than
+  // a "you have no invoices" empty state that would mislead an existing user.
+  const showLoadError = error && isEmptyWorkspace;
 
   useEffect(() => {
     const filterParam = searchParams.get("filter");
@@ -80,27 +66,14 @@ export default function InvoicesScreen() {
   }, []);
 
   async function handleCreated(invoiceId?: string) {
-    invoiceCreatedRef.current = true;
-    if (!isAuthenticated) {
-      setGuestDraftCreated(true);
-      send("INVOICE_CREATED", { invoiceId: "guest" });
-      navigate("/invoice/guest", { replace: true });
-      return;
-    }
     if (invoiceId) {
       navigate(`/invoice/${invoiceId}`, { replace: true });
       refetch();
-    } else if (flowState === FlowState.CREATE_INVOICE) {
-      send("INVOICE_CREATED");
     }
   }
 
   function handleCloseModal() {
     setShowNew(false);
-    if (!invoiceCreatedRef.current && flowState === FlowState.CREATE_INVOICE) {
-      send("BACK_TO_DASHBOARD");
-    }
-    invoiceCreatedRef.current = false;
   }
 
   if (loading) {
@@ -139,37 +112,13 @@ export default function InvoicesScreen() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden pt-[env(safe-area-inset-top,0px)] animate-page-enter">
-      {authReady && !isAuthenticated && (
-        <div className="mx-5 mt-4 rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 border border-primary/20 p-4">
-          <p className="text-sm font-bold text-foreground">
-            {guestDraftCreated ? "Your draft is saved on this device" : "Finish setting up your account"}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5 mb-3">
-            {guestDraftCreated
-              ? "Sign up to save it to your account and send this follow-up."
-              : "Sign up to keep your invoices and start sending follow-ups."}
-          </p>
-          <button
-            onClick={async () => {
-              send("REQUEST_POST_INVOICE_AUTH");
-              const pending = readPending();
-              const piSuffix = pending ? "?pi=" + encodeURIComponent(JSON.stringify(pending)) : "";
-              const { error } = await startGoogleOAuth(window.location.origin + "/auth-after-invoice" + piSuffix);
-              if (error) toast.error("Sign-in didn't go through. Give it another try.");
-            }}
-            className="w-full bg-primary text-primary-foreground py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.97]"
-          >
-            Create free account
-          </button>
-        </div>
-      )}
       <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl font-bold text-foreground">Follow-Ups</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Every follow-up, every client — in one place.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {isAuthenticated && <NotificationBell />}
+          <NotificationBell />
         </div>
       </div>
 
@@ -206,18 +155,36 @@ export default function InvoicesScreen() {
       )}
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24">
-        {isEmptyWorkspace ? (
+        {showLoadError ? (
           <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center mb-4">
+            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-5 shadow-[var(--shadow-card)]">
+              <AlertCircle className="w-7 h-7 text-muted-foreground" />
+            </div>
+            <p className="text-[clamp(20px,5vw,24px)] font-bold text-foreground tracking-[-0.02em] leading-[1.15]">Couldn't load your follow-ups.</p>
+            <p className="text-[15px] text-muted-foreground mt-2 max-w-xs leading-[1.5]">
+              Check your connection and try again — your data is safe.
+            </p>
+            <button
+              onClick={async () => { setRetrying(true); try { await refetch(); } finally { setRetrying(false); } }}
+              disabled={retrying}
+              className="mt-6 flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold transition-shadow shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)] disabled:opacity-60"
+            >
+              {retrying ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Retry
+            </button>
+          </div>
+        ) : isEmptyWorkspace ? (
+          <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-[hsl(var(--warm-50))] flex items-center justify-center mb-5 shadow-[var(--shadow-card)]">
               <FileText className="w-7 h-7 text-primary" />
             </div>
-            <p className="text-base font-semibold text-foreground">Nothing on your plate yet.</p>
-            <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+            <p className="text-xs uppercase tracking-[0.12em] font-semibold text-primary mb-2">Empty inbox, ready to start</p>
+            <p className="text-[clamp(22px,5.5vw,28px)] font-bold text-foreground tracking-[-0.02em] leading-[1.15]">Nothing on your plate yet.</p>
+            <p className="text-[15px] text-muted-foreground mt-2 max-w-xs leading-[1.5]">
               Add an invoice and ChaseHQ will draft the follow-ups for you — sent on your schedule.
             </p>
             <button
               onClick={() => setShowNew(true)}
-              className="mt-5 flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold"
+              className="mt-6 flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl text-sm font-semibold transition-shadow shadow-[0_8px_24px_rgba(91,123,142,0.25)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.30)]"
             >
               <Plus className="w-4 h-4" /> Add Your First Invoice
             </button>
@@ -231,39 +198,41 @@ export default function InvoicesScreen() {
             <p className="text-sm text-muted-foreground mt-1">{query ? `Nothing matches "${query}".` : "Nothing here yet."}</p>
           </div>
         ) : (
-          filtered.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => navigate(`/invoice/${item.id}`)}
-              className="w-full flex items-center px-5 py-3.5 border-b border-border text-left"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground truncate capitalize">{item.client}</span>
-                  <span className="text-xs text-muted-foreground">{item.id}</span>
-                  {differenceInDays(parseISO(item.createdAtISO), parseISO(item.dueDateISO)) > 1 && (
-                    <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                      Logged late
-                    </span>
-                  )}
+          <div className="px-5 pt-3 flex flex-col gap-2.5">
+            {filtered.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => navigate(`/invoice/${item.id}`)}
+                className="w-full flex items-center gap-3 bg-card border border-border rounded-2xl px-4 py-3.5 text-left transition-all active:scale-[0.99] hover:shadow-[var(--shadow-card-lg)]"
+                style={{ boxShadow: "var(--shadow-card)" }}
+              >
+                <span className="w-10 h-10 rounded-full bg-muted text-muted-foreground flex items-center justify-center shrink-0 text-sm font-semibold uppercase">
+                  {item.client.charAt(0)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate capitalize">
+                    {item.client} <span className="text-muted-foreground font-normal">· {item.id}</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    {formatUSD(item.amount)} · {item.daysPastDue > 0 ? `${item.daysPastDue} days late` : item.dueDate}
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{item.description}</p>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <StatusBadge status={item.status} />
-                  <span className="text-xs text-muted-foreground">{item.dueDate}</span>
-                  {item.daysPastDue > 0 && (
-                    <span className="text-xs font-semibold text-destructive">+{item.daysPastDue}d</span>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 ml-3">
-                <span className="text-sm font-semibold text-foreground">{formatUSD(item.amount)}</span>
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-              </div>
-            </button>
-          ))
+                <StatusBadge status={item.status} />
+              </button>
+            ))}
+          </div>
         )}
       </div>
+
+      {!isEmptyWorkspace && (
+        <button
+          onClick={() => setShowNew(true)}
+          aria-label="New invoice"
+          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+72px)] right-5 w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-[0_8px_24px_rgba(91,123,142,0.35)] hover:shadow-[0_12px_32px_rgba(91,123,142,0.40)] active:scale-[0.95] transition-all z-30"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+      )}
 
       <NewInvoiceModal visible={showNew} onClose={handleCloseModal} onCreated={handleCreated} />
     </div>
